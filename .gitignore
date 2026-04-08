@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data files (large)
+data/*.csv
+data/*.json
+data/*.txt
+!data/.gitkeep
+
+# Output files (generated)
+output/
+docs/
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.bak
