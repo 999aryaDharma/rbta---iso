@@ -195,8 +195,8 @@ def inject_scenario_a(
     random.seed(RANDOM_SEED)
 
     # Ambil timestamp tengah dataset supaya tidak mepet di tepi
-    ts_min = pd.to_datetime(df["timestamp_utc"]).min()
-    ts_max = pd.to_datetime(df["timestamp_utc"]).max()
+    ts_min = pd.to_datetime(df["timestamp_utc"], format="ISO8601").min()
+    ts_max = pd.to_datetime(df["timestamp_utc"], format="ISO8601").max()
     mid_ts = ts_min + (ts_max - ts_min) * 0.3
     base_ts = mid_ts.to_pydatetime().replace(microsecond=0)
 
@@ -240,8 +240,8 @@ def inject_scenario_b(
     """
     random.seed(RANDOM_SEED + 1)
 
-    ts_min = pd.to_datetime(df["timestamp_utc"]).min()
-    ts_max = pd.to_datetime(df["timestamp_utc"]).max()
+    ts_min = pd.to_datetime(df["timestamp_utc"], format="ISO8601").min()
+    ts_max = pd.to_datetime(df["timestamp_utc"], format="ISO8601").max()
     base_ts = (ts_min + (ts_max - ts_min) * 0.5).to_pydatetime().replace(microsecond=0)
 
     attacker_ip  = SYNTHETIC_ATTACKER_IPS[1]
@@ -288,8 +288,8 @@ def inject_scenario_c(
     """
     random.seed(RANDOM_SEED + 2)
 
-    ts_min = pd.to_datetime(df["timestamp_utc"]).min()
-    ts_max = pd.to_datetime(df["timestamp_utc"]).max()
+    ts_min = pd.to_datetime(df["timestamp_utc"], format="ISO8601").min()
+    ts_max = pd.to_datetime(df["timestamp_utc"], format="ISO8601").max()
     base_ts = (ts_min + (ts_max - ts_min) * 0.7).to_pydatetime().replace(microsecond=0)
 
     attacker_ip = SYNTHETIC_ATTACKER_IPS[2]

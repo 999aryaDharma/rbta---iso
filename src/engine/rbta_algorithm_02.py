@@ -53,6 +53,8 @@ RULE_GROUP_SEVERITY_ENC: dict[str, int] = {
     "authentication_success":  1,
     "stats":                   1,
     "accesslog":               1,
+    "wazuh":                   1,
+    "local":                   1,
     "dpkg":                    2,
     "config_changed":          2,
     "virus":                   2,
@@ -60,35 +62,44 @@ RULE_GROUP_SEVERITY_ENC: dict[str, int] = {
     "pam":                     2,
     "sca":                     2,
     "sca_check":               2,
+    "linux":                   2,
     "rootcheck":               3,
     "syscheck_file":           3,
     "syscheck_entry_deleted":  3,
     "syscheck_entry_added":    3,
     "system_error":            3,
     "docker-error":            3,
+    "docker":                  3,
+    "syscheck":                3,
     "windows":                 3,
     "virustotal":              3,
     "web":                     4,
     "apache":                  4,
     "nginx":                   4,
     "authentication_failed":   4,
+    "audit":                   4,
+    "auditd":                  4,
     "attack":                  5,
+    "access_control":          5,
     "sql_injection":           6,
     "vulnerability-detector":  6,
+    "webshell":                6,
     "judol_file":              6,
 }
 DEFAULT_GROUP_ENC = 2
 
+# ── 9 Fitur core (sebelum behavioral enrichment) ────────────────────────────
+# Optimization untuk HIDS: remove attacker_count, add rule_firedtimes
 FEATURE_COLS_V5 = [
     "alert_count",
     "max_severity",
     "duration_sec",
-    "attacker_count",
     "rule_group_severity_enc",
     "agent_criticality",
     "hour_of_day",
     "unique_rules_triggered",
     "mitre_hit_count",
+    "rule_firedtimes",
 ]
 
 
@@ -428,6 +439,17 @@ def run_rbta(
     elastic         : ElasticWindow.
     wmark           : Watermark.
     """
+    # Validate required columns
+    required_cols = ["timestamp", "agent_id", "rule_groups", "rule_level"]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        available = df.columns.tolist()
+        raise KeyError(
+            f"DataFrame RBTA missing required columns: {missing_cols}. "
+            f"Available: {available}. "
+            f"Ensure preprocessing renamed 'timestamp_utc' → 'timestamp' and 'rule_group_primary' → 'rule_groups'"
+        )
+    
     base_dt      = timedelta(minutes=delta_t_minutes)
     max_win_sec  = max_window_minutes * 60
     compound_sec = delta_t_minutes * 60

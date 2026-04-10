@@ -1,20 +1,27 @@
 """
-isolation_forest.py  —  13-fitur + Decision Matrix + False Positive Gate
-=========================================================================
-Perubahan dari versi sebelumnya:
+isolation_forest.py  —  12-fitur optimized + Decision Matrix + False Positive Gate (HIDS)
+==========================================================================================
+Optimisasi untuk HIDS dari versi sebelumnya:
 
-  [NEW-1] FEATURE_COLS diperluas dari 9 menjadi 13 fitur
-      f10  rule_group_entropy       -- behavioral diversity (dari feature_engineering)
-      f11  tactic_progression_score -- kill chain ordering (dari feature_engineering)
-      f12  deviation_from_baseline  -- deviasi dari rolling average (dari feature_engineering)
-      f13  cross_agent_spread       -- lateral movement proxy (dari feature_engineering)
+  [REMOVED] f4 (attacker_count) dan f13 (cross_agent_spread)
+      Keduanya selalu 0 di data HIDS → tidak memberikan informasi ke IF.
 
-  [NEW-2] run_pipeline() memanggil enrich_features() dari feature_engineering.py
-      setelah add_if_features(). Urutan: load → f1-f9 → f10-f13 → IF → decision.
+  [ADDED] f9 (rule_firedtimes)
+      Frekuensi rule yang sama dipicu → proxy untuk alert fatigue.
 
-  [NEW-3] Visualisasi panel F diperbarui untuk 13 fitur (bar chart lebih sempit).
+  [UPDATED] False Positive Gate
+      OLD: mengecek attacker_count, cross_agent_spread → selalu lolos gate
+      NEW: hanya suppress jika severity<7 AND alert_count<5 AND mitre_hit_count==0
+      → Cocok untuk HIDS, mencegah suppression false positive
 
-  [COMPAT] Decision Matrix, False Positive Gate, SOAR payload tidak berubah.
+  [UPDATED] FEATURE_COLS kini 12 fitur:
+      f1-f8:   core features (alert_count, max_severity, ..., mitre_hit_count)
+      f9:      rule_firedtimes (NEW)
+      f10-f12: behavioral features dari feature_engineering
+
+  [NEW] Telegram notifications export (Step 11)
+      Format 4-baris informatif untuk demo di sidang.
+      Menunjukkan sistem RBTA+IF beroperasional optimal.
 """
 
 import warnings
@@ -58,6 +65,8 @@ RULE_GROUP_SEVERITY_ENC: dict[str, int] = {
     "authentication_success":  1,
     "stats":                   1,
     "accesslog":               1,
+    "wazuh":                   1,
+    "local":                   1,
     "dpkg":                    2,
     "config_changed":          2,
     "virus":                   2,
@@ -65,56 +74,63 @@ RULE_GROUP_SEVERITY_ENC: dict[str, int] = {
     "pam":                     2,
     "sca":                     2,
     "sca_check":               2,
+    "linux":                   2,
     "rootcheck":               3,
     "syscheck_file":           3,
     "syscheck_entry_deleted":  3,
     "syscheck_entry_added":    3,
     "system_error":            3,
     "docker-error":            3,
+    "docker":                  3,
+    "syscheck":                3,
     "windows":                 3,
     "virustotal":              3,
     "web":                     4,
     "apache":                  4,
     "nginx":                   4,
     "authentication_failed":   4,
+    "audit":                   4,
+    "auditd":                  4,
     "attack":                  5,
+    "access_control":          5,
     "sql_injection":           6,
     "vulnerability-detector":  6,
+    "webshell":                6,
     "judol_file":              6,
 }
 DEFAULT_GROUP_ENC = 2
 
-# ── 13 Fitur Isolation Forest ─────────────────────────────────────────────────
+# ── 12 Fitur Isolation Forest (optimized untuk HIDS) ────────────────────────
+# Removed: f4 (attacker_count), f13 (cross_agent_spread) — keduanya selalu 0
+# Added: rule_firedtimes — frekuensi rule yang sama dipicu
 FEATURE_COLS = [
     "alert_count",               # f1  volume dalam bucket
     "max_severity",              # f2  rule.level tertinggi
     "duration_sec",              # f3  durasi insiden
-    "attacker_count",            # f4  IP penyerang unik
-    "rule_group_severity_enc",   # f5  ordinal encoding rule_group
-    "agent_criticality",         # f6  bobot kritis aset (1-4)
-    "hour_of_day",               # f7  jam kejadian
-    "unique_rules_triggered",    # f8  keberagaman rule_id
-    "mitre_hit_count",           # f9  jumlah alert bersinyal MITRE
+    "rule_group_severity_enc",   # f4  ordinal encoding rule_group
+    "agent_criticality",         # f5  bobot kritis aset (1-4)
+    "hour_of_day",               # f6  jam kejadian
+    "unique_rules_triggered",    # f7  keberagaman rule_id
+    "mitre_hit_count",           # f8  jumlah alert bersinyal MITRE
+    "rule_firedtimes",           # f9  frekuensi rule dipicu (dari feature_engineering)
     "rule_group_entropy",        # f10 Shannon entropy distribusi rule_group
     "tactic_progression_score",  # f11 urutan taktik MITRE di kill chain
     "deviation_from_baseline",   # f12 deviasi dari rolling avg 24 jam
-    "cross_agent_spread",        # f13 jumlah agent dengan srcip yang sama
 ]
 
 FEATURE_LABELS = {
     "alert_count":               "f1 · Alert count",
     "max_severity":              "f2 · Max severity",
     "duration_sec":              "f3 · Duration (s)",
-    "attacker_count":            "f4 · Attacker count",
-    "rule_group_severity_enc":   "f5 · Rule group enc",
-    "agent_criticality":         "f6 · Agent criticality",
-    "hour_of_day":               "f7 · Hour of day",
-    "unique_rules_triggered":    "f8 · Unique rules",
-    "mitre_hit_count":           "f9 · MITRE hits",
+    "rule_group_severity_enc":   "f4 · Rule group enc",
+    "agent_criticality":         "f5 · Agent criticality",
+    "hour_of_day":               "f6 · Hour of day",
+    "unique_rules_triggered":    "f7 · Unique rules",
+    "mitre_hit_count":           "f8 · MITRE hits",
+    "rule_firedtimes":           "f9 · Rule fired times",
     "rule_group_entropy":        "f10 · Rule entropy",
     "tactic_progression_score":  "f11 · Tactic progression",
     "deviation_from_baseline":   "f12 · Baseline deviation",
-    "cross_agent_spread":        "f13 · Cross-agent spread",
 }
 
 # Decision Matrix thresholds
@@ -150,7 +166,7 @@ def load_alerts(csv_path: str) -> pd.DataFrame:
 
 
 def add_if_features(df_meta: pd.DataFrame) -> pd.DataFrame:
-    """Validasi dan normalisasi f1-f9. f10-f13 ditambahkan oleh enrich_features()."""
+    """Validasi dan normalisasi f1-f9 (termasuk rule_firedtimes). f10-f12 ditambahkan oleh enrich_features()."""
     df = df_meta.copy()
     df["duration_sec"] = df["duration_sec"].clip(lower=0)
 
@@ -175,15 +191,15 @@ def add_if_features(df_meta: pd.DataFrame) -> pd.DataFrame:
         df["start_time"] = pd.to_datetime(df["start_time"], errors="coerce")
         df["hour_of_day"] = df["start_time"].dt.hour
 
-    for col in ("unique_rules_triggered", "mitre_hit_count"):
+    for col in ("unique_rules_triggered", "mitre_hit_count", "rule_firedtimes"):
         if col not in df.columns:
-            log.warning("Kolom %s tidak ada — di-set 0.", col)
-            df[col] = 0
+            log.warning("Kolom %s tidak ada — di-set 1 (default).", col)
+            df[col] = 1
 
-    # f1-f9 harus integer
-    for col in FEATURE_COLS[:9]:
+    # f1-f9 harus integer (termasuk rule_firedtimes di posisi f9)
+    for col in (FEATURE_COLS[:9] if len(FEATURE_COLS) >= 9 else FEATURE_COLS):
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(1 if col == "rule_firedtimes" else 0).astype(int)
 
     df["rule_groups"] = df["rule_groups"].astype(str).str.strip().str.lower()
     return df
@@ -200,7 +216,7 @@ def train_isolation_forest(
     random_state:  int   = 42,
 ) -> tuple[IsolationForest, RobustScaler, np.ndarray, np.ndarray]:
     """
-    Latih Isolation Forest pada feature matrix [f1..f13].
+    Latih Isolation Forest pada feature matrix [f1..f12] (12 fitur).
     RobustScaler dipilih karena distribusi fitur SIEM sangat skewed.
     f12 (deviation_from_baseline) bisa negatif — RobustScaler aman untuk ini.
     """
@@ -257,22 +273,21 @@ def _false_positive_gate(row: pd.Series, score: float, theta: float) -> bool:
     """
     True jika baris harus direklasifikasi ke CONTEXTUAL_ANOMALY.
 
-    Kondisi: score tinggi TAPI tidak ada konteks serangan:
-      - Tidak ada IP eksternal (attacker_count == 0)
+    Kondisi baru untuk HIDS — score tinggi TAPI tidak ada konteks serangan:
+      - Severity rendah (max_severity < 7)
+      - Volume kecil (alert_count < 5)
       - Tidak ada sinyal MITRE (mitre_hit_count == 0)
-      - Tidak ada cross-agent spread (cross_agent_spread <= 1)
-      - Severity rendah (max_severity < SEVERITY_HIGH_THRESHOLD)
 
-    Ini mencegah syscheck/rootcheck rutin dieskalasi hanya karena
-    entropy tinggi atau volume yang tidak biasa.
+    Gate ini cocok untuk HIDS karena attacker_count dan cross_agent_spread
+    selalu 0. Hanya suppress jika ketiga kondisi terpenuhi bersamaan.
+    Anomali yang benar-benar perlu dieskalasi tetap lolos.
     """
     if score < theta:
         return False
     return (
-        int(row.get("attacker_count", 0))      == 0 and
-        int(row.get("mitre_hit_count", 0))     == 0 and
-        int(row.get("cross_agent_spread", 0))  <= 1 and
-        int(row.get("max_severity", 0))        < SEVERITY_HIGH_THRESHOLD
+        int(row.get("max_severity", 0))      < 7 and
+        int(row.get("alert_count", 0))       < 5 and
+        int(row.get("mitre_hit_count", 0))   == 0
     )
 
 
@@ -717,6 +732,17 @@ def run_pipeline(
     log.info("Membuat visualisasi 6-panel ...")
     visualize(df_scored, X_scaled, theta,
               output_path=os.path.join(output_dir, "visualisasi_if.png"))
+
+    # Step 11: Telegram notifications (untuk demo operasional di sidang)
+    try:
+        from engine.telegram_notifier import export_telegram_messages
+        telegram_path = export_telegram_messages(df_scored, 
+            output_path=os.path.join(output_dir, "telegram_messages.txt"))
+        log.info("Telegram messages exported: %s", telegram_path)
+    except ImportError:
+        log.warning("telegram_notifier.py tidak ditemukan — skip telegram export.")
+    except Exception as e:
+        log.error("Gagal generate telegram notifications: %s", e)
 
     return df_scored, model, scaler, theta
 

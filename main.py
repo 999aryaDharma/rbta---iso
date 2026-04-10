@@ -1,6 +1,6 @@
 """
-main.py  —  Orchestrator RBTA v5 + IF 13-fitur + Evaluasi Lengkap
-==================================================================
+main.py  —  Orchestrator RBTA v5 + IF 12-fitur (optimized HIDS) + Evaluasi Lengkap
+===================================================================================
 Urutan eksekusi:
 
   STEP 1  preprocessing          → load_and_prepare()
@@ -16,6 +16,10 @@ Urutan eksekusi:
   STEP 7  fixed window baseline  → fixed_window_baseline.run_fixed_window()
   STEP 8  loss analysis          → fixed_window_baseline.loss_analysis()
   STEP 9  isolation forest       → isolation_forest.run_pipeline()
+             + 12 fitur (9 core + 3 behavioral)
+             + Decision Matrix 4 kuadran
+             + False Positive Gate (optimized untuk HIDS)
+             + Telegram notifications export
   STEP 10 evaluasi komprehensif  → metrics.comprehensive_report()
             + plot_pr_curve, plot_fnr_vs_arr (jika ground_truth tersedia)
   STEP 11 plot detail            → reuse cache sensitivity
@@ -35,12 +39,12 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
 
-from src.etl.preprocessing_01          import load_and_prepare
+from src.etl.preprocessing_01          import load_and_prepare, REQUIRED_COLS, OPTIONAL_COLS
 from src.engine.rbta_algorithm_02       import run_rbta, validate_mapping, add_if_features
 from src.engine.fixed_window_baseline   import run_fixed_window, loss_analysis
 from src.engine.feature_engineering     import enrich_features
@@ -75,7 +79,7 @@ FIGURES_DIR       = "reports/figures"
 QUALITY_DIR       = "reports/data_quality"
 
 # Aktifkan True untuk menjalankan attack injection + evaluasi PR-AUC/FNR
-USE_INJECTED_DATA = False
+USE_INJECTED_DATA = True
 INJECTION_SCENARIOS = ["A", "B", "C"]
 
 
@@ -91,6 +95,29 @@ def safe_step(name: str, fn, *args, **kwargs):
         log.error("[ERROR] %s gagal: %s", name, exc)
         traceback.print_exc()
         return None
+
+
+def _apply_preprocessing_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Apply column selection and renaming to any DataFrame.
+    This ensures consistency between preprocessed and injected data.
+    """
+    available_req = {k: v for k, v in REQUIRED_COLS.items() if k in df.columns}
+    available_opt = {k: v for k, v in OPTIONAL_COLS.items() if k in df.columns}
+    all_available = {**available_req, **available_opt}
+    
+    # Select and rename columns
+    selected_cols = [col for col in all_available.keys() if col in df.columns]
+    df_processed = df[selected_cols].rename(columns=all_available).copy()
+    
+    # Verify critical columns exist
+    critical_cols = ["timestamp", "agent_id", "rule_groups", "rule_level"]
+    missing = [col for col in critical_cols if col not in df_processed.columns]
+    if missing:
+        log.error("Kolom kritis hilang setelah preprocessing: %s", missing)
+        raise KeyError(f"Kolom kritis hilang: {missing}")
+    
+    return df_processed
 
 
 def main() -> None:
@@ -135,6 +162,11 @@ def main() -> None:
             log.info("Dataset injeksi: %d baris (synthetic: %d)",
                      len(df_raw_injected),
                      df_raw_injected["is_synthetic"].sum())
+            # ✅ APPLY COLUMN PREPROCESSING TO INJECTED DATA
+            log.info("Applying column preprocessing to injected data...")
+            df_raw_injected = _apply_preprocessing_columns(df_raw_injected)
+            log.info("✓ Injected data preprocessed: %d baris, columns = %s",
+                     len(df_raw_injected), df_raw_injected.columns.tolist()[:5])
         else:
             log.warning("Injeksi gagal. Lanjut dengan data asli.")
     else:
