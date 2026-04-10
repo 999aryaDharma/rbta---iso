@@ -31,7 +31,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from src.rbta_algorithm_02 import (
+from engine.rbta_algorithm_02 import (
     AGENT_CRITICALITY,
     DEFAULT_CRITICALITY,
     RULE_GROUP_SEVERITY_ENC,
@@ -304,7 +304,7 @@ def loss_analysis(
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, ".")
-    from src.preprocessing_01 import load_and_prepare
+    from etl.preprocessing_01 import load_and_prepare
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
