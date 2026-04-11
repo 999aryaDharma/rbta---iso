@@ -90,10 +90,14 @@ def load_and_prepare(csv_path: str | Path) -> pd.DataFrame:
         )
 
     # ── Parse timestamp ───────────────────────────────────────────────────────
-    df["timestamp"] = (
-        pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
-        .dt.tz_localize(None)
-    )
+    _ts = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
+    try:
+        df["timestamp"] = _ts.dt.tz_convert(None)
+    except Exception:
+        df["timestamp"] = _ts.apply(
+            lambda x: x.replace(tzinfo=None) if not pd.isna(x) else pd.NaT
+        )
+    df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
     n_bad_ts = df["timestamp"].isna().sum()
     if n_bad_ts > 0:
         log.warning("%d baris dengan timestamp tidak valid → dibuang", n_bad_ts)

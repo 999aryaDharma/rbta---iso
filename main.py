@@ -233,21 +233,27 @@ def main() -> None:
         # STEP 5: Feature Engineering f1-f9 → f10-f13
         # =====================================================================
         log.info("STEP 5 — FEATURE ENGINEERING (f1-f13)")
-        df_meta_rbta = safe_step("  f1-f9", add_if_features, df_meta_rbta) or df_meta_rbta
-        df_meta_rbta = safe_step("  f10-f13", enrich_features, df_meta_rbta) or df_meta_rbta
+        _r = safe_step("  f1-f9", add_if_features, df_meta_rbta)
+        if _r is not None:
+            df_meta_rbta = _r
+        _r = safe_step("  f10-f13", enrich_features, df_meta_rbta)
+        if _r is not None:
+            df_meta_rbta = _r
 
         # =====================================================================
         # STEP 6: [opsional] Propagasi ground truth label ke meta-alert
         # =====================================================================
         if USE_INJECTED_DATA and df_raw_injected is not None:
             log.info("STEP 6 — PROPAGASI GROUND TRUTH LABEL")
-            df_meta_rbta = safe_step(
+            _r = safe_step(
                 "STEP 6 — PROPAGATE LABELS",
                 propagate_labels,
                 df_meta_rbta,
                 df_raw_injected,
                 idx_map_rbta,
-            ) or df_meta_rbta
+            )
+            if _r is not None:
+                df_meta_rbta = _r
         else:
             log.info("STEP 6 — SKIP (USE_INJECTED_DATA = False)")
 
@@ -258,8 +264,12 @@ def main() -> None:
         log.warning("RBTA gagal. Coba cache sensitivity_analysis.")
         cached = meta_map.get(optimal_dt)
         if cached is not None:
-            df_meta_rbta = safe_step("  f1-f9", add_if_features, cached) or cached
-            df_meta_rbta = safe_step("  f10-f13", enrich_features, df_meta_rbta) or df_meta_rbta
+            _r = safe_step("  f1-f9", add_if_features, cached)
+            if _r is not None:
+                df_meta_rbta = _r
+            _r = safe_step("  f10-f13", enrich_features, df_meta_rbta)
+            if _r is not None:
+                df_meta_rbta = _r
             p = os.path.join(AGG_DIR, "meta_alerts_rbta.csv")
             df_meta_rbta.to_csv(p, index=False)
             log.info("Meta-alerts (cache, Δt=%d) disimpan: %s", optimal_dt, p)

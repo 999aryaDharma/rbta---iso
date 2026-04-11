@@ -146,8 +146,18 @@ def run_fixed_window(
 
     df = df.copy()
 
-    if df["timestamp"].dt.tz is not None:
-        df["timestamp"] = df["timestamp"].dt.tz_localize(None)
+    if not pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
+        _t = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
+        try:
+            df["timestamp"] = _t.dt.tz_convert(None)
+        except Exception:
+            df["timestamp"] = _t.apply(
+                lambda x: x.replace(tzinfo=None) if not pd.isna(x) else pd.NaT
+            )
+        df = df.dropna(subset=["timestamp"]).reset_index(drop=True)
+
+    if pd.api.types.is_datetime64tz_dtype(df["timestamp"]):
+        df["timestamp"] = df["timestamp"].dt.tz_convert(None)
 
     df["_unix"] = df["timestamp"].astype(np.int64) // 10**9
     df["_win"]  = df["_unix"] // delta_t_sec

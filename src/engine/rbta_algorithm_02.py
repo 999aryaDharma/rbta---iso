@@ -222,11 +222,22 @@ class Watermark:
         self.n_late_ok:   int = 0
         self.n_late_drop: int = 0
 
-    def advance(self, ts: pd.Timestamp) -> None:
+    def advance(self, ts) -> None:
+        if not isinstance(ts, pd.Timestamp):
+            try:
+                ts = pd.Timestamp(ts)
+            except Exception:
+                return
         if self._max_seen is None or ts > self._max_seen:
             self._max_seen = ts
 
-    def classify(self, ts: pd.Timestamp) -> str:
+    def classify(self, ts) -> str:
+        if not isinstance(ts, pd.Timestamp):
+            try:
+                ts = pd.Timestamp(ts)
+            except Exception:
+                self.n_on_time += 1
+                return "on_time"
         wm = self.watermark
         if wm is None or ts >= wm:
             self.n_on_time += 1
@@ -360,7 +371,9 @@ def _key_a(row: pd.Series) -> tuple:
     return (str(row["agent_id"]), str(row["rule_groups"]).strip().lower())
 
 
-def _key_b(row: pd.Series, ts: pd.Timestamp, window_sec: int) -> tuple:
+def _key_b(row: pd.Series, ts, window_sec: int) -> tuple:
+    if not isinstance(ts, pd.Timestamp):
+        ts = pd.Timestamp(ts)
     win_id = int(floor(ts.timestamp() / window_sec))
     return (str(row["agent_id"]), win_id)
 
@@ -453,6 +466,21 @@ def run_rbta(
     base_dt      = timedelta(minutes=delta_t_minutes)
     max_win_sec  = max_window_minutes * 60
     compound_sec = delta_t_minutes * 60
+
+    # ── Pastikan timestamp selalu datetime, bukan string ──────────────────────
+    if not pd.api.types.is_datetime64_any_dtype(df["timestamp"]):
+        df = df.copy()
+        _t = pd.to_datetime(df["timestamp"], errors="coerce", utc=True)
+        try:
+            df["timestamp"] = _t.dt.tz_convert(None)
+        except Exception:
+            df["timestamp"] = _t.apply(
+                lambda x: x.replace(tzinfo=None) if not pd.isna(x) else pd.NaT
+            )
+        df = df.dropna(subset=["timestamp"]).reset_index(drop=True)
+    elif pd.api.types.is_datetime64tz_dtype(df["timestamp"]):
+        df = df.copy()
+        df["timestamp"] = df["timestamp"].dt.tz_convert(None)
 
     buffer  = OutOfOrderBuffer(k=buffer_size)
     elastic = ElasticWindow(base_dt=base_dt) if enable_adaptive else None
@@ -556,6 +584,11 @@ def run_rbta(
     # ── Main loop ─────────────────────────────────────────────────────────────
     for row_idx, row in df.iterrows():
         ts = row["timestamp"]
+        if not isinstance(ts, pd.Timestamp):
+            try:
+                ts = pd.Timestamp(ts)
+            except Exception:
+                continue
         buffer.push(ts, (row_idx, row))
         if buffer.is_full:
             old_ts, (oi, or_) = _pop_with_idx(buffer)
