@@ -16,7 +16,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.streaming import AlertStreamSimulator
-from src.engine.rbta_algorithm_02 import run_rbta
+from engine.rbta_core import run_rbta
 from src.engine.isolation_forest import run_pipeline as run_isolation_forest
 
 

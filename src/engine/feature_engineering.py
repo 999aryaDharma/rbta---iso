@@ -111,21 +111,24 @@ def add_rule_group_entropy(df_meta: pd.DataFrame) -> pd.DataFrame:
     """
     Tambahkan kolom rule_group_entropy (f10) ke df_meta.
 
-    Menggunakan kolom 'rule_group_dist' jika ada (output rbta v5),
-    fallback ke rule_id_dist sebagai proxy jika tidak ada.
+    PERBAIKAN: Menggunakan rule_id_dist sebagai sumber entropy, BUKAN rule_group_dist.
+    Alasan: key Bucket A = (agent_id, rule_group) → setiap bucket selalu hanya
+    punya 1 rule_group → entropy = 0. rule_id_dist jauh lebih bervariasi
+    dalam satu bucket, sehingga entropy bermakna untuk mendeteksi keberagaman
+    tipe alert (monoton vs multi-stage).
 
     Kompleksitas total: O(n * k)
     """
     df = df_meta.copy()
 
-    if "rule_group_dist" in df.columns:
-        source_col = "rule_group_dist"
-    elif "rule_id_dist" in df.columns:
+    # PERBAIKAN: gunakan rule_id_dist sebagai sumber entropy yang bermakna
+    if "rule_id_dist" in df.columns:
         source_col = "rule_id_dist"
+    elif "rule_group_dist" in df.columns:
+        source_col = "rule_group_dist"
         log.warning(
-            "Kolom rule_group_dist tidak ditemukan. "
-            "Menggunakan rule_id_dist sebagai proxy untuk entropy. "
-            "Pastikan rbta_algorithm_02 v5 yang menghasilkan CSV ini."
+            "rule_id_dist tidak ditemukan, fallback ke rule_group_dist. "
+            "Entropy akan selalu 0 karena setiap bucket hanya 1 rule_group."
         )
     else:
         log.warning("Tidak ada kolom distribusi yang tersedia — rule_group_entropy di-set 0.")
@@ -148,7 +151,8 @@ def add_rule_group_entropy(df_meta: pd.DataFrame) -> pd.DataFrame:
 
     df["rule_group_entropy"] = df[source_col].apply(_safe_entropy)
     log.info(
-        "f10 rule_group_entropy: min=%.3f  median=%.3f  max=%.3f",
+        "f10 rule_group_entropy (sumber=%s): min=%.3f  median=%.3f  max=%.3f",
+        source_col,
         df["rule_group_entropy"].min(),
         df["rule_group_entropy"].median(),
         df["rule_group_entropy"].max(),
@@ -334,6 +338,10 @@ def compute_deviation_from_baseline(
 # f13 — Cross-Agent Spread
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Hard cap untuk mencegah O(n²) ekstrem pada IP yang sangat umum
+MAX_CANDIDATES_PER_IP = 500
+
+
 def compute_cross_agent_spread(
     df_meta:      pd.DataFrame,
     window_hours: int = SPREAD_WINDOW_HOURS,
@@ -349,7 +357,8 @@ def compute_cross_agent_spread(
     Nilai 0      = tidak ada IP eksternal atau IP hanya menyerang satu agent.
 
     Kompleksitas: O(n * n * k) dimana k = jumlah attacker IP per baris.
-    Untuk dataset besar, buat index IP → rows terlebih dahulu.
+    Hard cap MAX_CANDIDATES_PER_IP mencegah explosion pada IP yang terlalu umum
+    (scanner, proxy, CDN). IP dengan >500 candidates di-skip.
 
     Parameters
     ----------
@@ -387,6 +396,7 @@ def compute_cross_agent_spread(
 
     window_td = pd.Timedelta(hours=window_hours)
     spreads   = np.zeros(n, dtype=int)
+    skipped_ips = 0
 
     for i, (idx, row) in enumerate(df.iterrows()):
         raw_ips = str(row.get("attacker_ips", "") or "")
@@ -402,6 +412,16 @@ def compute_cross_agent_spread(
 
         for ip in ips:
             candidate_rows = ip_to_rows.get(ip, [])
+            
+            # ✅ HARD CAP: skip IP yang terlalu banyak candidates (scanner, CDN)
+            if len(candidate_rows) > MAX_CANDIDATES_PER_IP:
+                log.debug(
+                    "f13 skip IP %s: %d candidates > MAX_CANDIDATES_PER_IP=%d (terlalu umum)",
+                    ip, len(candidate_rows), MAX_CANDIDATES_PER_IP,
+                )
+                skipped_ips += 1
+                continue
+            
             agents_in_window: set[str] = set()
 
             for cand_idx in candidate_rows:
@@ -413,6 +433,12 @@ def compute_cross_agent_spread(
             max_spread = max(max_spread, len(agents_in_window))
 
         spreads[i] = max_spread
+    
+    if skipped_ips > 0:
+        log.info(
+            "f13: %d IP di-skip karena > MAX_CANDIDATES_PER_IP (scanner/CDN/proxy detection)",
+            skipped_ips,
+        )
 
     df["cross_agent_spread"] = spreads
 
@@ -433,18 +459,24 @@ def enrich_features(
     df_meta:               pd.DataFrame,
     baseline_window_hours: int = BASELINE_WINDOW_HOURS,
     spread_window_hours:   int = SPREAD_WINDOW_HOURS,
+    skip_f13:              bool = False,
 ) -> pd.DataFrame:
     """
-    Terapkan semua 4 fitur behavioral (f10-f13) ke df_meta secara berurutan.
+    Terapkan 4 fitur behavioral (f10-f13) ke df_meta secara berurutan.
 
     Urutan eksekusi:
       1. add_rule_group_entropy    → f10 (tidak bergantung pada baris lain)
       2. add_tactic_progression    → f11 (tidak bergantung pada baris lain)
       3. compute_deviation_from_baseline → f12 (bergantung pada urutan waktu)
       4. compute_cross_agent_spread      → f13 (bergantung pada IP lintas baris)
+                                              [optional: jika skip_f13=False]
 
     f12 dan f13 paling lambat karena O(n²) — untuk >10k baris pertimbangkan
     optimasi dengan rolling groupby dan IP index.
+    
+    f13 tidak informatif untuk Isolation Forest (IF), jadi opsional:
+    - skip_f13=True  → f13 akan diisi 0 (placeholder), lebih cepat
+    - skip_f13=False → f13 dihitung penuh, lebih lambat
 
     Parameters
     ----------
@@ -452,6 +484,7 @@ def enrich_features(
                             add_if_features() dari isolation_forest.py.
     baseline_window_hours : window untuk f12 (default 24 jam).
     spread_window_hours   : window untuk f13 (default 1 jam).
+    skip_f13              : jika True, set f13=0 tanpa komputasi (untuk efisiensi).
 
     Returns
     -------
@@ -462,7 +495,10 @@ def enrich_features(
     import time
     t0 = time.perf_counter()
 
-    log.info("[ENRICH] Memulai feature engineering behavioral (f10-f13) ...")
+    log.info(
+        "[ENRICH] Memulai feature engineering behavioral (f10-f13%s) ...",
+        " [skip f13]" if skip_f13 else "",
+    )
 
     df = add_rule_group_entropy(df_meta)
     log.info("[ENRICH] f10 selesai.")
@@ -473,8 +509,12 @@ def enrich_features(
     df = compute_deviation_from_baseline(df, window_hours=baseline_window_hours)
     log.info("[ENRICH] f12 selesai.")
 
-    df = compute_cross_agent_spread(df, window_hours=spread_window_hours)
-    log.info("[ENRICH] f13 selesai.")
+    if skip_f13:
+        log.info("[ENRICH] f13 skipped (placeholder = 0).")
+        df["cross_agent_spread"] = 0
+    else:
+        df = compute_cross_agent_spread(df, window_hours=spread_window_hours)
+        log.info("[ENRICH] f13 selesai.")
 
     elapsed = (time.perf_counter() - t0) * 1000
     log.info("[ENRICH] Semua fitur behavioral selesai dalam %.1f ms.", elapsed)

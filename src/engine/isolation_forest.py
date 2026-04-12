@@ -113,8 +113,8 @@ FEATURE_COLS = [
     "unique_rules_triggered",    # f7  keberagaman rule_id
     "mitre_hit_count",           # f8  jumlah alert bersinyal MITRE
     "rule_firedtimes",           # f9  frekuensi rule dipicu (dari feature_engineering)
-    "rule_group_entropy",        # f10 Shannon entropy distribusi rule_group
-    "tactic_progression_score",  # f11 urutan taktik MITRE di kill chain
+    # "rule_group_entropy",        # f10 Shannon entropy distribusi rule_group
+    # "tactic_progression_score",  # f11 urutan taktik MITRE di kill chain
     "deviation_from_baseline",   # f12 deviasi dari rolling avg 24 jam
 ]
 

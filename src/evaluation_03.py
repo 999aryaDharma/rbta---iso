@@ -38,7 +38,7 @@ import os
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from engine.rbta_algorithm_02 import run_rbta, OutOfOrderBuffer, ElasticWindow, Watermark
+from engine.rbta_core import run_rbta, OutOfOrderBuffer, ElasticWindow, Watermark
 
 
 DELTA_T_VALUES    = [1, 5, 10, 15, 20, 30, 45, 60]

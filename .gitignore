@@ -44,4 +44,5 @@ docs/
 *.tmp
 *.bak
 
-notebooks/
+notebooks/*.png
+reports/

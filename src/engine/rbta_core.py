@@ -274,6 +274,7 @@ class MetaAlert:
     external_threat_count: int    = 0
     internal_src_count:    int    = 0
     mitre_hit_count:       int    = 0
+    mitre_tactic_list:     list[str] = field(default_factory=list)
     srcip_list:       list[str]   = field(default_factory=list)
     rule_id_dist:     dict        = field(default_factory=dict)
     severity_dist:    dict        = field(default_factory=dict)
@@ -309,6 +310,7 @@ class MetaAlert:
             "severity_dist":            json.dumps(self.severity_dist),
             "rule_id_dist":             json.dumps(self.rule_id_dist),
             "rule_group_dist":          json.dumps(self.rule_group_dist),  # [NEW-1]
+            "mitre_tactic":             "|".join(self.mitre_tactic_list),
         }
 
 
@@ -541,6 +543,12 @@ def run_rbta(
                 elif stype == "internal":
                     b.internal_src_count += 1
                 b.mitre_hit_count += has_mitre
+                # Akumulasi MITRE tactics dari individual alerts
+                if has_mitre and tactic_raw:
+                    for t in tactic_raw.split("|"):
+                        t = t.strip()
+                        if t:
+                            b.mitre_tactic_list.append(t)
                 act_idx[ka].append(row_idx)
             else:
                 is_cont   = (gap <= cur_dt) and (dur > max_win_sec)
