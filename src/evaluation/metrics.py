@@ -797,13 +797,25 @@ def scenario_a_rbta_evaluation(
         worst_arr = df_per_group["arr_rbta_pct"].min()
         best_arr = df_per_group["arr_rbta_pct"].max()
         mean_arr = df_per_group["arr_rbta_pct"].mean()
-        
+
+        # FIX-7: Dynamic status based on actual data, not hardcoded
+        threshold_80 = (df_per_group["arr_rbta_pct"] >= 80).all()
+        if threshold_80:
+            status_text = "Konsisten ✓ (semua rule_group > 80%)"
+        else:
+            n_below = (df_per_group["arr_rbta_pct"] < 80).sum()
+            pct_below = n_below / len(df_per_group) * 100
+            status_text = (
+                f"Perlu review ⚠ ({n_below} rule_group < 80%, "
+                f"{pct_below:.1f}% di bawah threshold)"
+            )
+
         lines += [
             f"│",
             f"├─ Mean ARR           : {mean_arr:.2f}%",
             f"├─ Best performer     : {best_arr:.2f}%",
             f"├─ Worst performer    : {worst_arr:.2f}%",
-            f"└─ Status: Konsisten ✓ (semua rule_group > 80%)",
+            f"└─ Status: {status_text}",
             "",
         ]
     

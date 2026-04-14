@@ -90,7 +90,8 @@ def sensitivity_analysis(
         t0 = time.perf_counter()
 
         # FIX: Paksa enable_adaptive=False agar Δt tidak di-override oleh ElasticWindow
-        df_meta, _, elastic_obj, wmark_obj = run_rbta(
+        # [FIX-C] unpack 5 nilai: (df_meta, df_compound, idx_map, elastic, wmark)
+        df_meta, _, idx_map, elastic_obj, wmark_obj = run_rbta(
             df_raw,
             delta_t_minutes  = dt,
             buffer_size      = buffer_size,

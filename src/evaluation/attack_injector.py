@@ -299,6 +299,9 @@ def propagate_labels(df_meta: pd.DataFrame, df_raw_injected: pd.DataFrame,
     """
     Propagasi label is_synthetic dari raw alerts ke meta-alert.
     Meta-alert mendapat ground_truth=1 jika ada alert sintetis dalam bucket-nya.
+    
+    [FIX-A] Menggunakan wazuh_alert_ids set intersection (bukan positional index).
+    Ini menghindari kontaminasi label akibat row index yang bergeser setelah preprocessing.
     """
     df = df_meta.copy()
     if "is_synthetic" not in df_raw_injected.columns:
@@ -307,20 +310,58 @@ def propagate_labels(df_meta: pd.DataFrame, df_raw_injected: pd.DataFrame,
         df["scenario_id"]  = ""
         return df
 
+    # [FIX-A] Build index: wazuh_alert_id -> row di df_raw_injected
+    if "wazuh_alert_id" not in df_raw_injected.columns:
+        log.error("[PROPAGATE] Kolom wazuh_alert_id tidak ada — tidak bisa propagate dengan aman.")
+        df["ground_truth"] = 0
+        df["scenario_id"]  = ""
+        return df
+
+    # Map wazuh_alert_id -> (is_synthetic, scenario_id)
+    synthetic_ids = {}
+    for _, row in df_raw_injected.iterrows():
+        wid = str(row.get("wazuh_alert_id", ""))
+        if wid:
+            synthetic_ids[wid] = {
+                "is_synthetic": int(row.get("is_synthetic", 0)),
+                "scenario_id": str(row.get("scenario_id", "") or ""),
+            }
+
+    log.info("[PROPAGATE] Indexed %d wazuh_alert_id dari raw data", len(synthetic_ids))
+
     ground_truth, scenario_ids = [], []
     for _, row in df.iterrows():
-        mid      = row["meta_id"]
-        idx_list = alert_index_map.get(mid, [])
-        if not idx_list:
-            ground_truth.append(0)
-            scenario_ids.append("")
-            continue
-        raw_subset    = df_raw_injected.iloc[[i for i in idx_list if i < len(df_raw_injected)]]
-        has_synthetic = int(raw_subset["is_synthetic"].any())
-        scenario      = ""
-        if has_synthetic:
-            synth_rows = raw_subset[raw_subset["is_synthetic"] == 1]
-            scenario   = synth_rows["scenario_id"].iloc[0] if len(synth_rows) > 0 else ""
+        mid = row["meta_id"]
+        
+        # [FIX-A] Coba ambil wazuh_alert_ids dari meta-alert
+        wid_str = str(row.get("wazuh_alert_ids", "") or "")
+        if not wid_str:
+            # Fallback ke positional index jika wazuh_alert_ids kosong
+            idx_list = alert_index_map.get(mid, [])
+            if not idx_list:
+                ground_truth.append(0)
+                scenario_ids.append("")
+                continue
+            raw_subset = df_raw_injected.iloc[[i for i in idx_list if i < len(df_raw_injected)]]
+            has_synthetic = int(raw_subset["is_synthetic"].any())
+            scenario = ""
+            if has_synthetic:
+                synth_rows = raw_subset[raw_subset["is_synthetic"] == 1]
+                scenario = synth_rows["scenario_id"].iloc[0] if len(synth_rows) > 0 else ""
+        else:
+            # [FIX-A] Gunakan set intersection dengan wazuh_alert_ids
+            alert_ids = set(wid_str.split("|"))
+            has_synthetic = 0
+            scenario = ""
+            
+            for wid in alert_ids:
+                if wid in synthetic_ids:
+                    info = synthetic_ids[wid]
+                    if info["is_synthetic"] == 1:
+                        has_synthetic = 1
+                        scenario = info["scenario_id"]
+                        break  # Cukup ketemu 1 synthetic
+            
         ground_truth.append(has_synthetic)
         scenario_ids.append(scenario)
 

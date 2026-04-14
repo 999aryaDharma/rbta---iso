@@ -71,7 +71,25 @@ class FixedMetaAlert:
     _unique_rule_ids: set = field(default_factory=set, repr=False)
 
     def to_dict(self) -> dict:
-        duration_sec = max(0, int((self.end_time - self.start_time).total_seconds()))
+        # FIX-1: Guard semua timestamp sebelum dipakai (NaTType does not support strftime)
+        def safe_strftime(ts, fallback="1970-01-01T00:00:00Z"):
+            """Format timestamp dengan fallback untuk NaT/None."""
+            try:
+                if pd.isna(ts):
+                    return fallback
+                return ts.strftime("%Y-%m-%dT%H:%M:%SZ")
+            except (ValueError, AttributeError, TypeError):
+                return fallback
+
+        # Guard duration_sec
+        try:
+            if pd.isna(self.start_time) or pd.isna(self.end_time):
+                duration_sec = 0
+            else:
+                duration_sec = max(0, int((self.end_time - self.start_time).total_seconds()))
+        except (TypeError, ValueError):
+            duration_sec = 0
+
         clean_rg     = self.rule_groups.strip().lower()
 
         agent_crit = self.criticality_score
@@ -80,7 +98,7 @@ class FixedMetaAlert:
                 self.agent_name.strip().lower(), DEFAULT_CRITICALITY
             )
 
-        hour_of_day             = self.start_time.hour
+        hour_of_day             = self.start_time.hour if not pd.isna(self.start_time) else 0
         rule_group_severity_enc = RULE_GROUP_SEVERITY_ENC.get(clean_rg, DEFAULT_GROUP_ENC)
         unique_rules_triggered  = len(self._unique_rule_ids)
 
@@ -89,10 +107,10 @@ class FixedMetaAlert:
             "agent_id":                 self.agent_id,
             "agent_name":               self.agent_name,
             "rule_groups":              clean_rg,
-            "window_start":             self.window_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "window_end":               self.window_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "start_time":               self.start_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "end_time":                 self.end_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "window_start":             safe_strftime(self.window_start),
+            "window_end":               safe_strftime(self.window_end),
+            "start_time":               safe_strftime(self.start_time),
+            "end_time":                 safe_strftime(self.end_time),
             "duration_sec":             duration_sec,
             # ── Fitur f1-f9 (identik dengan RBTA v4) ─────────────────────
             "alert_count":              self.alert_count,               # f1

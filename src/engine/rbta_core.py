@@ -89,7 +89,7 @@ RULE_GROUP_SEVERITY_ENC: dict[str, int] = {
 DEFAULT_GROUP_ENC = 2
 
 # ── 9 Fitur core (sebelum behavioral enrichment) ────────────────────────────
-# Optimization untuk HIDS: remove attacker_count, add rule_firedtimes
+# [FIX-B] Optimization untuk HIDS: remove attacker_count, replace rule_firedtimes dengan alert_velocity
 FEATURE_COLS_V5 = [
     "alert_count",
     "max_severity",
@@ -99,7 +99,7 @@ FEATURE_COLS_V5 = [
     "hour_of_day",
     "unique_rules_triggered",
     "mitre_hit_count",
-    "rule_firedtimes",
+    "alert_velocity",  # [FIX-B] alert_count / duration_sec
 ]
 
 
@@ -279,6 +279,7 @@ class MetaAlert:
     rule_id_dist:     dict        = field(default_factory=dict)
     severity_dist:    dict        = field(default_factory=dict)
     rule_group_dist:  dict        = field(default_factory=dict)  # [NEW-1]
+    wazuh_alert_ids:  list[str]   = field(default_factory=list)  # [FIX-A] Untuk traceability
     _unique_rule_ids: set         = field(default_factory=set, repr=False)
 
     def to_dict(self) -> dict:
@@ -311,6 +312,7 @@ class MetaAlert:
             "rule_id_dist":             json.dumps(self.rule_id_dist),
             "rule_group_dist":          json.dumps(self.rule_group_dist),  # [NEW-1]
             "mitre_tactic":             "|".join(self.mitre_tactic_list),
+            "wazuh_alert_ids":          "|".join(self.wazuh_alert_ids),  # [FIX-A] Pipe-separated list
         }
 
 
@@ -385,6 +387,7 @@ def _new_meta(meta_id, row, ts, lv, ip, srcip_type, parent_id=None):
     rid     = str(row.get("rule_id", "unknown"))
     crit    = int(row.get("criticality_score", 1))
     mitre   = int(row.get("has_mitre", 0))
+    wid     = str(row.get("wazuh_alert_id", ""))  # [FIX-A] Ambil wazuh_alert_id
     ma      = MetaAlert(
         meta_id               = meta_id,
         parent_meta_id        = parent_id,
@@ -403,6 +406,7 @@ def _new_meta(meta_id, row, ts, lv, ip, srcip_type, parent_id=None):
         rule_id_dist          = {rid: 1},
         severity_dist         = {str(lv): 1},
         rule_group_dist       = {rg: 1},
+        wazuh_alert_ids       = [wid] if wid else [],  # [FIX-A] Simpan ID pertama
     )
     ma._unique_rule_ids = {rid}
     return ma
@@ -538,6 +542,10 @@ def run_rbta(
                 b.severity_dist[str(lv)] = b.severity_dist.get(str(lv), 0) + 1
                 b.rule_group_dist[clean_rg] = b.rule_group_dist.get(clean_rg, 0) + 1  # [NEW-3]
                 b._unique_rule_ids.add(rid)
+                # [FIX-A] Simpan wazuh_alert_id
+                wid_alert = str(row.get("wazuh_alert_id", "") or "")
+                if wid_alert:
+                    b.wazuh_alert_ids.append(wid_alert)
                 if stype == "external":
                     b.external_threat_count += 1
                 elif stype == "internal":

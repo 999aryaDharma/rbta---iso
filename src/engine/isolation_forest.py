@@ -102,7 +102,8 @@ DEFAULT_GROUP_ENC = 2
 
 # ── 12 Fitur Isolation Forest (optimized untuk HIDS) ────────────────────────
 # Removed: f4 (attacker_count), f13 (cross_agent_spread) — keduanya selalu 0
-# Added: rule_firedtimes — frekuensi rule yang sama dipicu
+# Updated: f9 diganti dari rule_firedtimes → alert_velocity (FIX-B)
+#          alert_velocity lebih informatif karena mengukur burst pattern
 FEATURE_COLS = [
     "alert_count",               # f1  volume dalam bucket
     "max_severity",              # f2  rule.level tertinggi
@@ -112,7 +113,7 @@ FEATURE_COLS = [
     "hour_of_day",               # f6  jam kejadian
     "unique_rules_triggered",    # f7  keberagaman rule_id
     "mitre_hit_count",           # f8  jumlah alert bersinyal MITRE
-    "rule_firedtimes",           # f9  frekuensi rule dipicu (dari feature_engineering)
+    "alert_velocity",            # f9  kecepatan alert (alert_count / duration_sec) [FIX-B]
     # "rule_group_entropy",        # f10 Shannon entropy distribusi rule_group
     # "tactic_progression_score",  # f11 urutan taktik MITRE di kill chain
     "deviation_from_baseline",   # f12 deviasi dari rolling avg 24 jam
@@ -127,7 +128,7 @@ FEATURE_LABELS = {
     "hour_of_day":               "f6 · Hour of day",
     "unique_rules_triggered":    "f7 · Unique rules",
     "mitre_hit_count":           "f8 · MITRE hits",
-    "rule_firedtimes":           "f9 · Rule fired times",
+    "alert_velocity":            "f9 · Alert velocity (cnt/sec)",  # [FIX-B]
     "rule_group_entropy":        "f10 · Rule entropy",
     "tactic_progression_score":  "f11 · Tactic progression",
     "deviation_from_baseline":   "f12 · Baseline deviation",
@@ -166,7 +167,11 @@ def load_alerts(csv_path: str) -> pd.DataFrame:
 
 
 def add_if_features(df_meta: pd.DataFrame) -> pd.DataFrame:
-    """Validasi dan normalisasi f1-f9 (termasuk rule_firedtimes). f10-f12 ditambahkan oleh enrich_features()."""
+    """
+    Validasi dan normalisasi f1-f9. 
+    [FIX-B] f9 sekarang alert_velocity = alert_count / max(duration_sec, 1)
+    f10-f12 ditambahkan oleh enrich_features().
+    """
     df = df_meta.copy()
     df["duration_sec"] = df["duration_sec"].clip(lower=0)
 
@@ -191,15 +196,25 @@ def add_if_features(df_meta: pd.DataFrame) -> pd.DataFrame:
         df["start_time"] = pd.to_datetime(df["start_time"], errors="coerce")
         df["hour_of_day"] = df["start_time"].dt.hour
 
-    for col in ("unique_rules_triggered", "mitre_hit_count", "rule_firedtimes"):
+    for col in ("unique_rules_triggered", "mitre_hit_count"):
         if col not in df.columns:
-            log.warning("Kolom %s tidak ada — di-set 1 (default).", col)
-            df[col] = 1
+            log.warning("Kolom %s tidak ada — di-set 0 (default).", col)
+            df[col] = 0
 
-    # f1-f9 harus integer (termasuk rule_firedtimes di posisi f9)
-    for col in (FEATURE_COLS[:9] if len(FEATURE_COLS) >= 9 else FEATURE_COLS):
+    # [FIX-B] Hitung alert_velocity = alert_count / max(duration_sec, 1)
+    if "alert_velocity" not in df.columns:
+        df["alert_velocity"] = df["alert_count"] / df["duration_sec"].clip(lower=1)
+        log.info("[FIX-B] alert_velocity dihitung: mean=%.4f, max=%.4f", 
+                 df["alert_velocity"].mean(), df["alert_velocity"].max())
+
+    # f1-f8 integer, f9 (alert_velocity) float
+    for col in FEATURE_COLS[:8]:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(1 if col == "rule_firedtimes" else 0).astype(int)
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
+    
+    # f9 alert_velocity tetap float
+    if "alert_velocity" in df.columns:
+        df["alert_velocity"] = pd.to_numeric(df["alert_velocity"], errors="coerce").fillna(0.0)
 
     df["rule_groups"] = df["rule_groups"].astype(str).str.strip().str.lower()
     return df
@@ -347,6 +362,7 @@ def apply_decision_matrix(
 
 def build_soar_payload(row: pd.Series) -> dict:
     """JSON webhook payload standar untuk SOAR Shuffle."""
+    # [FIX-4] cross_agent_spread dihapus — selalu 0 (zero variance di HIDS)
     return {
         "event_id":              str(row.get("meta_id", "")),
         "anomaly_score":         float(row.get("anomaly_score", 0.0)),
@@ -359,14 +375,13 @@ def build_soar_payload(row: pd.Series) -> dict:
         "rule_entropy":          float(row.get("rule_group_entropy", 0.0)),
         "tactic_progression":    float(row.get("tactic_progression_score", 0.0)),
         "baseline_deviation":    float(row.get("deviation_from_baseline", 0.0)),
-        "cross_agent_spread":    int(row.get("cross_agent_spread", 0)),
+        # "cross_agent_spread":  int(row.get("cross_agent_spread", 0)),  # [FIX-4] REMOVED — always 0
         "decision":              str(row.get("action", "")),
         "reason": (
             f"score={row.get('anomaly_score', 0):.4f} "
             f"sev={row.get('max_severity', 0)} "
             f"mitre={row.get('mitre_hit_count', 0)} "
             f"entropy={row.get('rule_group_entropy', 0):.3f} "
-            f"spread={row.get('cross_agent_spread', 0)} "
             f"dev={row.get('deviation_from_baseline', 0):.3f}"
         ),
     }
@@ -610,13 +625,60 @@ def visualize(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# FIX-2: DYNAMIC CONTAMINATION COMPUTATION
+# ══════════════════════════════════════════════════════════════════════════════
+
+def compute_dynamic_contamination(
+    df_meta: pd.DataFrame,
+    fallback: float = 0.05,
+) -> float:
+    """
+    FIX-2: Hitung contamination secara dinamis dari proporsi ground_truth positif.
+    
+    Masalah: contamination=0.05 hardcoded menyebabkan IF mengescalate 5% dari semua
+    meta-alert, padahal positif aktual bisa 0.59% (mismatch threshold).
+    
+    Solusi: Jika ground_truth tersedia, pakai proporsi aktual (dengan clipping).
+    Jika tidak, gunakan fallback (konservatif).
+    
+    Parameters
+    ----------
+    df_meta : DataFrame dengan kolom ground_truth (optional)
+    fallback : float default 0.05 (5%) jika tidak ada ground_truth
+    
+    Returns
+    -------
+    float — contamination value dalam range valid scikit-learn: (0, 0.5]
+    """
+    if "ground_truth" not in df_meta.columns:
+        log.info("[CONTAMINATION] ground_truth tidak ada → fallback=%.4f", fallback)
+        return fallback
+    
+    n_total    = len(df_meta)
+    n_positive = int(df_meta["ground_truth"].sum())
+    
+    if n_positive == 0:
+        log.warning("[CONTAMINATION] Tidak ada positif (n=0) → fallback=%.4f", fallback)
+        return fallback
+    
+    proportion    = n_positive / n_total
+    contamination = float(np.clip(proportion, 1e-4, 0.5))
+    
+    log.info(
+        "[CONTAMINATION] Dinamis: %d positif / %d total = %.6f (%.3f%%)",
+        n_positive, n_total, contamination, contamination * 100,
+    )
+    return contamination
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Main Pipeline
 # ══════════════════════════════════════════════════════════════════════════════
 
 def run_pipeline(
     csv_path:       str        = "output/meta_alerts_rbta.csv",
     output_dir:     str        = "output/",
-    contamination:  float      = 0.05,
+    contamination:  float|str  = "auto",
     n_estimators:   int        = 200,
     theta_method:   str        = "iqr",
     theta_override: float | None = None,
@@ -633,26 +695,49 @@ def run_pipeline(
     df = add_if_features(df)
     log.info("%d meta-alert dimuat. Menambahkan f10-f13 ...", len(df))
 
-    # Step 3: f10-f13 (behavioral)
-    try:
-        from engine.feature_engineering import enrich_features
-        df = enrich_features(df)
-    except ImportError:
-        log.warning(
-            "feature_engineering.py tidak ditemukan di src/. "
-            "Mencoba import langsung ..."
+    # Step 3: f10-f13 (behavioral) — cek apakah sudah ada di CSV
+    BEHAVIORAL_COLS = [
+        "rule_group_entropy",
+        "tactic_progression_score",
+        "deviation_from_baseline",
+        "cross_agent_spread",
+    ]
+
+    existing_behavioral = [c for c in BEHAVIORAL_COLS if c in df.columns]
+    missing_behavioral  = [c for c in BEHAVIORAL_COLS if c not in df.columns]
+
+    if existing_behavioral:
+        log.info(
+            "[IF] Behavioral features ditemukan di CSV: %s → digunakan langsung",
+            existing_behavioral,
         )
+        # Isi kolom yang missing dengan 0
+        for col in missing_behavioral:
+            log.warning("[IF] Kolom %s tidak ada di CSV → di-set 0", col)
+            df[col] = 0
+    else:
+        # Fallback: coba import feature_engineering untuk menghitung ulang
+        log.info("[IF] Behavioral features tidak ada di CSV → mencoba import feature_engineering ...")
         try:
             from engine.feature_engineering import enrich_features
             df = enrich_features(df)
+            log.info("[IF] Feature engineering berhasil dijalankan.")
         except ImportError:
-            log.error(
-                "Tidak bisa import feature_engineering. "
-                "f10-f13 di-set 0. Pastikan file ada di src/."
+            log.warning(
+                "feature_engineering.py tidak ditemukan di src/. "
+                "Mencoba import langsung ..."
             )
-            for col in ("rule_group_entropy", "tactic_progression_score",
-                        "deviation_from_baseline", "cross_agent_spread"):
-                df[col] = 0
+            try:
+                from engine.feature_engineering import enrich_features
+                df = enrich_features(df)
+                log.info("[IF] Feature engineering berhasil dijalankan (import langsung).")
+            except ImportError:
+                log.error(
+                    "Tidak bisa import feature_engineering. "
+                    "f10-f13 di-set 0. Pastikan file ada di src/."
+                )
+                for col in BEHAVIORAL_COLS:
+                    df[col] = 0
 
     # Pastikan semua fitur ada dan bertipe numerik
     for col in FEATURE_COLS:
@@ -664,9 +749,16 @@ def run_pipeline(
     log.info("Feature matrix 13-kolom:\n%s",
              df[FEATURE_COLS].describe().round(3).to_string())
 
-    # Step 4: Training
+    # Step 4: FIX-2 — Dynamic Contamination
+    if contamination == "auto" or contamination is None:
+        contamination = compute_dynamic_contamination(df, fallback=0.05)
+    
+    contamination = float(contamination)
+    log.info("[CONTAMINATION] Final value = %.6f (%.3f%%)", contamination, contamination * 100)
+
+    # Step 5: Training
     log.info(
-        "Training IF (n_estimators=%d, contamination=%.2f) ...",
+        "Training IF (n_estimators=%d, contamination=%.4f) ...",
         n_estimators, contamination,
     )
     model, scaler, X_scaled, raw_scores = train_isolation_forest(

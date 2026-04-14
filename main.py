@@ -286,10 +286,29 @@ def main() -> None:
         if_result = safe_step(
             "STEP 9 — ISOLATION FOREST",
             run_isolation_forest,
-            rbta_csv, FINAL_DIR, 0.05, 200, "iqr", None, 42,
+            rbta_csv, FINAL_DIR, "auto", 200, "iqr", None, 42,
         )
         if if_result is not None:
             df_scored = if_result[0]
+
+    # =========================================================================
+    # FIX-3: Propagate ground_truth ke df_scored (STEP 9→10)
+    # =========================================================================
+    if (df_scored is not None and df_meta_rbta is not None 
+        and "ground_truth" in df_meta_rbta.columns 
+        and "meta_id" in df_meta_rbta.columns):
+        gt_map = df_meta_rbta.set_index("meta_id")["ground_truth"]
+        df_scored["ground_truth"] = (
+            df_scored["meta_id"]
+            .map(gt_map)
+            .fillna(0)
+            .astype(int)
+        )
+        n_gt = int(df_scored["ground_truth"].sum())
+        log.info(
+            "[FIX-3] Ground truth propagated → df_scored: %d positif dari %d total",
+            n_gt, len(df_scored),
+        )
 
     # =========================================================================
     # STEP 10: FPR vs Reduction Rate (Landauer Figure 12)
