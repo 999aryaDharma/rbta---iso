@@ -1,27 +1,35 @@
 """
-isolation_forest.py  —  12-fitur optimized + Decision Matrix + False Positive Gate (HIDS)
+isolation_forest.py  —  11-fitur HIDS-optimized v2 + Decision Matrix + False Positive Gate
 ==========================================================================================
-Optimisasi untuk HIDS dari versi sebelumnya:
+Redesain dari v1 berdasarkan analisis distribusi fitur aktual.
 
-  [REMOVED] f4 (attacker_count) dan f13 (cross_agent_spread)
-      Keduanya selalu 0 di data HIDS → tidak memberikan informasi ke IF.
-
-  [ADDED] f9 (rule_firedtimes)
-      Frekuensi rule yang sama dipicu → proxy untuk alert fatigue.
+Perubahan dari v1:
+  [REMOVED] f7  unique_rules_triggered → 92.9% = 1 (IQR=0, zero variance)
+  [REMOVED] f10 rule_group_entropy     → 92.9% = 0 (IQR=0, singleton trap)
+  [REMOVED] f11 tactic_progression     → 91.3% = 0 (MITRE coverage rendah)
+  [REMOVED] f13 cross_agent_spread     → selalu 0 di HIDS (IP-based tidak relevan)
+  
+  [REPLACED] f1  alert_count (raw) → alert_count_log (log1p transform)
+  [NEW]      f7  alert_velocity (burst intensity)
+  [REPLACED] f9  rule_group_entropy → rule_concentration (repetitivitas)
+  [REPLACED] f10 tactic_progression → severity_spread (eskalasi)
+  [IMPROVED] f11 deviation_from_baseline: clip [-5,5] (eliminasi ceiling effect)
 
   [UPDATED] False Positive Gate
-      OLD: mengecek attacker_count, cross_agent_spread → selalu lolos gate
-      NEW: hanya suppress jika severity<7 AND alert_count<5 AND mitre_hit_count==0
+      Hanya suppress jika severity<7 AND alert_count<5 AND mitre_hit_count==0
       → Cocok untuk HIDS, mencegah suppression false positive
 
-  [UPDATED] FEATURE_COLS kini 12 fitur:
-      f1-f8:   core features (alert_count, max_severity, ..., mitre_hit_count)
-      f9:      rule_firedtimes (NEW)
-      f10-f12: behavioral features dari feature_engineering
+  [UPDATED] FEATURE_COLS kini 11 fitur (HIDS-optimized v2):
+      f1:   alert_count_log (log1p transform)
+      f2-f6: core features (max_severity, duration, rule_group_enc, agent_crit, hour)
+      f7:   alert_velocity (burst intensity)
+      f8:   mitre_hit_count (sparse tapi bermakna)
+      f9:   rule_concentration (repetitivitas)
+      f10:  severity_spread (eskalasi)
+      f11:  deviation_from_baseline (clip [-5,5])
 
   [NEW] Telegram notifications export (Step 11)
       Format 4-baris informatif untuk demo di sidang.
-      Menunjukkan sistem RBTA+IF beroperasional optimal.
 """
 
 import warnings
@@ -100,38 +108,44 @@ RULE_GROUP_SEVERITY_ENC: dict[str, int] = {
 }
 DEFAULT_GROUP_ENC = 2
 
-# ── 12 Fitur Isolation Forest (optimized untuk HIDS) ────────────────────────
-# Removed: f4 (attacker_count), f13 (cross_agent_spread) — keduanya selalu 0
-# Updated: f9 diganti dari rule_firedtimes → alert_velocity (FIX-B)
-#          alert_velocity lebih informatif karena mengukur burst pattern
+# ── 11 Fitur Isolation Forest (HIDS-optimized v2) ─────────────────────────
+# Synchronized with feature_engineering.py v2
+# Removed features (v1 → v2):
+#   - unique_rules_triggered : 92.9% = 1 (IQR=0, zero variance)
+#   - rule_group_entropy     : 92.9% = 0 (IQR=0, singleton trap)
+#   - tactic_progression     : 91.3% = 0 (MITRE coverage rendah)
+#   - cross_agent_spread     : selalu 0 di HIDS (IP-based tidak relevan)
+# Replaced features:
+#   - alert_count → alert_count_log (log1p transform, kompresi outlier)
+#   - rule_firedtimes → alert_velocity (burst intensity)
+#   - rule_group_entropy → rule_concentration (repetitivitas)
+#   - tactic_progression → severity_spread (eskalasi severity)
 FEATURE_COLS = [
-    "alert_count",               # f1  volume dalam bucket
-    "max_severity",              # f2  rule.level tertinggi
-    "duration_sec",              # f3  durasi insiden
-    "rule_group_severity_enc",   # f4  ordinal encoding rule_group
-    "agent_criticality",         # f5  bobot kritis aset (1-4)
-    "hour_of_day",               # f6  jam kejadian
-    "unique_rules_triggered",    # f7  keberagaman rule_id
-    "mitre_hit_count",           # f8  jumlah alert bersinyal MITRE
-    "alert_velocity",            # f9  kecepatan alert (alert_count / duration_sec) [FIX-B]
-    # "rule_group_entropy",        # f10 Shannon entropy distribusi rule_group
-    # "tactic_progression_score",  # f11 urutan taktik MITRE di kill chain
-    "deviation_from_baseline",   # f12 deviasi dari rolling avg 24 jam
+    "alert_count_log",          # f1  log1p(alert_count) — kompresi outlier
+    "max_severity",             # f2  rule.level tertinggi
+    "duration_sec",             # f3  durasi window (67.6% singleton = 0)
+    "rule_group_severity_enc",  # f4  ordinal encoding semantic rule_group
+    "agent_criticality",        # f5  bobot kritis aset (1-4)
+    "hour_of_day",              # f6  jam kejadian (proxy anomali temporal)
+    "alert_velocity",           # f7  intensitas burst (cnt/sec)
+    "mitre_hit_count",          # f8  sinyal MITRE (sparse tapi bermakna)
+    "rule_concentration",       # f9  repetitivitas rule (dominasi satu rule)
+    "severity_spread",          # f10 eskalasi severity dalam bucket
+    "deviation_from_baseline",  # f11 deviasi dari baseline 24h (clip [-5,5])
 ]
 
 FEATURE_LABELS = {
-    "alert_count":               "f1 · Alert count",
-    "max_severity":              "f2 · Max severity",
-    "duration_sec":              "f3 · Duration (s)",
-    "rule_group_severity_enc":   "f4 · Rule group enc",
-    "agent_criticality":         "f5 · Agent criticality",
-    "hour_of_day":               "f6 · Hour of day",
-    "unique_rules_triggered":    "f7 · Unique rules",
-    "mitre_hit_count":           "f8 · MITRE hits",
-    "alert_velocity":            "f9 · Alert velocity (cnt/sec)",  # [FIX-B]
-    "rule_group_entropy":        "f10 · Rule entropy",
-    "tactic_progression_score":  "f11 · Tactic progression",
-    "deviation_from_baseline":   "f12 · Baseline deviation",
+    "alert_count_log":          "f1 · Alert count (log)",
+    "max_severity":             "f2 · Max severity",
+    "duration_sec":             "f3 · Duration (s)",
+    "rule_group_severity_enc":  "f4 · Rule group enc",
+    "agent_criticality":        "f5 · Agent criticality",
+    "hour_of_day":              "f6 · Hour of day",
+    "alert_velocity":           "f7 · Alert velocity",
+    "mitre_hit_count":          "f8 · MITRE hits",
+    "rule_concentration":       "f9 · Rule concentration",
+    "severity_spread":          "f10 · Severity spread",
+    "deviation_from_baseline":  "f11 · Baseline deviation",
 }
 
 # Decision Matrix thresholds
@@ -168,19 +182,28 @@ def load_alerts(csv_path: str) -> pd.DataFrame:
 
 def add_if_features(df_meta: pd.DataFrame) -> pd.DataFrame:
     """
-    Validasi dan normalisasi f1-f9. 
-    [FIX-B] f9 sekarang alert_velocity = alert_count / max(duration_sec, 1)
-    f10-f12 ditambahkan oleh enrich_features().
+    Validasi dan normalisasi fitur core untuk IF v2.
+    
+    [v2] Fitur yang dihitung:
+      - f1 alert_count_log: log1p transform (bukan raw count)
+      - f7 alert_velocity: burst intensity
+      - f9 rule_concentration: repetitivitas (dari rule_id_dist)
+      - f10 severity_spread: eskalasi severity (dari severity_dist)
+    
+    Fitur behavioral lainnya (f11 deviation_from_baseline) dihitung oleh
+    enrich_features() di feature_engineering.py.
     """
     df = df_meta.copy()
     df["duration_sec"] = df["duration_sec"].clip(lower=0)
 
+    # f4: rule_group_severity_enc
     if "rule_group_severity_enc" not in df.columns:
         df["rule_groups"] = df["rule_groups"].astype(str).str.strip().str.lower()
         df["rule_group_severity_enc"] = (
             df["rule_groups"].map(RULE_GROUP_SEVERITY_ENC).fillna(DEFAULT_GROUP_ENC).astype(int)
         )
 
+    # f5: agent_criticality
     if "agent_criticality" not in df.columns:
         df["agent_criticality"] = (
             df["agent_name"].astype(str).str.strip().str.lower()
@@ -192,29 +215,84 @@ def add_if_features(df_meta: pd.DataFrame) -> pd.DataFrame:
             .fillna(DEFAULT_CRITICALITY).clip(1, 4).astype(int)
         )
 
+    # f6: hour_of_day
     if "hour_of_day" not in df.columns:
         df["start_time"] = pd.to_datetime(df["start_time"], errors="coerce")
         df["hour_of_day"] = df["start_time"].dt.hour
 
-    for col in ("unique_rules_triggered", "mitre_hit_count"):
-        if col not in df.columns:
-            log.warning("Kolom %s tidak ada — di-set 0 (default).", col)
-            df[col] = 0
+    # f1: alert_count_log (log1p transform)
+    if "alert_count_log" not in df.columns:
+        alert_count = pd.to_numeric(df["alert_count"], errors="coerce").fillna(1).clip(lower=1)
+        df["alert_count_log"] = np.log1p(alert_count).round(4)
+        log.info("[v2] f1 alert_count_log: median=%.3f, max=%.3f",
+                 df["alert_count_log"].median(), df["alert_count_log"].max())
 
-    # [FIX-B] Hitung alert_velocity = alert_count / max(duration_sec, 1)
+    # f7: alert_velocity
     if "alert_velocity" not in df.columns:
-        df["alert_velocity"] = df["alert_count"] / df["duration_sec"].clip(lower=1)
-        log.info("[FIX-B] alert_velocity dihitung: mean=%.4f, max=%.4f", 
-                 df["alert_velocity"].mean(), df["alert_velocity"].max())
+        alert_count = pd.to_numeric(df["alert_count"], errors="coerce").fillna(1).clip(lower=0)
+        duration_sec = pd.to_numeric(df["duration_sec"], errors="coerce").fillna(0).clip(lower=0)
+        df["alert_velocity"] = (alert_count / duration_sec.clip(lower=1)).round(4)
+        log.info("[v2] f7 alert_velocity: median=%.3f, max=%.3f",
+                 df["alert_velocity"].median(), df["alert_velocity"].max())
 
-    # f1-f8 integer, f9 (alert_velocity) float
-    for col in FEATURE_COLS[:8]:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
-    
-    # f9 alert_velocity tetap float
-    if "alert_velocity" in df.columns:
-        df["alert_velocity"] = pd.to_numeric(df["alert_velocity"], errors="coerce").fillna(0.0)
+    # f9: rule_concentration (dari rule_id_dist)
+    if "rule_concentration" not in df.columns:
+        if "rule_id_dist" in df.columns:
+            def _compute_concentration(val):
+                if pd.isna(val) or val == "":
+                    return 1.0
+                try:
+                    dist = json.loads(val) if isinstance(val, str) else val
+                    if not dist:
+                        return 1.0
+                    total = sum(dist.values())
+                    if total <= 0:
+                        return 1.0
+                    return max(dist.values()) / total
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    return 1.0
+            
+            df["rule_concentration"] = df["rule_id_dist"].apply(_compute_concentration).round(4)
+            log.info("[v2] f9 rule_concentration: median=%.3f, diverse(<0.8): %.1f%%",
+                     df["rule_concentration"].median(),
+                     (df["rule_concentration"] < 0.8).mean() * 100)
+        else:
+            log.warning("[v2] rule_id_dist tidak ada — rule_concentration di-set 1.0")
+            df["rule_concentration"] = 1.0
+
+    # f10: severity_spread (dari severity_dist)
+    if "severity_spread" not in df.columns:
+        if "severity_dist" in df.columns and "max_severity" in df.columns:
+            def _compute_severity_mean(val):
+                if pd.isna(val) or val == "":
+                    return 0.0
+                try:
+                    dist = json.loads(val) if isinstance(val, str) else val
+                    if not dist:
+                        return 0.0
+                    total = sum(dist.values())
+                    if total <= 0:
+                        return 0.0
+                    return sum(int(k) * v for k, v in dist.items()) / total
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    return 0.0
+            
+            max_sev = pd.to_numeric(df["max_severity"], errors="coerce").fillna(0)
+            sev_mean = df["severity_dist"].apply(_compute_severity_mean)
+            df["severity_spread"] = (max_sev - sev_mean).clip(lower=0).round(4)
+            log.info("[v2] f10 severity_spread: median=%.3f, eskalasi(>2): %.1f%%",
+                     df["severity_spread"].median(),
+                     (df["severity_spread"] > 2).mean() * 100)
+        else:
+            log.warning("[v2] severity_dist/max_severity tidak ada — severity_spread di-set 0")
+            df["severity_spread"] = 0.0
+
+    # f8: mitre_hit_count (ensure numeric)
+    if "mitre_hit_count" not in df.columns:
+        log.warning("[v2] mitre_hit_count tidak ada — di-set 0")
+        df["mitre_hit_count"] = 0
+    else:
+        df["mitre_hit_count"] = pd.to_numeric(df["mitre_hit_count"], errors="coerce").fillna(0).astype(int)
 
     df["rule_groups"] = df["rule_groups"].astype(str).str.strip().str.lower()
     return df
@@ -401,8 +479,9 @@ def print_report(df: pd.DataFrame, theta: float) -> str:
     top10 = (
         df[df["escalate"] == 1][
             ["meta_id", "agent_name", "rule_groups", "alert_count",
-             "max_severity", "mitre_hit_count", "rule_group_entropy",
-             "deviation_from_baseline", "cross_agent_spread",
+             "max_severity", "mitre_hit_count", "alert_velocity",
+             "rule_concentration", "severity_spread",
+             "deviation_from_baseline",
              "anomaly_score", "decision"]
         ]
         .sort_values("anomaly_score", ascending=False)
@@ -412,7 +491,7 @@ def print_report(df: pd.DataFrame, theta: float) -> str:
     lines = [
         "",
         "=" * 70,
-        "  LAPORAN ISOLATION FOREST — 13 FITUR + DECISION MATRIX",
+        "  LAPORAN ISOLATION FOREST — 11 FITUR HIDS-OPTIMIZED v2",
         "=" * 70,
         f"  Total Meta-Alert           : {n_total:,}",
         f"  Threshold theta            : {theta}",
@@ -436,9 +515,10 @@ def print_report(df: pd.DataFrame, theta: float) -> str:
             f"  id={int(row['meta_id']):>5} | {row['agent_name']:<14} | "
             f"{row['rule_groups']:<22} | cnt={int(row['alert_count']):>4} | "
             f"sev={int(row['max_severity']):>2} | mitre={int(row['mitre_hit_count']):>3} | "
-            f"ent={float(row['rule_group_entropy']):.2f} | "
+            f"vel={float(row['alert_velocity']):.2f} | "
+            f"conc={float(row['rule_concentration']):.2f} | "
+            f"sev_sp={float(row['severity_spread']):.2f} | "
             f"dev={float(row['deviation_from_baseline']):+.2f} | "
-            f"spr={int(row['cross_agent_spread']):>2} | "
             f"score={row['anomaly_score']:.4f} | {row['decision']}"
         )
 
@@ -475,10 +555,10 @@ def visualize(
     theta:       float,
     output_path: str = "visualisasi_if.png",
 ) -> None:
-    """6-panel visualization untuk 13 fitur."""
+    """6-panel visualization untuk 11 fitur v2."""
     fig = plt.figure(figsize=(20, 14), facecolor="white")
     fig.suptitle(
-        "Isolation Forest — 13 Fitur Behavioral + Decision Matrix · INSTIKI SOC",
+        "Isolation Forest — 11 Fitur HIDS-Optimized v2 + Decision Matrix · INSTIKI SOC",
         fontsize=13, fontweight="bold", color=ACCENT, y=0.98,
     )
     gs = gridspec.GridSpec(
@@ -506,12 +586,11 @@ def visualize(
     ax_a.set_ylabel("Frekuensi", fontsize=9, color="#555")
     ax_a.legend(fontsize=8, framealpha=0.9)
 
-    # [B] Scatter alert_count vs rule_group_entropy (f1 vs f10)
+    # [B] Scatter alert_count vs alert_velocity (f1 vs f7)
     ax_b = fig.add_subplot(gs[0, 2])
-    _style_ax(ax_b, "B · Alert count vs Rule entropy (f10)")
-    ent_col = "rule_group_entropy" if "rule_group_entropy" in df.columns else "max_severity"
+    _style_ax(ax_b, "B · Alert count vs Velocity (f7)")
     sc = ax_b.scatter(
-        df["alert_count"], df[ent_col],
+        df["alert_count"], df["alert_velocity"],
         c=scores, cmap="RdYlBu_r", s=16, alpha=0.65,
         linewidths=0, vmin=0, vmax=1, zorder=2,
     )
@@ -519,7 +598,7 @@ def visualize(
     cb.set_label("anomaly_score", fontsize=7, color="#555")
     cb.ax.tick_params(labelsize=7)
     ax_b.set_xlabel("alert_count", fontsize=9, color="#555")
-    ax_b.set_ylabel(ent_col, fontsize=9, color="#555")
+    ax_b.set_ylabel("alert_velocity", fontsize=9, color="#555")
 
     # [C] Top rule_groups yang dieskalasi
     ax_c = fig.add_subplot(gs[1, 0])
@@ -563,7 +642,7 @@ def visualize(
 
     # [E] PCA 2D scatter
     ax_e = fig.add_subplot(gs[1, 2])
-    _style_ax(ax_e, "E · PCA 2D — normal vs anomali (13 fitur)")
+    _style_ax(ax_e, "E · PCA 2D — normal vs anomali (11 fitur)")
     pca     = PCA(n_components=2, random_state=42)
     X_pca   = pca.fit_transform(X_scaled)
     var_exp = pca.explained_variance_ratio_
@@ -575,9 +654,9 @@ def visualize(
     ax_e.set_ylabel(f"PC2 ({var_exp[1]*100:.1f}%)", fontsize=8, color="#555")
     ax_e.legend(fontsize=7, framealpha=0.9, markerscale=1.5)
 
-    # [F] Feature importance — 13 fitur (bar lebih sempit)
+    # [F] Feature importance — 11 fitur
     ax_f = fig.add_subplot(gs[2, :])
-    _style_ax(ax_f, "F · Kontribusi fitur — rata-rata nilai Anomali vs Normal (13 fitur)")
+    _style_ax(ax_f, "F · Kontribusi fitur — rata-rata nilai Anomali vs Normal (11 fitur)")
     avail_feats = [c for c in FEATURE_COLS if c in df.columns]
     df_feat     = df[avail_feats].copy().astype(float)
     for col in avail_feats:
@@ -616,7 +695,7 @@ def visualize(
     fig.text(
         0.5, 0.005,
         f"Total: {n_tot}  |  Eskalasi: {n_esc} ({n_esc/n_tot*100:.1f}%)  |  "
-        f"theta={theta}  |  13 fitur (f1-f13)  |  Decision Matrix 4 Kuadran + FP Gate",
+        f"theta={theta}  |  11 fitur (v2 HIDS-optimized)  |  Decision Matrix 4 Kuadran + FP Gate",
         ha="center", fontsize=7.5, color="#888",
     )
     plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
@@ -685,22 +764,19 @@ def run_pipeline(
     random_state:   int        = 42,
 ) -> tuple[pd.DataFrame, IsolationForest, RobustScaler, float]:
     os.makedirs(output_dir, exist_ok=True)
-    log.info("=== ISOLATION FOREST — 13 fitur + Decision Matrix ===")
+    log.info("=== ISOLATION FOREST — 11 fitur HIDS-optimized v2 + Decision Matrix ===")
     log.info("Input: %s", csv_path)
 
     # Step 1: Load
     df = load_alerts(csv_path)
 
-    # Step 2: f1-f9
+    # Step 2: f1-f6, f8 (core features)
     df = add_if_features(df)
-    log.info("%d meta-alert dimuat. Menambahkan f10-f13 ...", len(df))
+    log.info("%d meta-alert dimuat. Fitur v2 sudah ditambahkan ...", len(df))
 
-    # Step 3: f10-f13 (behavioral) — cek apakah sudah ada di CSV
+    # Step 3: f11 deviation_from_baseline (behavioral) — cek apakah sudah ada di CSV
     BEHAVIORAL_COLS = [
-        "rule_group_entropy",
-        "tactic_progression_score",
         "deviation_from_baseline",
-        "cross_agent_spread",
     ]
 
     existing_behavioral = [c for c in BEHAVIORAL_COLS if c in df.columns]
@@ -725,19 +801,10 @@ def run_pipeline(
         except ImportError:
             log.warning(
                 "feature_engineering.py tidak ditemukan di src/. "
-                "Mencoba import langsung ..."
+                "Behavioral features di-set 0."
             )
-            try:
-                from engine.feature_engineering import enrich_features
-                df = enrich_features(df)
-                log.info("[IF] Feature engineering berhasil dijalankan (import langsung).")
-            except ImportError:
-                log.error(
-                    "Tidak bisa import feature_engineering. "
-                    "f10-f13 di-set 0. Pastikan file ada di src/."
-                )
-                for col in BEHAVIORAL_COLS:
-                    df[col] = 0
+            for col in BEHAVIORAL_COLS:
+                df[col] = 0
 
     # Pastikan semua fitur ada dan bertipe numerik
     for col in FEATURE_COLS:
@@ -746,7 +813,7 @@ def run_pipeline(
             df[col] = 0
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-    log.info("Feature matrix 13-kolom:\n%s",
+    log.info("Feature matrix 11-kolom (v2 HIDS-optimized):\n%s",
              df[FEATURE_COLS].describe().round(3).to_string())
 
     # Step 4: FIX-2 — Dynamic Contamination

@@ -159,11 +159,16 @@ def main() -> None:
             available = {k: v for k, v in all_cols.items() if k in injection_result.columns}
             selected  = [c for c in available.keys() if c in injection_result.columns]
             df_raw_injected = injection_result[selected].rename(columns=available).copy()
-            # Preserve is_synthetic untuk label propagation
-            if "is_synthetic" in injection_result.columns:
-                df_raw_injected["is_synthetic"] = injection_result["is_synthetic"].values
-            if "scenario_id" in injection_result.columns:
-                df_raw_injected["scenario_id"]  = injection_result["scenario_id"].values
+            
+            # [FIX-1] Preserve kolom kritis untuk label propagation dan traceability
+            # wazuh_alert_id: diperlukan untuk propagate_labels (set intersection)
+            # is_synthetic: ground truth label
+            # scenario_id: scenario attribution
+            for col in ["wazuh_alert_id", "is_synthetic", "scenario_id"]:
+                if col in injection_result.columns:
+                    df_raw_injected[col] = injection_result[col].values
+                    log.info("[FIX-1] Kolom %s dipreserve (%d values)", col, len(df_raw_injected[col]))
+            
             df_raw_injected["timestamp"] = pd.to_datetime(
                 df_raw_injected["timestamp"], errors="coerce", utc=True
             ).dt.tz_localize(None)
@@ -224,7 +229,7 @@ def main() -> None:
         # =====================================================================
         for step_name, fn, kwargs in [
             ("f1-f9", add_if_features, {}),
-            ("f10-f13", enrich_features, {"skip_f13": SKIP_F13}),
+            ("f10-f11", enrich_features, {}),  # [FIX-2] v2: hanya f11 deviation, skip_f13 default=True
         ]:
             r = safe_step(f"STEP 5 — {step_name}", fn, df_meta_rbta, **kwargs)
             if r is not None:

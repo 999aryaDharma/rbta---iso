@@ -88,18 +88,24 @@ RULE_GROUP_SEVERITY_ENC: dict[str, int] = {
 }
 DEFAULT_GROUP_ENC = 2
 
-# ── 9 Fitur core (sebelum behavioral enrichment) ────────────────────────────
-# [FIX-B] Optimization untuk HIDS: remove attacker_count, replace rule_firedtimes dengan alert_velocity
+# ── 11 Fitur core (sebelum behavioral enrichment) — v2 HIDS-optimized ─────
+# [v2] Optimization untuk HIDS:
+#   - alert_count → alert_count_log (log1p transform)
+#   - rule_firedtimes → alert_velocity (burst intensity)
+#   - unique_rules_triggered → rule_concentration (repetitivitas)
+#   - tactic_progression → severity_spread (eskalasi)
 FEATURE_COLS_V5 = [
-    "alert_count",
-    "max_severity",
-    "duration_sec",
-    "rule_group_severity_enc",
-    "agent_criticality",
-    "hour_of_day",
-    "unique_rules_triggered",
-    "mitre_hit_count",
-    "alert_velocity",  # [FIX-B] alert_count / duration_sec
+    "alert_count_log",          # f1  log1p(alert_count)
+    "max_severity",             # f2  rule.level tertinggi
+    "duration_sec",             # f3  durasi window
+    "rule_group_severity_enc",  # f4  ordinal encoding
+    "agent_criticality",        # f5  bobot kritis aset
+    "hour_of_day",              # f6  jam kejadian
+    "alert_velocity",           # f7  burst intensity
+    "mitre_hit_count",          # f8  sinyal MITRE
+    "rule_concentration",       # f9  repetitivitas rule
+    "severity_spread",          # f10 eskalasi severity
+    "deviation_from_baseline",  # f11 deviasi baseline 24h
 ]
 
 
