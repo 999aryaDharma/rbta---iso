@@ -28,7 +28,15 @@ execution_time_ms
 
 Titik elbow boleh dihitung otomatis tetapi algoritma dan hasilnya harus dilaporkan, bukan hardcoded.
 
-### A2. Alert Reduction Rate
+### A2. Fixed Window Baseline
+
+Source of truth mengikuti laporan seminar: baseline adalah **fixed tumbling time-window** yang membagi event berdasarkan interval waktu kalender dan tidak menggunakan contextual grouping `(agent_id, rule_group_primary)` milik RBTA.
+
+Tujuannya adalah menjadi pembanding statis terhadap RBTA context-aware + adaptive.
+
+Output baseline harus mempertahankan schema meta-alert yang cukup kompatibel untuk perbandingan ARR, tetapi implementasi tidak boleh diam-diam menambahkan contextual key RBTA ke baseline.
+
+### A3. Alert Reduction Rate
 
 ```text
 ARR = (N_raw - N_meta) / N_raw * 100%
@@ -36,7 +44,9 @@ ARR = (N_raw - N_meta) / N_raw * 100%
 
 `N_raw` adalah jumlah alert valid setelah preprocessing. `N_meta` adalah jumlah output meta-alert.
 
-### A3. Noise Robustness
+ARR dihitung terpisah untuk Fixed Window dan RBTA bila keduanya dibandingkan.
+
+### A4. Noise Robustness
 
 Noise rate:
 
@@ -68,7 +78,7 @@ execution_time_ms
 
 Noise injection ini berbeda dari synthetic attack injection. Ia hanya digunakan untuk menguji ketahanan agregasi.
 
-### A4. Runtime Complexity
+### A5. Runtime Complexity
 
 Jalankan RBTA pada delapan ukuran subset yang meningkat menuju 100% dataset.
 
@@ -110,7 +120,7 @@ ESCALATE = 1
 non-ESCALATE = 0
 ```
 
-Jika penelitian ingin membandingkan `escalate/suppress` secara literal, `DAILY_DIGEST` harus memiliki mapping eksplisit dan konsisten. Default specification ini memasukkannya sebagai non-escalate.
+`DAILY_DIGEST` masuk non-escalate agar partisi evaluasi tetap biner dan konsisten.
 
 ### B2. Observed Silhouette Score
 
@@ -196,7 +206,7 @@ Jika artefact lama dipertahankan untuk histori, harus berada di area archive/leg
 2. Sensitivity analysis (adaptive OFF)
 3. Select/report base delta-t
 4. Final RBTA run (adaptive PER-AGENT ON)
-5. Fixed Window baseline run
+5. Fixed Window baseline run (time-only, sesuai laporan)
 6. ARR analysis
 7. Noise robustness
 8. Runtime proof
