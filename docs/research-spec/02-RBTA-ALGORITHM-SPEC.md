@@ -53,6 +53,7 @@ Setiap agent mempunyai:
 
 ```text
 last_timestamp
+warmup_event_count
 warmup_gaps
 baseline_gap
 ema_gap
@@ -96,22 +97,16 @@ bukan 299 detik dan bukan 1 detik.
 
 ## Warm-up
 
-Warm-up adalah **100 gap valid per agent**.
+Laporan seminar menetapkan fase pemanasan **100 event pertama**. Klarifikasi implementasinya: fase tersebut dihitung **per agent**.
 
-Selama agent belum warm-up:
+Untuk setiap agent:
 
-```text
-current_delta_t = base_delta_t
-```
+- event pertama membentuk `last_timestamp`;
+- event-event berikutnya selama fase 100 event pertama menghasilkan inter-arrival gap lokal yang dikumpulkan ke `warmup_gaps`;
+- sebelum warm-up selesai, `current_delta_t = base_delta_t`;
+- setelah 100 event pertama agent selesai diproses, `baseline_gap` dihitung dari gap lokal yang tersedia pada fase tersebut dan `ema_gap` diinisialisasi dari baseline itu.
 
-Ketika jumlah gap agent mencapai 100:
-
-```text
-baseline_gap = mean(warmup_gaps_agent)
-ema_gap = baseline_gap
-```
-
-Agent lain tetap pada fase warm-up masing-masing.
+Agent lain tetap memiliki hitungan warm-up independen.
 
 ## EMA Formula
 
