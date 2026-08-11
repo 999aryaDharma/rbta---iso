@@ -2,38 +2,73 @@
 
 ## Status dan Boundary
 
-Dokumen ini mendefinisikan **extension operasional** agar research core dapat digunakan langsung pada alur live:
+Dokumen ini mendefinisikan extension operasional agar research core dapat digunakan langsung pada alur live tanpa mengubah metodologi penelitian.
+
+Target operasional utama:
 
 ```text
-Wazuh Alert
-    -> RBTA REST Service
-    -> Agent-local RBTA state
-    -> MetaAlert finalization
-    -> 7-feature extraction
-    -> Isolation Forest scoring
-    -> Decision Matrix
-    -> Shuffle SOAR
-    -> Telegram Bot
+Wazuh
+  -> RBTA REST Service
+  -> agent-local RBTA runtime
+  -> MetaAlert finalization
+  -> 7-feature extraction
+  -> Isolation Forest scoring
+  -> Decision Matrix
+  -> Shuffle SOAR Workflow
+       -> custom RBTA Shuffle App node(s)
+       -> Telegram Bot
 ```
 
-Bagian REST/Shuffle/Telegram adalah rancangan implementasi operasional, bukan perubahan metodologi seminar. Research core pada dokumen `00`–`05` tetap menjadi source of truth algoritmik.
+Research core pada dokumen `00`–`05` tetap menjadi source of truth algoritmik. REST API, Shuffle, dan Telegram adalah adapter operasional.
 
 ## Design Goal
 
-Code hasil refactor tidak boleh menjadi script batch yang sulit diintegrasikan. Core harus dapat dipanggil dari:
+Code hasil refactor tidak boleh menjadi script batch-only. Core yang sama harus dapat dipanggil dari:
 
 ```text
 BatchResearchRunner
-LiveAlertService
+LiveRBTAService
 ```
 
-melalui service/domain API yang sama.
+Tidak boleh ada implementasi RBTA/EMA/feature/model kedua di dalam Shuffle.
+
+## Keputusan Integrasi Shuffle
+
+**Custom Shuffle App adalah requirement utama, bukan opsi tambahan.**
+
+Dalam istilah Shuffle, app/action adalah node reusable pada workflow. Custom app dapat dibuat dari OpenAPI untuk HTTP API atau dengan Python App SDK untuk action yang membutuhkan custom logic.
+
+Karena RBTA akan menyediakan REST API, integrasi default adalah:
+
+```text
+RBTA REST API
+    -> OpenAPI specification
+    -> generate/import custom Shuffle App
+    -> reusable RBTA actions visible as nodes in Shuffle workflow
+```
+
+Gunakan Python App SDK hanya bila action membutuhkan logic yang tidak tepat diletakkan pada REST API wrapper.
+
+### Prinsip Penting
+
+Custom Shuffle node **tidak mengimplementasikan ulang**:
+
+```text
+EMA
+RBTA bucket logic
+7 features
+Isolation Forest
+IQR threshold
+Decision Matrix
+```
+
+Node hanya menjadi adapter/orchestrator yang memanggil kontrak REST service dan mengembalikan hasil terstruktur kepada workflow.
 
 ## Arsitektur Target
 
 ```text
                          +----------------------+
-Wazuh -----------------> | REST Alert Ingress   |
+Wazuh -----------------> | RBTA REST Ingress    |
                          +----------+-----------+
                                     |
                                     v
@@ -69,55 +104,212 @@ Wazuh -----------------> | REST Alert Ingress   |
                                     |
                                     v
                          +----------------------+
-                         | Shuffle SOAR Adapter |
+                         | Shuffle Webhook      |  <- workflow trigger
                          +----------+-----------+
                                     |
                                     v
                          +----------------------+
-                         | Telegram Workflow    |
+                         | Custom RBTA App Node |
+                         | fetch/validate/ack   |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         | Switch / Enrichment  |
+                         +----------+-----------+
+                                    |
+                                    v
+                         +----------------------+
+                         | Telegram Node        |
                          +----------------------+
 ```
 
-## Important Streaming Constraint
+## Mengapa REST Service Tetap Menangkap Alert Langsung dari Wazuh
 
-Incoming raw alert **tidak selalu langsung menghasilkan scored meta-alert**.
+Wazuh tidak perlu bergantung pada availability Shuffle untuk menjalankan agregasi penelitian.
 
-RBTA melakukan aggregation. Scoring dilakukan saat meta-alert dianggap final.
+Jalur ingest utama:
 
-Maka endpoint ingest seharusnya merespons status processing, bukan memaksa satu request = satu prediction.
+```text
+Wazuh -> RBTA REST Service
+```
 
-Contoh response:
+bukan:
+
+```text
+Wazuh -> Shuffle -> RBTA
+```
+
+Alasannya:
+
+- state EMA per-agent harus konsisten dan durable;
+- active bucket harus tetap berjalan walaupun Shuffle sedang down;
+- SOAR adalah downstream orchestration, bukan bagian algoritma agregasi;
+- retry SOAR tidak boleh menggandakan raw alert di RBTA.
+
+## Workflow Shuffle yang Direkomendasikan
+
+Workflow dipicu ketika RBTA menghasilkan **scored/finalized MetaAlert**, bukan untuk setiap raw alert.
+
+```text
+Webhook Trigger: rbta.meta_alert.scored
+        |
+        v
+RBTA App - Validate Event
+        |
+        v
+RBTA App - Get Meta Alert Details   (opsional bila payload trigger sudah lengkap)
+        |
+        v
+Switch(action)
+  |-- ESCALATE
+  |      -> optional enrichment
+  |      -> Telegram
+  |
+  |-- DAILY_DIGEST
+  |      -> aggregate/store digest
+  |
+  `-- SUPPRESS
+         -> audit/end
+```
+
+Webhook adalah trigger workflow; custom RBTA app adalah node/action yang reusable di dalam workflow.
+
+## Custom Shuffle App Specification
+
+Nama app yang disarankan:
+
+```text
+RBTA Security Analytics
+```
+
+Versioning:
+
+```text
+1.0.0
+```
+
+App harus berasal dari satu OpenAPI contract yang juga digunakan REST API agar tidak terjadi schema drift.
+
+### Authentication
+
+Konfigurasi app minimum:
+
+```text
+base_url
+api_key / bearer_token
+request_timeout
+```
+
+Credential tidak boleh hardcoded dalam workflow atau source code.
+
+### Action 1 — Validate Scored Event
+
+Tujuan:
+
+- validasi `schema_version`;
+- validasi event type;
+- memastikan field minimum tersedia;
+- mengembalikan normalized object untuk node berikutnya.
+
+Input:
+
+```text
+event JSON
+```
+
+Output:
 
 ```json
 {
-  "status": "accepted",
-  "wazuh_alert_id": "...",
-  "processing": "aggregating"
+  "valid": true,
+  "event_id": "meta-1234",
+  "meta_id": 1234,
+  "action": "ESCALATE",
+  "decision": "CRITICAL"
 }
 ```
 
-Jika event menyebabkan bucket lama ditutup, response boleh menyertakan ID meta-alert yang baru difinalisasi.
+Validasi ini tidak menghitung ulang model.
 
-## MetaAlert Finalization Policy
+### Action 2 — Get Meta Alert
 
-Bucket dapat difinalisasi ketika salah satu kondisi berikut terjadi:
+REST target konseptual:
 
-1. alert berikut dengan key sama memiliki gap lebih besar dari local `delta_t`;
-2. bucket mencapai batas maksimum 60 menit;
-3. runtime menjalankan idle flush untuk bucket yang sudah tidak menerima event melebihi window aktifnya;
-4. controlled shutdown melakukan drain/finalization sesuai lifecycle policy.
+```text
+GET /v1/meta-alerts/{meta_id}
+```
 
-### Idle Flush adalah kebutuhan operasional
+Output mencakup:
 
-Dalam batch, akhir file dapat melakukan drain. Dalam live API tidak ada "akhir file". Karena itu service membutuhkan timer/scheduler yang memeriksa active bucket.
+```text
+meta-alert summary
+7 feature values
+score/threshold/decision
+source alert IDs
+model/schema version
+```
 
-Idle flush tidak mengubah formula RBTA. Ia hanya memungkinkan bucket yang tidak pernah mendapat event berikutnya tetap selesai dan dapat dinilai.
+### Action 3 — Get Alert Trace
+
+REST target konseptual:
+
+```text
+GET /v1/meta-alerts/{meta_id}/trace
+```
+
+Tujuan: analyst dapat memperoleh source `wazuh_alert_id` tanpa memasukkan full raw log ke notification default.
+
+### Action 4 — Get Runtime Stats
+
+REST target:
+
+```text
+GET /v1/runtime/stats
+```
+
+Untuk observability workflow/admin, bukan metrik penelitian utama.
+
+### Action 5 — Get Runtime Health
+
+REST target:
+
+```text
+GET /v1/health
+GET /v1/ready
+```
+
+Dapat digunakan dalam workflow monitoring terpisah.
+
+### Action 6 — Acknowledge Delivery
+
+REST target konseptual:
+
+```text
+POST /v1/events/{event_id}/ack
+```
+
+Digunakan untuk mencatat bahwa event sudah berhasil diterima/ditangani oleh Shuffle.
+
+ACK adalah state operasional dan tidak mengubah keputusan model.
+
+### Administrative Action — Flush Eligible Buckets
+
+Bila dibutuhkan:
+
+```text
+POST /v1/runtime/flush
+```
+
+Harus admin-only dan **bukan** node normal pada workflow alert.
+
+Tujuannya hanya controlled operational maintenance/testing.
 
 ## REST API Contract
 
 ### POST `/v1/alerts/wazuh`
 
-Menerima satu alert Wazuh.
+Menerima satu alert langsung dari Wazuh/bridge.
 
 Responsibilities:
 
@@ -140,13 +332,19 @@ Possible status:
 503 runtime/model unavailable
 ```
 
+Raw ingest endpoint bukan action utama Shuffle. Ia terutama digunakan Wazuh -> RBTA.
+
 ### POST `/v1/alerts/wazuh/batch`
 
-Opsional untuk bridge/bulk replay. Tetap melalui canonical service yang sama, bukan code path kedua.
+Opsional untuk replay/bulk ingestion. Tetap melalui canonical service yang sama.
 
 ### GET `/v1/meta-alerts/{meta_id}`
 
-Mengembalikan meta-alert dan scoring trace bila tersedia.
+Mengembalikan meta-alert dan scoring trace.
+
+### GET `/v1/meta-alerts/{meta_id}/trace`
+
+Mengembalikan trace/source alert identifiers yang diperlukan analyst.
 
 ### GET `/v1/health`
 
@@ -154,7 +352,7 @@ Liveness process.
 
 ### GET `/v1/ready`
 
-Readiness minimum memverifikasi:
+Readiness memverifikasi minimum:
 
 ```text
 state store accessible
@@ -166,7 +364,7 @@ outbox available
 
 ### GET `/v1/runtime/stats`
 
-Operational metric, misalnya:
+Metric operasional:
 
 ```text
 accepted alerts
@@ -179,39 +377,84 @@ outbox pending
 Shuffle delivery failures
 ```
 
-Endpoint ini tidak digunakan sebagai metrik akademik kecuali eksplisit diekspor ke eksperimen.
+### POST `/v1/events/{event_id}/ack`
+
+Idempotent acknowledgement dari Shuffle.
+
+## Important Streaming Constraint
+
+Incoming raw alert tidak selalu langsung menghasilkan scored meta-alert.
+
+RBTA melakukan aggregation. Scoring dilakukan saat meta-alert final.
+
+Contoh:
+
+```text
+POST raw alert #1
+-> accepted / aggregating
+
+POST raw alert #2
+-> accepted / aggregating
+
+... local delta-t terlewati ...
+-> previous bucket finalized
+-> 7 features
+-> IF score
+-> Decision
+-> outbox event
+-> Shuffle workflow triggered
+```
+
+Jangan memaksa satu HTTP request raw alert = satu model prediction.
+
+## MetaAlert Finalization Policy
+
+Bucket dapat difinalisasi ketika:
+
+1. alert berikut untuk key sama memiliki gap lebih besar dari local agent `delta_t`;
+2. bucket mencapai maksimum 60 menit;
+3. idle flush mendeteksi bucket sudah tidak menerima event melebihi window aktif;
+4. controlled shutdown melakukan drain sesuai lifecycle policy.
+
+### Idle Flush
+
+Live service tidak memiliki akhir file. Scheduler internal perlu memeriksa bucket idle agar meta-alert terakhir suatu stream tetap dapat selesai.
+
+Idle flush adalah extension operasional dan tidak mengubah formula EMA/RBTA.
 
 ## Idempotency
 
-`wazuh_alert_id` adalah idempotency key utama.
+`wazuh_alert_id` adalah idempotency key ingress.
 
 Invariant:
 
 ```text
-same wazuh_alert_id -> at most one state mutation
+same wazuh_alert_id -> at most one RBTA state mutation
 ```
 
-Retry dari Wazuh/bridge/network tidak boleh menggandakan `alert_count` pada bucket.
+Untuk downstream:
+
+```text
+event_id/meta_id -> at most one logical Shuffle delivery
+```
+
+Retry transport boleh terjadi, tetapi tidak boleh menyebabkan Telegram ganda.
 
 ## Runtime State Persistence
 
-Live service memiliki mutable state yang tidak ada pada script stateless:
+Persist minimum:
 
 ```text
 per-agent EMA state
 active RBTA buckets
 processed wazuh_alert_id registry / dedup window
-pending finalized meta-alerts
+finalized meta-alert records
 outbox delivery state
 ```
 
-State ini harus dapat dipulihkan setelah restart atau memiliki recovery policy eksplisit.
-
 ### Per-Agent EMA Persistence
 
-Ini paling penting.
-
-State Agent A disimpan terpisah dari Agent B:
+State harus terpisah per agent:
 
 ```text
 temporal_state:{agent_id}
@@ -221,20 +464,19 @@ Minimum persisted fields:
 
 ```text
 last_timestamp
-warmup_gap_count / required warmup state
+warmup_event_count
+warmup gaps/baseline accumulator yang diperlukan
 baseline_gap
 ema_gap
 current_delta_t
 state_version
 ```
 
-Restart service tidak boleh secara diam-diam mencampur state agent.
+Restart tidak boleh mencampur state agent.
 
 ## Concurrency Requirement
 
-REST dapat menerima alert paralel. Mutasi state untuk agent yang sama harus serialized/atomic agar urutan state tidak race.
-
-Model concurrency yang disarankan secara konseptual:
+Mutasi state untuk agent yang sama harus ordered/serialized.
 
 ```text
 partition by agent_id
@@ -243,41 +485,26 @@ partition by agent_id
 
 Agent berbeda boleh diproses paralel.
 
-Acceptance test:
-
-```text
-100 concurrent alerts Agent A
--> deterministic result equivalent to valid ordered processing policy
-```
-
 ## Model Artifact Lifecycle
 
-Operational service tidak melakukan training ulang Isolation Forest per request.
+REST runtime tidak melakukan training ulang per request.
 
-Artifact aktif minimum:
+Artifact aktif:
 
 ```text
-isolation_forest model
+IsolationForest model
 RobustScaler
-threshold policy/value
+Tukey threshold/value dari research calibration run
 feature_schema_version
 model_version
 metadata
 ```
 
-Training/evaluation menghasilkan versioned artifact; live service memuat artifact yang sudah disetujui.
-
-### Threshold in Live Mode
-
-Tukey IQR membutuhkan distribusi score. Karena satu request tidak memiliki distribusi, operational runtime harus menggunakan threshold hasil calibration/training research run yang versioned, atau mekanisme rolling recalibration terpisah yang nantinya didefinisikan sebagai extension penelitian.
-
-**Default scope saat ini:** gunakan threshold versioned dari artifact research run. Jangan recalibrate per request.
+Operational runtime memuat artifact versioned yang sudah dihasilkan research pipeline.
 
 ## Scored MetaAlert Event Contract
 
-Payload internal menuju Shuffle sebaiknya stabil dan tidak bergantung pada struktur Python internal.
-
-Contoh:
+Contoh kontrak ke Shuffle:
 
 ```json
 {
@@ -305,7 +532,7 @@ Contoh:
     "threshold": 0.82,
     "decision": "CRITICAL",
     "action": "ESCALATE",
-    "model_version": "if-...",
+    "model_version": "if-example",
     "feature_schema_version": "7f-v1"
   },
   "trace": {
@@ -314,177 +541,163 @@ Contoh:
 }
 ```
 
-Nilai di atas hanya contoh kontrak, bukan hasil eksperimen.
+Nilai hanya contoh schema, bukan hasil eksperimen.
 
-## Shuffle SOAR Integration
-
-Ada dua boundary yang didukung agar implementasi fleksibel.
-
-### Option A — Webhook Trigger + Workflow Nodes
-
-RBTA service POST `ScoredMetaAlert` ke webhook workflow Shuffle.
-
-Workflow:
-
-```text
-Webhook Trigger
-    -> Validate schema
-    -> Switch(action)
-       -> ESCALATE -> enrich/format -> Telegram
-       -> DAILY_DIGEST -> store/aggregate
-       -> SUPPRESS -> audit only/end
-```
-
-Ini adalah opsi awal yang direkomendasikan karena research service tetap independen dari detail internal workflow.
-
-### Option B — Custom Shuffle App / Action Node
-
-Buat custom Shuffle action/node yang memahami schema `rbta.meta_alert.scored` atau dapat memanggil RBTA REST API.
-
-Contoh logical actions:
-
-```text
-RBTA - Get Meta Alert
-RBTA - Get Runtime Stats
-RBTA - Flush Eligible Buckets (admin/internal only)
-RBTA - Score Finalized Meta Alert (internal integration only)
-```
-
-Untuk jalur alert utama tetap disarankan event push dari service ke Shuffle agar latency rendah dan tidak membutuhkan polling.
-
-## Outbox Pattern untuk Shuffle Delivery
-
-Jangan langsung menganggap POST ke Shuffle berhasil permanen.
+## Outbox Pattern untuk Trigger Shuffle
 
 Setelah scoring:
 
 ```text
-save scored event
-save outbox record
-commit
--> delivery worker sends to Shuffle
--> mark delivered
+save finalized/scored meta-alert
+save outbox event
+commit state
+-> delivery worker POST ke Shuffle webhook trigger
+-> Shuffle execution starts
+-> custom RBTA node validates/fetches required details
+-> successful handling -> optional ACK
+-> mark delivered/handled according to delivery policy
 ```
 
 Jika Shuffle down:
 
 ```text
-retry with backoff
+retry with bounded exponential backoff
 ```
 
-Idempotency downstream gunakan `event_id/meta_id` agar retry tidak menghasilkan Telegram ganda.
+`event_id` wajib tetap sama pada retry.
 
 ## Telegram Responsibility
 
-Telegram adalah output channel, bukan bagian model.
+Telegram adalah downstream workflow action, bukan bagian model atau REST research core.
 
-Formatting dan delivery sebaiknya berada pada Shuffle workflow atau dedicated notification adapter.
-
-Minimal message untuk immediate escalation:
+Routing default:
 
 ```text
-[CRITICAL/SUSPICIOUS]
-Agent: ...
-Rule group: ...
-Alerts: ... | Max severity: ...
-Anomaly score: ... | Threshold: ...
-MITRE: ...
-Meta ID: ...
+CRITICAL   / ESCALATE -> immediate Telegram
+SUSPICIOUS / ESCALATE -> immediate Telegram
+NOISE_HIGH / DAILY_DIGEST -> digest path
+NOISE / SUPPRESS -> no immediate notification
+CONTEXTUAL_ANOMALY / SUPPRESS -> no immediate notification
 ```
 
-### Routing
+Telegram message mengambil data dari normalized event / custom RBTA node output.
+
+Jangan mengirim `full_log` sensitif secara default.
+
+## Custom Shuffle App Source Layout
+
+Jika menggunakan Python App SDK, target layout mengikuti struktur custom app Shuffle secara konseptual:
 
 ```text
-CRITICAL   -> immediate Telegram
-SUSPICIOUS -> immediate Telegram
-NOISE_HIGH -> digest path
-NOISE      -> no immediate notification
-CONTEXTUAL_ANOMALY -> no immediate notification
+shuffle-apps/
+└── rbta_security_analytics/
+    └── 1.0.0/
+        ├── api.yaml
+        ├── Dockerfile
+        ├── docs.md
+        ├── requirements.txt
+        └── src/
+            └── app.py
 ```
 
-Exact chat/channel policy adalah konfigurasi operasional, bukan research logic.
+Namun karena service kita adalah HTTP REST API, **OpenAPI-generated app adalah default yang direkomendasikan**. Python SDK digunakan bila ada kebutuhan custom behavior di node yang tidak cukup diekspresikan oleh REST action biasa.
+
+## OpenAPI as Integration Contract
+
+REST service wajib menyediakan versioned OpenAPI schema.
+
+Target:
+
+```text
+openapi/rbta-api-v1.yaml
+```
+
+Schema ini menjadi source untuk:
+
+```text
+REST API documentation
+contract tests
+Shuffle custom app generation/import
+automated client generation bila diperlukan
+```
+
+Jangan menulis `api.yaml` Shuffle dan REST schema secara manual dengan kontrak berbeda jika dapat dihasilkan dari satu OpenAPI source.
 
 ## Security Boundary
-
-REST ingress tidak boleh dibuka tanpa authentication/authorization yang sesuai deployment.
 
 Minimum operational controls:
 
 ```text
 TLS pada deployment path
-request authentication
+API authentication
+Shuffle credential via app authentication config
 payload size limit
-rate limiting / backpressure
-schema validation
-no sensitive full_log in Telegram by default
+rate limiting/backpressure
+strict schema validation
 structured audit log
+no secrets in workflow parameters/log output
+no sensitive full_log in Telegram by default
 ```
-
-Full raw log dan sensitive field tidak perlu diteruskan ke Shuffle/Telegram jika tidak diperlukan untuk triage.
 
 ## Observability
 
-Gunakan correlation identifiers:
+Correlation IDs:
 
 ```text
 wazuh_alert_id
 meta_id
 event_id
+Shuffle workflow execution ID (operational only)
 ```
 
-Log dapat menelusuri:
+Tracing harus dapat mengikuti:
 
 ```text
-raw ingest
--> bucket membership
+raw Wazuh ingest
+-> RBTA membership
 -> meta finalization
 -> score
 -> decision
--> Shuffle delivery
--> Telegram workflow outcome
+-> Shuffle trigger
+-> custom RBTA node
+-> Telegram outcome
 ```
-
-## Deployment Separation
-
-Disarankan secara konseptual:
-
-```text
-Research CLI / experiment runner
-    menggunakan package core
-
-REST runtime service
-    menggunakan package core yang sama
-```
-
-Tidak boleh copy-paste algoritma menjadi dua implementasi terpisah.
 
 ## End-to-End Acceptance Test
 
-Gunakan Wazuh-like fixture tanpa synthetic attack label:
+Tanpa synthetic attack label:
 
 ```text
-1. POST beberapa alert Agent A + group X
-2. POST traffic Agent B dengan cadence berbeda
-3. verifikasi EMA A dan B independen
-4. trigger/finalize bucket A
-5. verify 7 features
-6. score dengan artifact test model
-7. verify decision payload
-8. deliver ke Shuffle stub
-9. retry delivery tidak membuat duplicate downstream event
+1. POST Wazuh-like alerts Agent A ke RBTA REST API
+2. POST Agent B dengan cadence berbeda
+3. verify EMA A/B independen
+4. finalize bucket A
+5. verify exactly 7 features
+6. score dengan versioned test artifact
+7. persist scored event/outbox
+8. deliver ke Shuffle webhook test workflow
+9. custom RBTA Shuffle node membaca/validasi event dan/atau fetch meta detail
+10. action ESCALATE masuk ke Telegram test node/stub
+11. retry event_id yang sama tidak menghasilkan duplicate logical notification
+12. verify correlation trace dari wazuh_alert_id sampai Shuffle execution
 ```
 
-## Future-Compatible Interface
+## Definition of Done Operasional
 
-Core service harus cukup decoupled sehingga output channel dapat ditambah tanpa mengubah penelitian:
+Integrasi belum dianggap selesai hanya karena webhook berhasil menerima JSON.
+
+Selesai berarti:
 
 ```text
-Shuffle
-Telegram
-email
-SIEM dashboard
-case management
-other SOAR
+[ ] RBTA REST API mempunyai OpenAPI versioned contract
+[ ] Wazuh dapat mengirim alert langsung ke REST ingress
+[ ] research core yang sama dipakai batch dan live
+[ ] per-agent EMA state durable dan terisolasi
+[ ] custom RBTA Shuffle App tersedia sebagai node reusable
+[ ] app actions memakai REST API, bukan duplicate algorithm
+[ ] scored event memulai workflow secara reliable
+[ ] ESCALATE dapat mencapai Telegram
+[ ] retry/idempotency terbukti
+[ ] health/readiness/observability tersedia
+[ ] integration tests end-to-end lulus
 ```
-
-Semua channel mengonsumsi `ScoredMetaAlert`; tidak ada channel yang memanggil atau memodifikasi EMA/feature/model internals.
