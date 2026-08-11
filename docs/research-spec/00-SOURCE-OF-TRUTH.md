@@ -45,6 +45,7 @@ Setiap `agent_id` wajib mempunyai state independen:
 ```text
 AgentTemporalState
 - last_timestamp
+- warmup_event_count
 - warmup_gaps
 - baseline_gap
 - ema_gap
@@ -60,16 +61,16 @@ Konsekuensi penting:
 
 ### 3. Formula Elastic Time Window
 
-Parameter utama:
+Parameter utama mengikuti laporan seminar:
 
 ```text
 alpha = 0.10
-warmup_gap_count = 100
+warmup_event_count = 100 event pertama per agent
 min_delta_t = 0.5 * base_delta_t
 max_delta_t = 1.5 * base_delta_t
 ```
 
-Setelah warm-up lokal per agent:
+Selama 100 event pertama milik agent tersebut, inter-arrival gap yang tersedia dikumpulkan untuk membangun baseline lokal. Setelah fase warm-up selesai:
 
 ```text
 EMA_gap[a,t] = alpha * gap[a,t] + (1-alpha) * EMA_gap[a,t-1]
