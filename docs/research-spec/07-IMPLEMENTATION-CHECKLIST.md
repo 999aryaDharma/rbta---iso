@@ -34,8 +34,9 @@ Dokumen ini adalah checklist eksekusi refactor. Agent coding wajib menyelesaikan
 
 - [ ] state disimpan per `agent_id`
 - [ ] `last_timestamp` per agent
-- [ ] warm-up gaps per agent
-- [ ] warm-up count = 100 gap per agent
+- [ ] `warmup_event_count` per agent
+- [ ] inter-arrival `warmup_gaps` dikumpulkan dari 100 event pertama agent
+- [ ] warm-up selesai setelah 100 event pertama **per agent**
 - [ ] `baseline_gap` per agent
 - [ ] `ema_gap` per agent
 - [ ] alpha = 0.10
@@ -107,6 +108,7 @@ Jika event Agent A mengubah EMA/baseline/delta-t B, test gagal.
 - [ ] sensitivity delta-t 1,5,10,15,20,30,45,60
 - [ ] adaptive OFF saat sensitivity
 - [ ] final RBTA adaptive PER-AGENT ON
+- [ ] Fixed Window baseline mengikuti definisi laporan: fixed tumbling time-window tanpa contextual key RBTA
 - [ ] ARR dihitung dari raw valid vs meta-alert
 - [ ] noise rate 0,5,10,20,30%
 - [ ] noise sampling mempertahankan valid `(agent_id, agent_name)` pair
