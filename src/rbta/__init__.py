@@ -6,9 +6,11 @@ Authoritative implementation of:
 - Single-bucket deterministic RBTA engine
 """
 
+from src.rbta.reorder_buffer import LosslessReorderBuffer
 from src.rbta.temporal_state import AgentTemporalState, TemporalStateError
 
 __all__ = [
     "AgentTemporalState",
+    "LosslessReorderBuffer",
     "TemporalStateError",
 ]
