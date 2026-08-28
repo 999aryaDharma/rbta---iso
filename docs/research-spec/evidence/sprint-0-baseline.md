@@ -107,19 +107,19 @@ Scenario A/B Reports + Visualizations
 $ python -m pytest --collect-only -q
 tests/unit/config/test_domain.py: 9
 tests/unit/config/test_domain_governance.py: 1
-tests/unit/contracts/test_meta_alert.py: 3
-tests/unit/contracts/test_raw_alert.py: 6
-tests/unit/contracts/test_scored_meta_alert.py: 2
-tests/unit/etl/test_wazuh_canonicalizer.py: 9
-tests/unit/test_smoke.py: 2
+tests/unit/contracts/test_meta_alert.py: 5
+tests/unit/contracts/test_raw_alert.py: 7
+tests/unit/contracts/test_scored_meta_alert.py: 4
+tests/unit/etl/test_wazuh_canonicalizer.py: 14
+tests/unit/test_smoke.py: 3
 
-32 tests collected in 0.08s
+43 tests collected in 0.06s
 ```
 
 ### Pytest Execution
 ```text
 $ python -m pytest -q
-................................
+...........................................
 
-32 passed in 1.45s
+43 passed in 2.08s
 ```
