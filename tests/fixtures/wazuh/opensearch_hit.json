@@ -1,0 +1,37 @@
+{
+  "_index": "wazuh-alerts-4.x-2026.08.28",
+  "_id": "doc-hit-sample-001",
+  "_score": null,
+  "_source": {
+    "timestamp": "2026-08-28T05:38:46.000Z",
+    "rule": {
+      "level": 7,
+      "description": "sshd: Insecure connection attempt (scan).",
+      "id": "5710",
+      "mitre": {
+        "id": ["T1110"],
+        "tactic": ["Credential Access"],
+        "technique": ["Brute Force"]
+      },
+      "groups": ["syslog", "sshd", "authentication_failed"]
+    },
+    "agent": {
+      "id": "001",
+      "name": "soc-1",
+      "ip": "172.16.83.101"
+    },
+    "manager": {
+      "name": "wazuh-soc"
+    },
+    "id": "1787895526.48426",
+    "full_log": "Aug 28 05:38:46 soc-1 sshd[5678]: Failed password for invalid user admin from 192.168.1.50 port 44212 ssh2",
+    "location": "/var/log/auth.log",
+    "data": {
+      "srcip": "192.168.1.50"
+    }
+  },
+  "sort": [
+    1787895526000,
+    "1787895526.48426"
+  ]
+}

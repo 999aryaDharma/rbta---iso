@@ -1,0 +1,33 @@
+{
+  "timestamp": "2026-08-28T05:38:45.712+0000",
+  "rule": {
+    "level": 3,
+    "description": "PAM: Login session opened.",
+    "id": "5501",
+    "mitre": {
+      "id": ["T1078"],
+      "tactic": [
+        "Defense Evasion",
+        "Persistence",
+        "Privilege Escalation",
+        "Initial Access"
+      ],
+      "technique": ["Valid Accounts"]
+    },
+    "groups": [
+      "pam",
+      "syslog",
+      "authentication_success"
+    ]
+  },
+  "agent": {
+    "id": "000",
+    "name": "wazuh-soc"
+  },
+  "manager": {
+    "name": "wazuh-soc"
+  },
+  "id": "1787895525.48425",
+  "full_log": "Aug 28 05:38:45 wazuh-soc sshd[1234]: pam_unix(sshd:session): session opened for user root",
+  "location": "journald"
+}
