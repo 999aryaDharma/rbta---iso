@@ -15,7 +15,13 @@ env/
 ENV/
 .venv/
 
-# IDE
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# IDE & Editor
 .vscode/
 .idea/
 *.swp
@@ -29,20 +35,33 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Data files (large)
-data/*
-!data/.gitkeep
+# Secrets and Environment Configs
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.crt
+secrets/
 
-# Output files (generated)
-output/
-docs/
+# Model staging & local storage
+artifacts/models/.staging/
+*.staging/
+*.db
+*.sqlite
+*.sqlite3
 
 # Logs
 *.log
+logs/
 
-# Temporary files
+# Temporary files & reports
 *.tmp
 *.bak
-
 notebooks/*.png
+output/
 reports/
+
+# Data files (large)
+data/*
+!data/.gitkeep
