@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 import shutil
-from typing import Any, Dict, Union
+from typing import Any, Dict, Optional, Union
 import uuid
 import joblib
 
@@ -34,6 +34,16 @@ class ModelRegistry:
     def __init__(self, base_dir: Union[str, Path] = "artifacts/models") -> None:
         self.base_dir: Path = Path(base_dir).resolve()
         self.staging_dir: Path = self.base_dir / ".staging"
+
+    def get_active_version(self) -> Optional[str]:
+        """Discover the most recently published model version in base_dir."""
+        if not self.base_dir.exists():
+            return None
+        versions = [p.name for p in self.base_dir.iterdir() if p.is_dir() and not p.name.startswith(".")]
+        if not versions:
+            return None
+        versions.sort(key=lambda v: (self.base_dir / v).stat().st_mtime, reverse=True)
+        return versions[0]
 
     def publish_bundle(self, bundle: ModelArtifactBundle, model_version: str) -> Path:
         """Publish a model bundle atomically via staging.
