@@ -36,11 +36,8 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ── Path default ──────────────────────────────────────────────────────────────
-BASE_DIR    = Path(r"D:\KAMPUS\SEMINAR\data")
-OUT_FULL    = BASE_DIR / "rbta_ready_v3.csv"
-OUT_MINIMAL = BASE_DIR / "rbta_raw_minimal.csv"
-OUT_REPORT  = BASE_DIR / "data_quality_report.txt"
+# ── Path default (relative project root) ──────────────────────────────────────
+DEFAULT_DATA_DIR = Path("data")
 
 # ── Dedup key ─────────────────────────────────────────────────────────────────
 DEDUP_KEY = "wazuh_alert_id"
@@ -310,7 +307,7 @@ def data_quality_report(df: pd.DataFrame) -> str:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def main(base_dir: Path = BASE_DIR) -> None:
+def main(base_dir: Path = DEFAULT_DATA_DIR) -> None:
     log.info("=== JSON → PIPELINE (BATCH PER BULAN) ===")
 
     all_csv_files: list[Path] = []
@@ -389,5 +386,5 @@ def main(base_dir: Path = BASE_DIR) -> None:
 
 if __name__ == "__main__":
     import sys
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else BASE_DIR
+    root = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DATA_DIR
     main(base_dir=root)
