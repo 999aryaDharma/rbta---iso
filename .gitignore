@@ -62,6 +62,10 @@ notebooks/*.png
 output/
 reports/
 
+# Documentation
+docs/*
+!docs/research-spec/
+
 # Data files (large)
 data/*
 !data/.gitkeep
