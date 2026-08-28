@@ -1,20 +1,35 @@
-"""Smoke test to verify project and test harness foundation."""
+"""Smoke test to verify project foundation and clean module importability."""
 import importlib
 import pytest
 
 
-def test_python_version_and_imports():
-    """Verify that essential standard and third-party libraries import correctly."""
+def test_third_party_dependencies_import():
+    """Verify that all declared runtime and test dependencies import correctly."""
     core_modules = [
         "numpy",
         "pandas",
         "sklearn",
         "joblib",
+        "matplotlib",
         "pytest",
     ]
     for mod_name in core_modules:
         mod = importlib.import_module(mod_name)
-        assert mod is not None, f"Module {mod_name} could not be loaded."
+        assert mod is not None, f"Third-party module {mod_name} could not be loaded."
+
+
+def test_primary_application_modules_import():
+    """Verify that primary foundation modules can be imported cleanly without side effects."""
+    app_modules = [
+        "src.config.domain",
+        "src.contracts.raw_alert",
+        "src.contracts.meta_alert",
+        "src.contracts.scored_meta_alert",
+        "src.etl.wazuh_canonicalizer",
+    ]
+    for mod_name in app_modules:
+        mod = importlib.import_module(mod_name)
+        assert mod is not None, f"Application module {mod_name} could not be loaded."
 
 
 def test_fixtures_available():
