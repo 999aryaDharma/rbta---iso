@@ -1,4 +1,5 @@
 """Unit tests for MetaAlert DTO contract."""
+from dataclasses import FrozenInstanceError
 from datetime import datetime, timezone
 import pytest
 from src.contracts.meta_alert import MetaAlert
@@ -37,6 +38,59 @@ def test_meta_alert_valid_instantiation():
     assert len(meta.wazuh_alert_ids) == 5
 
 
+def test_meta_alert_immutability():
+    """Test that MetaAlert attributes cannot be mutated after creation."""
+    t1 = datetime(2026, 8, 28, 5, 0, 0, tzinfo=timezone.utc)
+    meta = MetaAlert(
+        meta_id=1,
+        agent_id="001",
+        agent_name="soc-1",
+        rule_group_primary="pam",
+        start_time=t1,
+        end_time=t1,
+        alert_count=1,
+        max_severity=3,
+        rule_id_distribution={"5501": 1},
+        severity_distribution={3: 1},
+        mitre_tactics_unique=(),
+        critical_mitre_present=False,
+        agent_criticality=1,
+        wazuh_alert_ids=("id1",),
+    )
+    with pytest.raises((FrozenInstanceError, AttributeError)):
+        meta.alert_count = 10
+
+
+def test_meta_alert_nested_distribution_immutability():
+    """Test that nested distribution maps and metadata are protected from in-place mutation (FIX 7)."""
+    t1 = datetime(2026, 8, 28, 5, 0, 0, tzinfo=timezone.utc)
+    meta = MetaAlert(
+        meta_id=1,
+        agent_id="001",
+        agent_name="soc-1",
+        rule_group_primary="pam",
+        start_time=t1,
+        end_time=t1,
+        alert_count=1,
+        max_severity=3,
+        rule_id_distribution={"5501": 1},
+        severity_distribution={3: 1},
+        mitre_tactics_unique=(),
+        critical_mitre_present=False,
+        agent_criticality=1,
+        wazuh_alert_ids=("id1",),
+        metadata={"key": "val"},
+    )
+    with pytest.raises(TypeError):
+        meta.rule_id_distribution["5501"] = 99
+
+    with pytest.raises(TypeError):
+        meta.severity_distribution[3] = 99
+
+    with pytest.raises(TypeError):
+        meta.metadata["key"] = "new_val"
+
+
 def test_meta_alert_duration_non_negative():
     """Test that end_time >= start_time is required."""
     t1 = datetime(2026, 8, 28, 5, 15, 0, tzinfo=timezone.utc)
@@ -49,7 +103,7 @@ def test_meta_alert_duration_non_negative():
             agent_name="soc-1",
             rule_group_primary="pam",
             start_time=t1,
-            end_time=t2,  # earlier than start_time
+            end_time=t2,
             alert_count=1,
             max_severity=3,
             rule_id_distribution={"5501": 1},

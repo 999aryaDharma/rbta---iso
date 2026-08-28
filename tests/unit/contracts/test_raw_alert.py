@@ -1,4 +1,5 @@
 """Unit tests for CanonicalRawAlert DTO contract."""
+from dataclasses import FrozenInstanceError
 from datetime import datetime, timezone
 import pytest
 from src.contracts.raw_alert import CanonicalRawAlert
@@ -35,7 +36,7 @@ def test_canonical_raw_alert_valid_instantiation():
 
 
 def test_canonical_raw_alert_immutability():
-    """Test that CanonicalRawAlert is frozen/immutable."""
+    """Test that CanonicalRawAlert attributes cannot be modified after creation."""
     now = datetime.now(timezone.utc)
     alert = CanonicalRawAlert(
         wazuh_alert_id="1787895525.48425",
@@ -49,12 +50,35 @@ def test_canonical_raw_alert_immutability():
         srcip=None,
         agent_criticality=1,
     )
-    with pytest.raises(Exception):
-        alert.rule_level = 5  # FrozenInstanceError or AttributeError
+    with pytest.raises((FrozenInstanceError, AttributeError)):
+        alert.rule_level = 5
+
+
+def test_canonical_raw_alert_metadata_immutability():
+    """Test that CanonicalRawAlert metadata mapping cannot be mutated in place (FIX 7)."""
+    now = datetime.now(timezone.utc)
+    alert = CanonicalRawAlert(
+        wazuh_alert_id="1787895525.48425",
+        timestamp=now,
+        agent_id="001",
+        agent_name="soc-1",
+        rule_group_primary="pam",
+        rule_level=3,
+        rule_id="5501",
+        mitre_tactics=(),
+        srcip=None,
+        agent_criticality=1,
+        metadata={"initial_key": "initial_value"},
+    )
+    with pytest.raises(TypeError):
+        alert.metadata["initial_key"] = "mutated_value"
+
+    with pytest.raises(TypeError):
+        alert.metadata["new_key"] = "new_value"
 
 
 def test_canonical_raw_alert_timezone_awareness_enforced():
-    """Test that naive datetimes are rejected or cause validation error."""
+    """Test that naive datetimes are rejected with ValueError."""
     naive_dt = datetime(2026, 8, 28, 5, 38, 45)
     with pytest.raises(ValueError, match="timezone-aware"):
         CanonicalRawAlert(
@@ -81,7 +105,7 @@ def test_canonical_raw_alert_rule_level_range_validation():
             agent_id="001",
             agent_name="soc-1",
             rule_group_primary="pam",
-            rule_level=16,  # Out of range
+            rule_level=16,
             rule_id="5501",
             mitre_tactics=(),
             srcip=None,
@@ -95,7 +119,7 @@ def test_canonical_raw_alert_rule_level_range_validation():
             agent_id="001",
             agent_name="soc-1",
             rule_group_primary="pam",
-            rule_level=-1,  # Negative
+            rule_level=-1,
             rule_id="5501",
             mitre_tactics=(),
             srcip=None,
@@ -117,7 +141,7 @@ def test_canonical_raw_alert_criticality_range_validation():
             rule_id="5501",
             mitre_tactics=(),
             srcip=None,
-            agent_criticality=5,  # Invalid
+            agent_criticality=5,
         )
 
 

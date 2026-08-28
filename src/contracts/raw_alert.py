@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from types import MappingProxyType
 from typing import Any, Mapping
 
 
@@ -32,7 +33,7 @@ class CanonicalRawAlert:
     agent_criticality : int
         Domain asset criticality score in range [1, 4].
     metadata : Mapping[str, Any]
-        Audit and envelope metadata (e.g. OpenSearch _id, _index, sort, location, full_log).
+        Immutable audit and envelope metadata.
     """
 
     wazuh_alert_id: str
@@ -65,3 +66,6 @@ class CanonicalRawAlert:
 
         if not isinstance(self.mitre_tactics, tuple):
             object.__setattr__(self, "mitre_tactics", tuple(self.mitre_tactics))
+
+        if not isinstance(self.metadata, MappingProxyType):
+            object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))

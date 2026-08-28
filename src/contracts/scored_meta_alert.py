@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from types import MappingProxyType
 from typing import Any, Mapping
 
 VALID_DECISIONS: frozenset[str] = frozenset({
@@ -44,7 +45,7 @@ class ScoredMetaAlert:
     mitre_tactics : tuple[str, ...]
         Unique MITRE ATT&CK tactics.
     seven_features : Mapping[str, float]
-        Dictionary mapping feature name to normalized value for the canonical 7 features.
+        Immutable dictionary mapping feature name to normalized value for the canonical 7 features.
     raw_model_score : float
         Oriented raw anomaly score from Isolation Forest.
     anomaly_score : float
@@ -66,7 +67,7 @@ class ScoredMetaAlert:
     source_alert_ids : tuple[str, ...]
         Traceable tuple of all member Wazuh alert IDs.
     metadata : Mapping[str, Any]
-        Audit metadata.
+        Immutable audit metadata.
     """
 
     meta_id: int
@@ -103,3 +104,9 @@ class ScoredMetaAlert:
 
         if not isinstance(self.source_alert_ids, tuple):
             object.__setattr__(self, "source_alert_ids", tuple(self.source_alert_ids))
+
+        if not isinstance(self.seven_features, MappingProxyType):
+            object.__setattr__(self, "seven_features", MappingProxyType(dict(self.seven_features)))
+
+        if not isinstance(self.metadata, MappingProxyType):
+            object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
