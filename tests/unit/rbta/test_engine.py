@@ -252,6 +252,75 @@ def test_contradictory_agent_criticality_raises_error():
         engine.process(a2)
 
 
+def test_failed_process_does_not_poison_seen_id_and_can_be_retried():
+    """A failed process() call must be failure-atomic: zero state mutation, ID not marked seen, and can be retried."""
+    engine = RBTAEngine(base_delta_t=timedelta(minutes=15))
+    base_t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+
+    # 1. Process Alert A successfully
+    alert_a = make_alert("alert_A", base_t, agent_id="001", crit=1)
+    engine.process(alert_a)
+
+    # Snapshot baseline state before failure
+    seen_before = set(engine._seen_alert_ids)
+    temp_state = engine._temporal_states["001"]
+    warmup_count_before = temp_state.warmup_event_count
+    last_t_before = temp_state.last_timestamp
+    warmup_gaps_before = list(temp_state.warmup_gaps)
+    meta_counter_before = engine._meta_id_counter
+
+    active_bucket = engine._active_buckets[("001", "pam")]
+    bucket_count_before = active_bucket.alert_count
+    bucket_ids_before = list(active_bucket.wazuh_alert_ids)
+
+    # 2. Process Alert B with contradictory criticality -> must raise RBTAInvariantError
+    bad_alert_b = make_alert("alert_B", base_t + timedelta(minutes=2), agent_id="001", crit=3)
+    with pytest.raises(RBTAInvariantError, match="Contradictory agent_criticality"):
+        engine.process(bad_alert_b)
+
+    # 3. Assert zero observable mutation occurred from failed alert_B
+    assert "alert_B" not in engine._seen_alert_ids
+    assert engine._seen_alert_ids == seen_before
+
+    assert temp_state.warmup_event_count == warmup_count_before
+    assert temp_state.last_timestamp == last_t_before
+    assert temp_state.warmup_gaps == warmup_gaps_before
+    assert engine._meta_id_counter == meta_counter_before
+
+    assert active_bucket.alert_count == bucket_count_before
+    assert active_bucket.wazuh_alert_ids == bucket_ids_before
+
+    # 4. Retry corrected Alert B (with matching crit=1)
+    corrected_alert_b = make_alert("alert_B", base_t + timedelta(minutes=2), agent_id="001", crit=1)
+    out_b = engine.process(corrected_alert_b)
+    assert out_b == []
+
+    # Retry succeeded and mutated exactly once
+    assert "alert_B" in engine._seen_alert_ids
+    current_temp_state = engine._temporal_states["001"]
+    assert current_temp_state.warmup_event_count == warmup_count_before + 1
+    assert current_temp_state.last_timestamp == base_t + timedelta(minutes=2)
+    current_active_bucket = engine._active_buckets[("001", "pam")]
+    assert current_active_bucket.alert_count == 2
+    assert current_active_bucket.wazuh_alert_ids == ["alert_A", "alert_B"]
+
+
+def test_fixed_mode_engine_aggregates_without_adaptive_baseline_dependency():
+    """RBTAEngine in fixed mode (adaptive=False) aggregates correctly without requiring adaptive baseline."""
+    engine = RBTAEngine(base_delta_t=timedelta(minutes=15), adaptive=False)
+    base_t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+
+    # Feed 150 events with identical timestamps
+    for i in range(150):
+        alert = make_alert(f"same_{i}", base_t, agent_id="001", group="pam")
+        engine.process(alert)
+
+    drained = engine.drain()
+    assert len(drained) == 1
+    assert drained[0].alert_count == 150
+    assert drained[0].duration_sec == 0.0
+
+
 # ── Idempotency Tests ─────────────────────────────────────────────────────────
 
 def test_duplicate_wazuh_alert_id_is_idempotent_no_op():

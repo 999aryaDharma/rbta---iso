@@ -122,7 +122,7 @@ def generate_synthetic_stream() -> list[CanonicalRawAlert]:
         )
     )
 
-    # 4. Duplicate Ingress ID (e.g. duplicate of a001_0005)
+    # 4. Duplicate Ingress ID (duplicate of a001_0005)
     dup_alert = CanonicalRawAlert(
         wazuh_alert_id="a001_0005",
         timestamp=base_t + timedelta(minutes=1),
@@ -165,8 +165,15 @@ def run_pipeline(stream: list[CanonicalRawAlert]) -> tuple[list[MetaAlert], RBTA
 def test_full_mapping_integrity_and_event_conservation():
     """Prove that the complete RBTA pipeline satisfies 100% event conservation and mapping integrity."""
     stream = generate_synthetic_stream()
+    ingress_count = len(stream)
     unique_input_ids = {a.wazuh_alert_id for a in stream}
     expected_unique_count = len(unique_input_ids)
+    duplicate_ingress_count = ingress_count - expected_unique_count
+
+    # Verify input stream composition
+    assert ingress_count == 239
+    assert duplicate_ingress_count == 1
+    assert expected_unique_count == 238
 
     finalized_metas, engine = run_pipeline(stream)
 
@@ -178,12 +185,16 @@ def test_full_mapping_integrity_and_event_conservation():
 
     # 2. Source ID Membership Integrity Proof
     all_output_source_ids = [aid for m in finalized_metas for aid in m.wazuh_alert_ids]
-    assert len(all_output_source_ids) == expected_unique_count, "Duplicate memberships detected in MetaAlerts"
-    assert set(all_output_source_ids) == unique_input_ids, "Missing or unexpected alert IDs in MetaAlerts"
+    output_unique_ids = set(all_output_source_ids)
+    missing_ids = unique_input_ids - output_unique_ids
+    duplicate_memberships = [
+        aid for aid, cnt in Counter(all_output_source_ids).items() if cnt != 1
+    ]
 
-    # Multiplicity check: each unique alert ID must appear exactly once
-    id_counts = Counter(all_output_source_ids)
-    assert all(c == 1 for c in id_counts.values()), "Some alert IDs have multiplicity != 1"
+    assert len(all_output_source_ids) == expected_unique_count, "Duplicate memberships detected in MetaAlerts"
+    assert output_unique_ids == unique_input_ids, "Missing or unexpected alert IDs in MetaAlerts"
+    assert len(missing_ids) == 0, f"Found missing alert IDs: {missing_ids}"
+    assert len(duplicate_memberships) == 0, f"Found duplicate memberships: {duplicate_memberships}"
 
     # 3. Maximum Duration Invariant Proof (0 <= duration <= 60 minutes)
     for m in finalized_metas:

@@ -126,6 +126,32 @@ def test_zero_baseline_raises_temporal_state_error():
             state.observe(same_t)
 
 
+def test_invalid_warmup_baseline_becomes_terminal_and_does_not_extend_beyond_100_events():
+    """When warmup fails with invalid baseline, state becomes terminally invalid and rejects event 101+."""
+    base_dt = timedelta(minutes=15)
+    state = AgentTemporalState(agent_id="001", base_delta_t=base_dt)
+
+    same_t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    # Events 1 through 100 with same timestamp
+    with pytest.raises(TemporalStateError, match="baseline gap is <= 0"):
+        for _ in range(100):
+            state.observe(same_t)
+
+    assert state.warmup_event_count == 100
+    assert state.is_warmed_up is False
+    assert state.baseline_gap is None
+
+    # Event 101 arrives with positive timestamp -> must still fail fast and NOT extend warmup
+    event_101_t = same_t + timedelta(seconds=10)
+    with pytest.raises(TemporalStateError, match="terminal invalid state|baseline gap is <= 0"):
+        state.observe(event_101_t)
+
+    # Invariants preserved
+    assert state.warmup_event_count == 100
+    assert state.is_warmed_up is False
+    assert state.baseline_gap is None
+
+
 def test_retrograde_timestamp_handling():
     """Residual out-of-order event (timestamp < last_timestamp) must not regress last_timestamp, nor create negative EMA gap."""
     base_dt = timedelta(minutes=10)
@@ -187,3 +213,34 @@ def test_fixed_mode_never_alters_delta_t():
         dt_out = state.observe(start + timedelta(seconds=i * 2))
         assert dt_out == base_dt
         assert state.current_delta_t == base_dt
+
+
+def test_fixed_mode_does_not_require_positive_baseline_and_supports_same_timestamps():
+    """Fixed mode (adaptive=False) must not compute or require an adaptive baseline, supporting 150 same-timestamp events."""
+    base_dt = timedelta(minutes=15)
+    state = AgentTemporalState(agent_id="001", base_delta_t=base_dt, adaptive=False)
+
+    same_t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    for _ in range(150):
+        dt_out = state.observe(same_t)
+        assert dt_out == base_dt
+
+    assert state.current_delta_t == base_dt
+    assert state.baseline_gap is None
+    assert state.ema_gap is None
+    assert state.warmup_event_count == 150
+
+
+def test_fixed_mode_arbitrary_and_retrograde_gaps():
+    """Fixed mode must handle tiny, large, and retrograde gaps while keeping current_delta_t == base_delta_t."""
+    base_dt = timedelta(minutes=15)
+    state = AgentTemporalState(agent_id="001", base_delta_t=base_dt, adaptive=False)
+
+    base_t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    # Forward gap 1s
+    assert state.observe(base_t + timedelta(seconds=1)) == base_dt
+    # Huge gap 10 days
+    assert state.observe(base_t + timedelta(days=10)) == base_dt
+    # Retrograde gap 5 days ago
+    assert state.observe(base_t + timedelta(days=5)) == base_dt
+    assert state.current_delta_t == base_dt
