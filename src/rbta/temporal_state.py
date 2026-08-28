@@ -44,6 +44,10 @@ class AgentTemporalState:
         Current active time window for this agent.
     is_warmed_up : bool
         Flag indicating if the 100-event warmup has completed.
+    _is_terminal_invalid : bool
+        Flag indicating if warmup baseline was invalid, permanently disabling this state instance.
+    _invalid_reason : str | None
+        Descriptive explanation of the terminal failure.
     """
 
     agent_id: str
@@ -56,11 +60,31 @@ class AgentTemporalState:
     ema_gap: float | None = None
     current_delta_t: timedelta = field(init=False)
     is_warmed_up: bool = False
+    _is_terminal_invalid: bool = False
+    _invalid_reason: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.base_delta_t, timedelta) or self.base_delta_t.total_seconds() <= 0:
             raise TemporalStateError(f"base_delta_t must be a positive timedelta, got {self.base_delta_t}")
         self.current_delta_t = self.base_delta_t
+
+    def snapshot(self) -> "AgentTemporalState":
+        """Create an isolated defensive copy of this temporal state for transactional operations."""
+        copied = AgentTemporalState(
+            agent_id=self.agent_id,
+            base_delta_t=self.base_delta_t,
+            adaptive=self.adaptive,
+        )
+        copied.last_timestamp = self.last_timestamp
+        copied.warmup_event_count = self.warmup_event_count
+        copied.warmup_gaps = list(self.warmup_gaps)
+        copied.baseline_gap = self.baseline_gap
+        copied.ema_gap = self.ema_gap
+        copied.current_delta_t = self.current_delta_t
+        copied.is_warmed_up = self.is_warmed_up
+        copied._is_terminal_invalid = self._is_terminal_invalid
+        copied._invalid_reason = self._invalid_reason
+        return copied
 
     def observe(self, timestamp: datetime) -> timedelta:
         """Observe an incoming event timestamp for this agent and return the active delta_t.
@@ -78,18 +102,36 @@ class AgentTemporalState:
         Raises
         ------
         TemporalStateError
-            If timestamp is naive or if warmup baseline gap is <= 0.
+            If timestamp is naive, if state is in terminal invalid state, or if warmup baseline gap is <= 0.
         """
         if timestamp.tzinfo is None:
             raise TemporalStateError("Observed timestamp must be timezone-aware (tzinfo cannot be None)")
 
-        # ── 1. First event initialization ─────────────────────────────────────
+        # ── 0. Terminal Failure Check ─────────────────────────────────────────
+        if self._is_terminal_invalid:
+            raise TemporalStateError(
+                f"AgentTemporalState for agent '{self.agent_id}' is in a terminal invalid state: {self._invalid_reason}"
+            )
+
+        # ── 1. Fixed Mode (adaptive=False) ────────────────────────────────────
+        if not self.adaptive:
+            if self.last_timestamp is None:
+                self.last_timestamp = timestamp
+                self.warmup_event_count = 1
+                return self.current_delta_t
+
+            self.warmup_event_count += 1
+            if timestamp > self.last_timestamp:
+                self.last_timestamp = timestamp
+            return self.current_delta_t
+
+        # ── 2. First Event Initialization ─────────────────────────────────────
         if self.last_timestamp is None:
             self.last_timestamp = timestamp
             self.warmup_event_count = 1
             return self.current_delta_t
 
-        # ── 2. Warmup Phase (Events 2 through 100) ───────────────────────────
+        # ── 3. Warmup Phase (Events 2 through 100) ───────────────────────────
         if not self.is_warmed_up:
             self.warmup_event_count += 1
 
@@ -102,6 +144,11 @@ class AgentTemporalState:
             # Check if event 100 just completed warmup
             if self.warmup_event_count >= WARMUP_EVENT_TARGET:
                 if not self.warmup_gaps or sum(self.warmup_gaps) <= 0:
+                    self._is_terminal_invalid = True
+                    self._invalid_reason = (
+                        f"baseline gap is <= 0 after {self.warmup_event_count} warmup events "
+                        f"(sum={sum(self.warmup_gaps) if self.warmup_gaps else 0})"
+                    )
                     raise TemporalStateError(
                         f"Agent '{self.agent_id}' baseline gap is <= 0 or undefined after "
                         f"{self.warmup_event_count} warmup events (sum={sum(self.warmup_gaps) if self.warmup_gaps else 0})"
@@ -114,12 +161,7 @@ class AgentTemporalState:
 
             return self.current_delta_t
 
-        # ── 3. Post-Warmup Adaptive Phase (Event 101+) ─────────────────────────
-        if not self.adaptive:
-            if timestamp > self.last_timestamp:
-                self.last_timestamp = timestamp
-            return self.current_delta_t
-
+        # ── 4. Post-Warmup Adaptive Phase (Event 101+) ─────────────────────────
         # Handle forward arrival
         if timestamp >= self.last_timestamp:
             current_gap = (timestamp - self.last_timestamp).total_seconds()

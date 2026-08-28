@@ -2,7 +2,7 @@
 
 from collections import Counter
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from src.config.domain import has_critical_mitre_tactic
 from src.config.research import (
@@ -46,6 +46,26 @@ class _ActiveBucket:
                 self.mitre_tactics_order.append(t)
 
         self.critical_mitre_present: bool = has_critical_mitre_tactic(self.mitre_tactics_order)
+
+    def copy(self) -> "_ActiveBucket":
+        """Create a defensive copy of this active bucket accumulator for transactional operations."""
+        copied = _ActiveBucket.__new__(_ActiveBucket)
+        copied.meta_id = self.meta_id
+        copied.agent_id = self.agent_id
+        copied.agent_name = self.agent_name
+        copied.rule_group_primary = self.rule_group_primary
+        copied.start_time = self.start_time
+        copied.end_time = self.end_time
+        copied.alert_count = self.alert_count
+        copied.max_severity = self.max_severity
+        copied.rule_id_distribution = Counter(self.rule_id_distribution)
+        copied.severity_distribution = Counter(self.severity_distribution)
+        copied.agent_criticality = self.agent_criticality
+        copied.wazuh_alert_ids = list(self.wazuh_alert_ids)
+        copied.mitre_tactics_order = list(self.mitre_tactics_order)
+        copied._mitre_seen = set(self._mitre_seen)
+        copied.critical_mitre_present = self.critical_mitre_present
+        return copied
 
     def add(self, alert: CanonicalRawAlert) -> None:
         """Accumulate a merged alert into this active bucket."""
@@ -127,11 +147,6 @@ class RBTAEngine:
         self._seen_alert_ids: Set[str] = set()
         self._meta_id_counter: int = 1
 
-    def _next_meta_id(self) -> int:
-        mid = self._meta_id_counter
-        self._meta_id_counter += 1
-        return mid
-
     def _get_agent_state(self, agent_id: str) -> AgentTemporalState:
         if agent_id not in self._temporal_states:
             self._temporal_states[agent_id] = AgentTemporalState(
@@ -142,7 +157,10 @@ class RBTAEngine:
         return self._temporal_states[agent_id]
 
     def process(self, alert: CanonicalRawAlert) -> List[MetaAlert]:
-        """Process an incoming canonical raw alert through RBTA aggregation.
+        """Process an incoming canonical raw alert through transactional RBTA aggregation.
+
+        Guarantees failure-atomicity: If processing fails, zero internal state is mutated,
+        the alert ID is not marked seen, and it can be safely retried.
 
         Parameters
         ----------
@@ -154,67 +172,85 @@ class RBTAEngine:
         List[MetaAlert]
             List of 0 or more finalized MetaAlerts (e.g. from bucket splits or singleton residual events).
         """
-        # ── 1. Idempotency Check ──────────────────────────────────────────────
+        # ── 1. Idempotency Check (Seen ID = Successfully Committed Alert) ────
         if alert.wazuh_alert_id in self._seen_alert_ids:
             return []
-        self._seen_alert_ids.add(alert.wazuh_alert_id)
 
-        # ── 2. Observe Agent Temporal State ───────────────────────────────────
-        agent_state = self._get_agent_state(alert.agent_id)
-        current_delta_t = agent_state.observe(alert.timestamp)
-
-        # ── 3. Evaluate Bucket Aggregation ────────────────────────────────────
+        # ── 2. Pre-Validation Check on Active Bucket ─────────────────────────
         bucket_key = (alert.agent_id, alert.rule_group_primary)
+        active_bucket = self._active_buckets.get(bucket_key)
 
-        if bucket_key not in self._active_buckets:
-            new_bucket = _ActiveBucket(alert, meta_id=self._next_meta_id())
-            self._active_buckets[bucket_key] = new_bucket
-            return []
-
-        active_bucket = self._active_buckets[bucket_key]
-
-        # Domain Integrity Validation
-        if alert.agent_criticality != active_bucket.agent_criticality:
+        if active_bucket is not None and alert.agent_criticality != active_bucket.agent_criticality:
             raise RBTAInvariantError(
                 f"Contradictory agent_criticality ({alert.agent_criticality} vs "
                 f"{active_bucket.agent_criticality}) for agent '{alert.agent_id}'"
             )
 
-        # ── Case A: Normal Forward / Equal Arrival ────────────────────────────
-        if alert.timestamp >= active_bucket.end_time:
-            gap = alert.timestamp - active_bucket.end_time
-            prospective_duration = alert.timestamp - active_bucket.start_time
+        # ── 3. Transactional Candidate State Evaluation ───────────────────────
+        current_agent_state = self._get_agent_state(alert.agent_id)
+        candidate_state = current_agent_state.snapshot()
+        current_delta_t = candidate_state.observe(alert.timestamp)
 
-            if gap <= current_delta_t and prospective_duration <= MAX_BUCKET_DURATION:
-                active_bucket.end_time = alert.timestamp
-                active_bucket.add(alert)
-                return []
-            else:
-                # Split: finalize existing bucket, start new active bucket
-                finalized_meta = active_bucket.finalize()
-                new_bucket = _ActiveBucket(alert, meta_id=self._next_meta_id())
-                self._active_buckets[bucket_key] = new_bucket
-                return [finalized_meta]
+        finalized_list: List[MetaAlert] = []
+        candidate_meta_id_increment = 0
+        candidate_bucket_update: Optional[Tuple[Tuple[str, str], _ActiveBucket]] = None
 
-        # ── Case B: In-Window Arrival (start <= timestamp < end) ───────────────
-        elif alert.timestamp >= active_bucket.start_time:
-            active_bucket.add(alert)
-            return []
-
-        # ── Case C: Earlier Residual Arrival (timestamp < start) ──────────────
+        if active_bucket is None:
+            new_bucket = _ActiveBucket(alert, meta_id=self._meta_id_counter)
+            candidate_meta_id_increment = 1
+            candidate_bucket_update = (bucket_key, new_bucket)
         else:
-            boundary_gap = active_bucket.start_time - alert.timestamp
-            prospective_duration = active_bucket.end_time - alert.timestamp
+            # ── Case A: Normal Forward / Equal Arrival ────────────────────────
+            if alert.timestamp >= active_bucket.end_time:
+                gap = alert.timestamp - active_bucket.end_time
+                prospective_duration = alert.timestamp - active_bucket.start_time
 
-            if boundary_gap <= current_delta_t and prospective_duration <= MAX_BUCKET_DURATION:
-                active_bucket.start_time = alert.timestamp
-                active_bucket.add(alert)
-                return []
+                if gap <= current_delta_t and prospective_duration <= MAX_BUCKET_DURATION:
+                    merged = active_bucket.copy()
+                    merged.end_time = alert.timestamp
+                    merged.add(alert)
+                    candidate_bucket_update = (bucket_key, merged)
+                else:
+                    # Split: finalize existing bucket, start new active bucket
+                    finalized_meta = active_bucket.finalize()
+                    new_bucket = _ActiveBucket(alert, meta_id=self._meta_id_counter)
+                    candidate_meta_id_increment = 1
+                    candidate_bucket_update = (bucket_key, new_bucket)
+                    finalized_list.append(finalized_meta)
+
+            # ── Case B: In-Window Arrival (start <= timestamp < end) ───────────
+            elif alert.timestamp >= active_bucket.start_time:
+                merged = active_bucket.copy()
+                merged.add(alert)
+                candidate_bucket_update = (bucket_key, merged)
+
+            # ── Case C: Earlier Residual Arrival (timestamp < start) ──────────
             else:
-                # Extremely late non-mergeable event -> create immediate singleton
-                singleton = _ActiveBucket(alert, meta_id=self._next_meta_id())
-                finalized_singleton = singleton.finalize()
-                return [finalized_singleton]
+                boundary_gap = active_bucket.start_time - alert.timestamp
+                prospective_duration = active_bucket.end_time - alert.timestamp
+
+                if boundary_gap <= current_delta_t and prospective_duration <= MAX_BUCKET_DURATION:
+                    merged = active_bucket.copy()
+                    merged.start_time = alert.timestamp
+                    merged.add(alert)
+                    candidate_bucket_update = (bucket_key, merged)
+                else:
+                    # Extremely late non-mergeable event -> create immediate singleton
+                    singleton = _ActiveBucket(alert, meta_id=self._meta_id_counter)
+                    finalized_singleton = singleton.finalize()
+                    candidate_meta_id_increment = 1
+                    finalized_list.append(finalized_singleton)
+                    # Existing active bucket is untouched
+
+        # ── 4. Atomic Commit Phase ────────────────────────────────────────────
+        self._temporal_states[alert.agent_id] = candidate_state
+        if candidate_bucket_update is not None:
+            k, b = candidate_bucket_update
+            self._active_buckets[k] = b
+        self._meta_id_counter += candidate_meta_id_increment
+        self._seen_alert_ids.add(alert.wazuh_alert_id)
+
+        return finalized_list
 
     def flush_idle(self, event_time: datetime) -> List[MetaAlert]:
         """Finalize and return active buckets whose idle duration strictly exceeds current_delta_t.
