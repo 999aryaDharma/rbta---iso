@@ -1,6 +1,6 @@
 # Implementation Checklist
 
-Dokumen ini adalah checklist eksekusi refactor. Agent coding wajib menyelesaikan fase secara berurutan dan tidak menandai selesai tanpa test/evidence.
+Dokumen ini adalah high-level checklist eksekusi refactor. Agent coding wajib menyelesaikan fase secara berurutan dan tidak menandai selesai tanpa test/evidence. Untuk task-level implementation steps gunakan `13-ANTIGRAVITY-SPRINT-PLAN.md`; completion rules ada di `14-AGENT-DEFINITION-OF-DONE.md`.
 
 ## Phase 0 — Protect Current State
 
@@ -8,6 +8,8 @@ Dokumen ini adalah checklist eksekusi refactor. Agent coding wajib menyelesaikan
 - [ ] simpan baseline output penting untuk perbandingan
 - [ ] identifikasi entry point aktif dan dependency antar module
 - [ ] pastikan docs `00-SOURCE-OF-TRUTH.md` dibaca sebelum perubahan
+- [ ] project manifest + pytest harness tersedia
+- [ ] tidak ada credential/secrets di repo/fixtures
 
 ## Phase 1 — Remove Obsolete Research Paths
 
@@ -17,18 +19,22 @@ Dokumen ini adalah checklist eksekusi refactor. Agent coding wajib menyelesaikan
 - [ ] Bucket B / `CompoundMetaAlert` dihapus
 - [ ] output compound bucket dihapus
 - [ ] watermark `late_drop` dihapus
+- [ ] step ETW `HIGH_FREQ/LOW_FREQ/SHRINK_RATE/EXPAND_RATE` dihapus
 - [ ] feature vector 9/11/12/13 lama dihapus
 - [ ] report hardcoded dihapus
 - [ ] stale fields pada SOAR payload dihapus
 
 ## Phase 2 — Canonical Data Contract
 
-- [ ] satu `RawAlert` schema untuk batch dan REST
+- [ ] satu `CanonicalRawAlert` schema untuk batch/API/archive/live
 - [ ] `wazuh_alert_id` wajib dan idempotent
+- [ ] OpenSearch `_id` disimpan sebagai source metadata, bukan idempotency key utama
 - [ ] MITRE tactics dipertahankan sebagai daftar/set
+- [ ] parser support `rule.mitre.*` dan `rule.mitre_tactics/techniques`
 - [ ] `rule_group_primary` berasal dari config tunggal
 - [ ] agent criticality berasal dari config tunggal
 - [ ] parser file dan parser API menghasilkan canonical representation setara
+- [ ] tidak ada hardcoded workstation path pada production path
 
 ## Phase 3 — Agent-Local EMA / ETW
 
@@ -74,7 +80,7 @@ Jika event Agent A mengubah EMA/baseline/delta-t B, test gagal.
 - [ ] tidak ada event valid hilang karena lateness threshold
 - [ ] `wazuh_alert_ids` terakumulasi
 - [ ] mapping integrity lulus
-- [ ] `sum(alert_count) == processed_raw_alert_count`
+- [ ] `sum(alert_count) == processed_unique_raw_alert_count`
 
 ## Phase 5 — Seven Features
 
@@ -90,20 +96,50 @@ Jika event Agent A mengubah EMA/baseline/delta-t B, test gagal.
 - [ ] singleton entropy = 0
 - [ ] singleton dispersion = 0
 - [ ] duplicate MITRE tactic tidak dihitung dua kali
+- [ ] missing required feature fail-fast; no silent production zero-fill
 
-## Phase 6 — Isolation Forest
+## Phase 6 — Isolation Forest + Artifact Lifecycle
 
 - [ ] RobustScaler
 - [ ] IsolationForest `n_estimators=200`
 - [ ] `contamination="auto"`
 - [ ] fixed random state
 - [ ] tidak ada penggunaan ground truth
+- [ ] persistent score calibration dibuat saat training/reference run
+- [ ] single-event inference memakai stored calibration
+- [ ] single-event inference tidak fallback menjadi 0.5 karena request min=max
 - [ ] Tukey IQR tanpa clamp threshold ke 1.0
 - [ ] Decision Matrix 4 kuadran
 - [ ] False Positive Gate memakai `mitre_tactic_count == 0`
-- [ ] output menyimpan model/schema version
+- [ ] output menyimpan model/schema/calibration version
+- [ ] artifact bundle atomic + validated
+- [ ] replay/live melakukan zero fit operations
 
-## Phase 7 — RBTA Evaluation
+## Phase 7 — Historical Wazuh Ingestion
+
+- [ ] discover daily indices; missing date valid
+- [ ] PIT dibuat per daily index, bukan wildcard multi-month
+- [ ] partial PIT ditolak
+- [ ] stable sort `@timestamp ASC, id ASC`
+- [ ] page fetch default 500; yield event satu-per-satu
+- [ ] `search_after` memakai exact previous sort
+- [ ] PIT ditutup pada `finally`
+- [ ] checkpoint simpan index + last_sort + count
+- [ ] restart membuat PIT baru dan resume checkpoint
+- [ ] dedup mencegah duplicate state mutation
+- [ ] credential tidak hardcoded/logged
+
+## Phase 8 — Dual Mode Runtime
+
+- [ ] `research-batch` dan `replay-stream` memakai shared `RBTAEngine`
+- [ ] archived source dan Wazuh source menghasilkan canonical contract sama
+- [ ] replay speed 1x/10x/100x/MAX
+- [ ] replay sleep tidak mengubah event timestamp research
+- [ ] finite replay `drain()` di EOF
+- [ ] same canonical fixture: BatchRunner == MAX StreamRunner research output
+- [ ] `run_id` dicatat
+
+## Phase 9 — RBTA Evaluation
 
 - [ ] sensitivity delta-t 1,5,10,15,20,30,45,60
 - [ ] adaptive OFF saat sensitivity
@@ -117,7 +153,7 @@ Jika event Agent A mengubah EMA/baseline/delta-t B, test gagal.
 - [ ] throughput dihitung dari run aktual
 - [ ] tidak ada claim hardcoded
 
-## Phase 8 — IF Structural Evaluation
+## Phase 10 — IF Structural Evaluation
 
 - [ ] observed binary partition dibuat
 - [ ] Silhouette menggunakan `X_scaled`
@@ -130,38 +166,67 @@ Jika event Agent A mengubah EMA/baseline/delta-t B, test gagal.
 - [ ] z-score dihitung
 - [ ] empirical p-value dihitung
 
-## Phase 9 — Operational API Readiness
+## Phase 11 — Live Wazuh + Runtime Persistence
 
-- [ ] batch core dan live core memakai service yang sama
-- [ ] endpoint menerima Wazuh alert payload
-- [ ] duplicate `wazuh_alert_id` tidak diproses dua kali
+- [ ] live source dapat berupa campus collector push atau approved private route
+- [ ] Wazuh Indexer port 9200 tidak perlu dipublish ke Internet
+- [ ] live Indexer polling tidak memakai long-lived PIT snapshot
+- [ ] polling overlap configurable; baseline recommendation 5 menit
+- [ ] duplicate overlap dibuang sebelum RBTA mutation
+- [ ] late-indexed event dalam overlap tetap diproses
+- [ ] daily index rollover teruji
 - [ ] temporal state per agent persisten/recoverable
-- [ ] active RBTA buckets persisten/recoverable atau lifecycle restart terdokumentasi
-- [ ] model/scaler/version dapat dimuat saat service start
-- [ ] scored meta-alert dapat dikirim ke Shuffle
-- [ ] delivery retry tidak menggandakan alert pada downstream
-- [ ] health/readiness endpoint tersedia
-- [ ] structured logging dan correlation ID tersedia
+- [ ] active RBTA buckets persisten/recoverable
+- [ ] source checkpoint persisten
+- [ ] restart mempertahankan continuity state
+- [ ] idle flush tersedia
 
-## Phase 10 — Shuffle + Telegram Integration
+## Phase 12 — Operational API Readiness
+
+- [ ] endpoint menerima Wazuh alert payload dari authorized collector
+- [ ] duplicate `wazuh_alert_id` tidak diproses dua kali
+- [ ] model/scaler/calibration/threshold/version dimuat saat service start
+- [ ] scored meta-alert dapat disimpan/dikirim ke outbox
+- [ ] delivery retry tidak menggandakan logical downstream event
+- [ ] `/health`, `/ready`, `/runtime/stats` tersedia
+- [ ] structured logging dan correlation/run ID tersedia
+
+## Phase 13 — Shuffle + Telegram Integration
 
 - [ ] Shuffle menerima normalized scored meta-alert
+- [ ] custom Shuffle app memanggil REST contract; tidak menghitung research logic
 - [ ] action routing mengikuti `ESCALATE`, `DAILY_DIGEST`, `SUPPRESS`
 - [ ] CRITICAL/SUSPICIOUS dapat diteruskan ke Telegram
 - [ ] Telegram formatting berada di workflow/adaptor, bukan research model
 - [ ] suppressed alert tidak dikirim sebagai immediate notification
 - [ ] retry/idempotency downstream teruji
 
-## Phase 11 — Final Verification
+## Phase 14 — ASUS Deployment
+
+- [ ] Dockerfile production non-root
+- [ ] config/env external
+- [ ] persistent state/artifact volumes
+- [ ] healthcheck + readiness
+- [ ] graceful shutdown/restart recovery
+- [ ] no public Wazuh 9200 dependency
+- [ ] secrets absent from image/repo
+- [ ] CI runs relevant tests before deploy
+
+## Phase 15 — Final Verification
 
 - [ ] seluruh unit tests lulus
 - [ ] integration tests batch lulus
-- [ ] integration tests REST ingestion lulus
+- [ ] integration tests historical ingestion lulus
+- [ ] integration tests live overlap/dedup lulus
 - [ ] EMA isolation test lulus
 - [ ] no-event-loss test lulus
 - [ ] duplicate ingress test lulus
+- [ ] artifact roundtrip test lulus
+- [ ] batch-replay equivalence test lulus
+- [ ] restart recovery test lulus
 - [ ] research pipeline end-to-end lulus
-- [ ] operational pipeline Wazuh-like payload -> RBTA -> IF -> Shuffle stub lulus
+- [ ] operational Wazuh-like payload -> RBTA -> IF -> outbox/Shuffle stub lulus
 - [ ] grep/search tidak menemukan import primary ke synthetic/compound legacy
 - [ ] dokumentasi dan code menyebut 7 fitur secara konsisten
 - [ ] angka report berasal dari artifact eksperimen aktual
+- [ ] final status tidak claim real-live verified jika agent/jalur kampus belum tersedia
