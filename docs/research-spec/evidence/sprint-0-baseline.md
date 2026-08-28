@@ -1,4 +1,4 @@
-# Sprint 0 — Repository Baseline Evidence
+# Sprint 0 — Repository Baseline & Gate Evidence
 
 **Research Title:** *RULE-BASED TEMPORAL AGGREGATION DAN ISOLATION FOREST UNTUK MITIGASI ALERT FATIGUE PADA LOG KEAMANAN SIEM WAZUH*  
 **Document Type:** Normative Audit & Baseline Record  
@@ -6,13 +6,13 @@
 
 ---
 
-## 1. Repository Baseline
+## 1. Repository Baseline & Traceability
 
-* **Branch Baseline:** `refactor/sprint-0-1-foundation` (branched from `main` @ `189c7f7`)
+* **Branch:** `refactor/sprint-0-1-foundation` (branched from `main` @ `189c7f7`)
 * **Baseline Commit SHA:** `189c7f7`
-* **Current Working Commit:** `339da3f`
+* **Code Commit Tested:** `bcb24ac`
 * **Python Runtime:** Python 3.14.0 (Windows AMD64, compatible with `>=3.11` specification)
-* **Test Framework:** pytest 9.0.3
+* **Test Framework:** pytest 9.0.3 (active) / pytest 9.1.1 (`.venv-gate`)
 
 ---
 
@@ -95,31 +95,38 @@ Scenario A/B Reports + Visualizations
 | **P0-10** | Live streaming score normalized with batch min/max | Calibration parameters persisted at training; loaded at inference | Sprint 4 |
 | **P0-11** | Synthetic attack scenarios A/B/C in primary pipeline | Removed from primary research pipeline; structural validity evaluation used | Sprint 8 |
 | **P0-12** | Missing native Wazuh Indexer PIT / `search_after` | Resumable `WazuhIndexerHistoricalSource` with daily PIT | Sprint 5 |
-| **P0-13** | Workstation-specific hardcoded Windows paths | External configuration via environment / CLI / config files | Sprint 0–1 |
+| **P0-13** | Workstation-specific hardcoded Windows paths (`D:\KAMPUS\...`) | External configuration via relative path / CLI / config files | Sprint 0–1 (Resolved) |
 | **P1-07** | Domain constants duplicated across files | Single authoritative `src/config/domain.py` | Sprint 1 (Resolved) |
 
 ---
 
-## 6. Test Evidence
+## 6. Clean Installation & Test Evidence
+
+### Clean Virtual Environment Verification (`.venv-gate`)
+* **Editable Installation:** PASS
+* **Install Command:** `.venv-gate\Scripts\python -m pip install -e ".[dev]"`
+* **Installed Project:** `rbta-wazuh-isolation-forest==0.1.0`
 
 ### Pytest Collection
 ```text
 $ python -m pytest --collect-only -q
 tests/unit/config/test_domain.py: 9
-tests/unit/config/test_domain_governance.py: 1
+tests/unit/config/test_domain_governance.py: 2
+tests/unit/contracts/test_immutability.py: 3
 tests/unit/contracts/test_meta_alert.py: 5
 tests/unit/contracts/test_raw_alert.py: 7
 tests/unit/contracts/test_scored_meta_alert.py: 4
-tests/unit/etl/test_wazuh_canonicalizer.py: 14
+tests/unit/etl/test_json_orches.py: 1
+tests/unit/etl/test_wazuh_canonicalizer.py: 15
 tests/unit/test_smoke.py: 3
 
-43 tests collected in 0.06s
+49 tests collected in 3.35s
 ```
 
 ### Pytest Execution
 ```text
 $ python -m pytest -q
-...........................................
+.................................................
 
-43 passed in 2.08s
+49 passed in 2.03s
 ```
