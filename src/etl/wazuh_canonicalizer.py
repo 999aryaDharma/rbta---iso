@@ -6,6 +6,8 @@ Supports:
 - Nested MITRE (rule.mitre.tactic / technique / id)
 - Flattened MITRE (rule.mitre_tactics / rule.mitre_techniques)
 - Strict timezone normalization to UTC (rejection of naive timestamps)
+- Case-insensitive MITRE tactic deduplication (preserving first encountered casing)
+- Safe malformed rule group normalization
 """
 
 from datetime import datetime, timezone
@@ -21,6 +23,16 @@ _OFFSET_REGEX = re.compile(r"([+-]\d{2}:?\d{2}|Z|z)$")
 class CanonicalizationError(ValueError):
     """Raised when raw alert data is missing mandatory fields or malformed."""
     pass
+
+
+def _clean_str_field(val: Any) -> str | None:
+    """Clean a string field, returning None if value is None, empty, or 'none'/'null'."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or s.casefold() in ("none", "null"):
+        return None
+    return s
 
 
 def parse_wazuh_timestamp(val: Any) -> datetime:
@@ -109,7 +121,7 @@ def parse_wazuh_timestamp(val: Any) -> datetime:
 
 
 def extract_mitre_tactics(rule_dict: Mapping[str, Any]) -> tuple[str, ...]:
-    """Extract unique MITRE ATT&CK tactic names from a rule dictionary.
+    """Extract unique MITRE ATT&CK tactic names with case-insensitive deduplication.
 
     Supports:
     - rule.mitre.tactic (list of strings, single string, or pipe-separated)
@@ -124,9 +136,9 @@ def extract_mitre_tactics(rule_dict: Mapping[str, Any]) -> tuple[str, ...]:
     Returns
     -------
     tuple[str, ...]
-        Tuple of unique MITRE tactic names preserving discovery order.
+        Tuple of unique MITRE tactic names preserving discovery order and first representation.
     """
-    tactics: list[str] = []
+    raw_candidates: list[str] = []
 
     # Check nested rule.mitre
     mitre_block = rule_dict.get("mitre")
@@ -134,41 +146,48 @@ def extract_mitre_tactics(rule_dict: Mapping[str, Any]) -> tuple[str, ...]:
         raw_tactic = mitre_block.get("tactic")
         if isinstance(raw_tactic, (list, tuple)):
             for item in raw_tactic:
-                if item and str(item).strip():
-                    tactics.append(str(item).strip())
-        elif isinstance(raw_tactic, str) and raw_tactic.strip():
+                clean = _clean_str_field(item)
+                if clean:
+                    raw_candidates.append(clean)
+        elif isinstance(raw_tactic, str):
             for part in raw_tactic.split("|"):
-                if part.strip():
-                    tactics.append(part.strip())
+                clean = _clean_str_field(part)
+                if clean:
+                    raw_candidates.append(clean)
 
     # Check flattened rule.mitre_tactics
     flat_tactics = rule_dict.get("mitre_tactics")
     if isinstance(flat_tactics, (list, tuple)):
         for item in flat_tactics:
-            if item and str(item).strip():
-                tactics.append(str(item).strip())
-    elif isinstance(flat_tactics, str) and flat_tactics.strip():
+            clean = _clean_str_field(item)
+            if clean:
+                raw_candidates.append(clean)
+    elif isinstance(flat_tactics, str):
         for part in flat_tactics.split("|"):
-            if part.strip():
-                tactics.append(part.strip())
+            clean = _clean_str_field(part)
+            if clean:
+                raw_candidates.append(clean)
 
     # Check flattened rule.mitre_tactic
     single_flat = rule_dict.get("mitre_tactic")
-    if isinstance(single_flat, str) and single_flat.strip():
+    if isinstance(single_flat, str):
         for part in single_flat.split("|"):
-            if part.strip():
-                tactics.append(part.strip())
+            clean = _clean_str_field(part)
+            if clean:
+                raw_candidates.append(clean)
     elif isinstance(single_flat, (list, tuple)):
         for item in single_flat:
-            if item and str(item).strip():
-                tactics.append(str(item).strip())
+            clean = _clean_str_field(item)
+            if clean:
+                raw_candidates.append(clean)
 
-    # Deduplicate while preserving order
-    seen: set[str] = set()
+    # Deduplicate case-insensitively while preserving first representation and discovery order
+    seen_keys: set[str] = set()
     deduped: list[str] = []
-    for t in tactics:
-        if t not in seen:
-            seen.add(t)
+    for t in raw_candidates:
+        key = t.casefold()
+        if key not in seen_keys:
+            seen_keys.add(key)
             deduped.append(t)
 
     return tuple(deduped)
@@ -189,26 +208,34 @@ def extract_source_ip(data_dict: Mapping[str, Any], raw_dict: Mapping[str, Any])
     str | None
         Normalized source IP address or None.
     """
-    ip = data_dict.get("srcip") if isinstance(data_dict, dict) else None
-    if not ip:
-        ip = raw_dict.get("srcip")
+    raw_ip = data_dict.get("srcip") if isinstance(data_dict, dict) else None
+    if raw_ip is None:
+        raw_ip = raw_dict.get("srcip")
 
-    if ip is not None:
-        ip_str = str(ip).strip()
-        if ip_str and ip_str.lower() not in ("none", "nan", "null", ""):
-            return ip_str
-
-    return None
+    return _clean_str_field(raw_ip)
 
 
-def _clean_str_field(val: Any) -> str | None:
-    """Clean a string field, returning None if value is None, empty, or 'none'/'null'."""
-    if val is None:
-        return None
-    s = str(val).strip()
-    if not s or s.lower() in ("none", "null", ""):
-        return None
-    return s
+def extract_clean_rule_groups(rule_dict: Mapping[str, Any]) -> tuple[str, ...]:
+    """Extract valid cleaned rule groups, filtering out None, null, empty strings, and 'none'."""
+    raw_groups = rule_dict.get("groups")
+    if isinstance(raw_groups, (list, tuple)):
+        items = raw_groups
+    elif isinstance(raw_groups, str):
+        items = raw_groups.split(",")
+    else:
+        items = []
+
+    clean_groups: list[str] = []
+    seen_groups: set[str] = set()
+    for g in items:
+        cleaned = _clean_str_field(g)
+        if cleaned:
+            key = cleaned.casefold()
+            if key not in seen_groups:
+                seen_groups.add(key)
+                clean_groups.append(cleaned.lower())
+
+    return tuple(clean_groups)
 
 
 def canonicalize_wazuh_alert(event: Mapping[str, Any]) -> CanonicalRawAlert:
@@ -268,7 +295,7 @@ def canonicalize_wazuh_alert(event: Mapping[str, Any]) -> CanonicalRawAlert:
         raise CanonicalizationError("Wazuh alert rule missing required 'rule.id'")
     rule_id = cleaned_rule_id
 
-    # Strict rule.level validation (FIX 4)
+    # Strict rule.level validation
     raw_level = rule.get("level")
     if raw_level is None or isinstance(raw_level, bool):
         raise CanonicalizationError("Wazuh alert rule missing required 'rule.level'")
@@ -281,17 +308,11 @@ def canonicalize_wazuh_alert(event: Mapping[str, Any]) -> CanonicalRawAlert:
     if not (0 <= rule_level <= 15):
         raise CanonicalizationError(f"Rule level {rule_level} outside valid Wazuh range [0, 15]")
 
-    rule_groups = rule.get("groups")
-    if isinstance(rule_groups, (list, tuple)):
-        clean_groups = [str(g).strip() for g in rule_groups if str(g).strip()]
-    elif isinstance(rule_groups, str) and rule_groups.strip():
-        clean_groups = [g.strip() for g in rule_groups.split(",") if g.strip()]
-    else:
-        clean_groups = []
-
+    # Cleaned rule groups
+    clean_groups = extract_clean_rule_groups(rule)
     rule_group_primary = resolve_primary_rule_group(clean_groups)
 
-    # 4. Agent Block (FIX 5: deterministic null and whitespace normalization)
+    # 4. Agent Block (deterministic null and whitespace normalization)
     agent = alert_body.get("agent")
     if isinstance(agent, dict):
         agent_id_clean = _clean_str_field(agent.get("id"))

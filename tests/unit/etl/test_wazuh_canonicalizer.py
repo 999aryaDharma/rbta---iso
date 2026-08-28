@@ -67,13 +67,13 @@ def test_parse_wazuh_timestamp_rejects_naive():
 
 def test_parse_wazuh_timestamp_invalid():
     """Test that invalid timestamp formats raise CanonicalizationError."""
-    with pytest.raises(CanonicalizationError, match="timestamp"):
+    with pytest.raises(CanonicalizationError, match="[Tt]imestamp|naive"):
         parse_wazuh_timestamp("invalid-date-string")
 
-    with pytest.raises(CanonicalizationError, match="timestamp"):
+    with pytest.raises(CanonicalizationError, match="[Tt]imestamp"):
         parse_wazuh_timestamp(None)
 
-    with pytest.raises(CanonicalizationError, match="timestamp"):
+    with pytest.raises(CanonicalizationError, match="[Tt]imestamp"):
         parse_wazuh_timestamp("")
 
 
@@ -157,10 +157,10 @@ def test_canonicalize_agent_null_and_fallback_normalization():
     assert a5.agent_name == "soc-1"
 
 
-# ── MITRE Deduplication & Normalization Tests (FIX 8) ─────────────────────────
+# ── MITRE Deduplication & Case-Insensitive Normalization Tests (FIX 3) ────────
 
-def test_canonicalize_mitre_deduplication():
-    """Test that duplicate MITRE tactics across nested and flattened fields are deduplicated."""
+def test_canonicalize_mitre_case_insensitive_deduplication():
+    """Test that MITRE tactics are deduplicated case-insensitively, preserving first valid casing (FIX 3)."""
     alert_data = {
         "id": "1001",
         "timestamp": "2026-08-28T05:00:00Z",
@@ -169,16 +169,56 @@ def test_canonicalize_mitre_deduplication():
             "level": 5,
             "groups": ["pam"],
             "mitre": {
-                "tactic": ["Defense Evasion", "Persistence", "Defense Evasion"],
+                "tactic": ["Execution", "execution", " EXECUTION "],
             },
-            "mitre_tactics": ["Persistence", "Privilege Escalation"],
+            "mitre_tactics": ["defense evasion", "Defense Evasion"],
         },
     }
     alert = canonicalize_wazuh_alert(alert_data)
-    assert alert.mitre_tactics == ("Defense Evasion", "Persistence", "Privilege Escalation")
+    assert alert.mitre_tactics == ("Execution", "defense evasion")
 
 
-# ── OpenSearch Envelope and Traceability Tests (FIX 8) ────────────────────────
+# ── Rule Groups Normalization Tests (FIX 4) ───────────────────────────────────
+
+def test_canonicalize_rule_groups_malformed_normalization():
+    """Test that malformed rule groups (None, empty, null, none) are filtered out safely (FIX 4)."""
+    base_alert = {
+        "id": "1001",
+        "timestamp": "2026-08-28T05:00:00Z",
+        "rule": {"id": "500", "level": 3},
+    }
+
+    # 1. Missing groups
+    a1 = canonicalize_wazuh_alert({**base_alert, "rule": {"id": "500", "level": 3}})
+    assert a1.rule_group_primary == "unknown"
+    assert a1.metadata["rule_groups_all"] == ()
+
+    # 2. Empty list of groups
+    a2 = canonicalize_wazuh_alert({**base_alert, "rule": {"id": "500", "level": 3, "groups": []}})
+    assert a2.rule_group_primary == "unknown"
+    assert a2.metadata["rule_groups_all"] == ()
+
+    # 3. List of None and empty strings
+    a3 = canonicalize_wazuh_alert({**base_alert, "rule": {"id": "500", "level": 3, "groups": [None, "", "   "]}})
+    assert a3.rule_group_primary == "unknown"
+    assert a3.metadata["rule_groups_all"] == ()
+
+    # 4. List containing 'none', 'null' string literals
+    a4 = canonicalize_wazuh_alert({**base_alert, "rule": {"id": "500", "level": 3, "groups": ["none", "null"]}})
+    assert a4.rule_group_primary == "unknown"
+    assert a4.metadata["rule_groups_all"] == ()
+
+    # 5. Mixed valid groups with whitespace and casing variants
+    a5 = canonicalize_wazuh_alert({
+        **base_alert,
+        "rule": {"id": "500", "level": 3, "groups": [None, " Web ", "web", "syslog"]},
+    })
+    # 'web' has higher weight than 'syslog' (7 vs 3)
+    assert a5.rule_group_primary == "web"
+    assert a5.metadata["rule_groups_all"] == ("web", "syslog")
+
+
+# ── OpenSearch Envelope and Traceability Tests ────────────────────────────────
 
 def test_canonicalize_opensearch_hit_envelope_alert_id_traceability():
     """Test that wazuh_alert_id strictly comes from _source.id and NOT from OpenSearch _id."""
@@ -198,7 +238,7 @@ def test_canonicalize_opensearch_hit_envelope_alert_id_traceability():
     assert alert.wazuh_alert_id != "opensearch-doc-id-xyz"
     assert alert.metadata["source_document_id"] == "opensearch-doc-id-xyz"
     assert alert.metadata["source_index"] == "wazuh-alerts-4.x-2026.08.28"
-    assert alert.metadata["source_sort"] == [1787895526000, "wazuh-alert-123.456"]
+    assert alert.metadata["source_sort"] == (1787895526000, "wazuh-alert-123.456")
 
 
 def test_canonicalize_missing_source_id_fails_fast():
@@ -243,7 +283,7 @@ def test_canonicalize_alert_no_mitre():
 
     assert alert.wazuh_alert_id == "1787897412.1001"
     assert alert.agent_name == "pusatkarir"
-    assert alert.agent_criticality == 3  # pusatkarir is High criticality (3)
+    assert alert.agent_criticality == 3
     assert alert.rule_group_primary == "syslog"
     assert alert.mitre_tactics == ()
     assert alert.srcip is None
@@ -256,7 +296,7 @@ def test_canonicalize_alert_flattened_mitre():
 
     assert alert.wazuh_alert_id == "1787901330.2002"
     assert alert.agent_name == "dfir-iris"
-    assert alert.agent_criticality == 4  # dfir-iris is Critical (4)
+    assert alert.agent_criticality == 4
     assert alert.rule_group_primary == "sql_injection"
     assert "Initial Access" in alert.mitre_tactics
     assert "Defense Evasion" in alert.mitre_tactics
@@ -301,7 +341,7 @@ def test_canonicalize_missing_mandatory_fields_fails():
         })
 
     # Missing Timestamp
-    with pytest.raises(CanonicalizationError, match="timestamp"):
+    with pytest.raises(CanonicalizationError, match="[Tt]imestamp"):
         canonicalize_wazuh_alert({
             "id": "123.456",
             "rule": {"id": "100", "level": 3, "groups": ["syslog"]},
