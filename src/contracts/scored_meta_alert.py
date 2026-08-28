@@ -2,8 +2,9 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from types import MappingProxyType
 from typing import Any, Mapping
+
+from src.contracts.immutability import freeze_value
 
 VALID_DECISIONS: frozenset[str] = frozenset({
     "CRITICAL",
@@ -45,7 +46,7 @@ class ScoredMetaAlert:
     mitre_tactics : tuple[str, ...]
         Unique MITRE ATT&CK tactics.
     seven_features : Mapping[str, float]
-        Immutable dictionary mapping feature name to normalized value for the canonical 7 features.
+        Recursively immutable dictionary mapping feature name to normalized value for the canonical 7 features.
     raw_model_score : float
         Oriented raw anomaly score from Isolation Forest.
     anomaly_score : float
@@ -67,7 +68,7 @@ class ScoredMetaAlert:
     source_alert_ids : tuple[str, ...]
         Traceable tuple of all member Wazuh alert IDs.
     metadata : Mapping[str, Any]
-        Immutable audit metadata.
+        Recursively immutable audit metadata.
     """
 
     meta_id: int
@@ -105,8 +106,5 @@ class ScoredMetaAlert:
         if not isinstance(self.source_alert_ids, tuple):
             object.__setattr__(self, "source_alert_ids", tuple(self.source_alert_ids))
 
-        if not isinstance(self.seven_features, MappingProxyType):
-            object.__setattr__(self, "seven_features", MappingProxyType(dict(self.seven_features)))
-
-        if not isinstance(self.metadata, MappingProxyType):
-            object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        object.__setattr__(self, "seven_features", freeze_value(self.seven_features))
+        object.__setattr__(self, "metadata", freeze_value(self.metadata))

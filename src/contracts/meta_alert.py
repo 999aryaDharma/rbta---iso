@@ -2,8 +2,9 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from types import MappingProxyType
 from typing import Any, Mapping
+
+from src.contracts.immutability import freeze_value
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,9 +30,9 @@ class MetaAlert:
     max_severity : int
         Maximum Wazuh rule level observed in this bucket [0, 15].
     rule_id_distribution : Mapping[str, int]
-        Immutable distribution map of rule IDs to counts.
+        Recursively immutable distribution map of rule IDs to counts.
     severity_distribution : Mapping[int, int]
-        Immutable distribution map of severity levels to counts.
+        Recursively immutable distribution map of severity levels to counts.
     mitre_tactics_unique : tuple[str, ...]
         Unique MITRE ATT&CK tactics seen across all alerts in the bucket.
     critical_mitre_present : bool
@@ -41,7 +42,7 @@ class MetaAlert:
     wazuh_alert_ids : tuple[str, ...]
         Traceable tuple of all member Wazuh alert IDs.
     metadata : Mapping[str, Any]
-        Immutable audit metadata.
+        Recursively immutable audit metadata.
     """
 
     meta_id: int
@@ -85,14 +86,9 @@ class MetaAlert:
         if not isinstance(self.wazuh_alert_ids, tuple):
             object.__setattr__(self, "wazuh_alert_ids", tuple(self.wazuh_alert_ids))
 
-        if not isinstance(self.rule_id_distribution, MappingProxyType):
-            object.__setattr__(self, "rule_id_distribution", MappingProxyType(dict(self.rule_id_distribution)))
-
-        if not isinstance(self.severity_distribution, MappingProxyType):
-            object.__setattr__(self, "severity_distribution", MappingProxyType(dict(self.severity_distribution)))
-
-        if not isinstance(self.metadata, MappingProxyType):
-            object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
+        object.__setattr__(self, "rule_id_distribution", freeze_value(self.rule_id_distribution))
+        object.__setattr__(self, "severity_distribution", freeze_value(self.severity_distribution))
+        object.__setattr__(self, "metadata", freeze_value(self.metadata))
 
     @property
     def duration_sec(self) -> float:
