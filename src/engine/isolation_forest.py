@@ -55,17 +55,10 @@ log = logging.getLogger(__name__)
 # Konstanta — sinkron dengan rbta_algorithm_02.py
 # ══════════════════════════════════════════════════════════════════════════════
 
-AGENT_CRITICALITY: dict[str, int] = {
-    "soc-1":         1,
-    "pusatkarir":    3,
-    "dfir-iris":     4,
-    "siput":         2,
-    "proxy-manager": 3,
-    "e-kuesioner":   2,
-    "sads":          3,
-    "dvwa":          1,
-}
-DEFAULT_CRITICALITY = 1
+from src.config.domain import (
+    AGENT_CRITICALITY,
+    DEFAULT_AGENT_CRITICALITY as DEFAULT_CRITICALITY,
+)
 
 RULE_GROUP_SEVERITY_ENC: dict[str, int] = {
     "ossec":                   1,
