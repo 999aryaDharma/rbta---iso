@@ -5,14 +5,17 @@ Supports:
 - OpenSearch search hits ({_index, _id, _source, sort})
 - Nested MITRE (rule.mitre.tactic / technique / id)
 - Flattened MITRE (rule.mitre_tactics / rule.mitre_techniques)
-- Timezone-safe timestamp normalization to UTC
+- Strict timezone normalization to UTC (rejection of naive timestamps)
 """
 
 from datetime import datetime, timezone
+import re
 from typing import Any, Mapping, Sequence
 
 from src.config.domain import get_agent_criticality, resolve_primary_rule_group
 from src.contracts.raw_alert import CanonicalRawAlert
+
+_OFFSET_REGEX = re.compile(r"([+-]\d{2}:?\d{2}|Z|z)$")
 
 
 class CanonicalizationError(ValueError):
@@ -21,7 +24,13 @@ class CanonicalizationError(ValueError):
 
 
 def parse_wazuh_timestamp(val: Any) -> datetime:
-    """Parse any valid Wazuh timestamp representation into a timezone-aware UTC datetime.
+    """Parse a valid Wazuh timestamp representation into a timezone-aware UTC datetime.
+
+    Strict Policy:
+    - Timezone-aware datetime: converted to UTC.
+    - Explicit 'Z' or offset (e.g. +08:00, +0000): converted to UTC.
+    - Numeric epoch: converted to UTC.
+    - Naive datetime or naive string: REJECTED with CanonicalizationError.
 
     Parameters
     ----------
@@ -36,22 +45,21 @@ def parse_wazuh_timestamp(val: Any) -> datetime:
     Raises
     ------
     CanonicalizationError
-        If timestamp is None, empty, or unparseable.
+        If timestamp is missing, naive, or unparseable.
     """
     if val is None or val == "":
         raise CanonicalizationError("Event timestamp is required and cannot be empty")
 
     if isinstance(val, datetime):
         if val.tzinfo is None:
-            return val.replace(tzinfo=timezone.utc)
+            raise CanonicalizationError("Event timestamp datetime object is naive; timezone-aware datetime is required")
         return val.astimezone(timezone.utc)
 
     if isinstance(val, (int, float)):
         # If timestamp is in milliseconds (epoch > 1e11)
-        if val > 1e11:
-            val = val / 1000.0
+        epoch_sec = val / 1000.0 if val > 1e11 else float(val)
         try:
-            return datetime.fromtimestamp(val, tz=timezone.utc)
+            return datetime.fromtimestamp(epoch_sec, tz=timezone.utc)
         except Exception as exc:
             raise CanonicalizationError(f"Invalid numeric epoch timestamp '{val}': {exc}") from exc
 
@@ -60,29 +68,37 @@ def parse_wazuh_timestamp(val: Any) -> datetime:
         if not ts_str:
             raise CanonicalizationError("Event timestamp string is empty")
 
-        # Handle trailing Z
+        # Check for timezone offset or Z
+        if not _OFFSET_REGEX.search(ts_str):
+            raise CanonicalizationError(
+                f"Invalid or naive timestamp '{val}'; explicit UTC 'Z' or timezone offset is required"
+            )
+
+        # Normalize trailing Z/z to standard +00:00 for fromisoformat
         if ts_str.endswith("Z") or ts_str.endswith("z"):
-            ts_str = ts_str[:-1] + "+00:00"
+            ts_iso = ts_str[:-1] + "+00:00"
+        else:
+            ts_iso = ts_str
 
         try:
-            dt = datetime.fromisoformat(ts_str)
+            dt = datetime.fromisoformat(ts_iso)
             if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+                raise CanonicalizationError(f"Parsed timestamp '{val}' has no tzinfo")
             return dt.astimezone(timezone.utc)
         except Exception:
             pass
 
-        # Try standard common formatting fallbacks
+        # Try strptime with standard offset formats
         for fmt in (
             "%Y-%m-%dT%H:%M:%S.%f%z",
             "%Y-%m-%dT%H:%M:%S%z",
-            "%Y-%m-%d %H:%M:%S.%f",
-            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%d %H:%M:%S.%f%z",
+            "%Y-%m-%d %H:%M:%S%z",
         ):
             try:
                 dt = datetime.strptime(ts_str, fmt)
                 if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
+                    continue
                 return dt.astimezone(timezone.utc)
             except ValueError:
                 continue
@@ -108,7 +124,7 @@ def extract_mitre_tactics(rule_dict: Mapping[str, Any]) -> tuple[str, ...]:
     Returns
     -------
     tuple[str, ...]
-        Tuple of unique MITRE tactic names.
+        Tuple of unique MITRE tactic names preserving discovery order.
     """
     tactics: list[str] = []
 
@@ -185,6 +201,16 @@ def extract_source_ip(data_dict: Mapping[str, Any], raw_dict: Mapping[str, Any])
     return None
 
 
+def _clean_str_field(val: Any) -> str | None:
+    """Clean a string field, returning None if value is None, empty, or 'none'/'null'."""
+    if val is None:
+        return None
+    s = str(val).strip()
+    if not s or s.lower() in ("none", "null", ""):
+        return None
+    return s
+
+
 def canonicalize_wazuh_alert(event: Mapping[str, Any]) -> CanonicalRawAlert:
     """Canonicalize a raw Wazuh alert dictionary or OpenSearch search hit into CanonicalRawAlert.
 
@@ -220,11 +246,12 @@ def canonicalize_wazuh_alert(event: Mapping[str, Any]) -> CanonicalRawAlert:
     else:
         alert_body = event
 
-    # 1. Wazuh Alert ID
+    # 1. Wazuh Alert ID — MUST come from alert_body.id (or _source.id), NEVER OpenSearch _id
     raw_id = alert_body.get("id")
-    if raw_id is None or not str(raw_id).strip():
+    cleaned_id = _clean_str_field(raw_id)
+    if cleaned_id is None:
         raise CanonicalizationError("Wazuh alert must contain a valid top-level 'id'")
-    wazuh_alert_id = str(raw_id).strip()
+    wazuh_alert_id = cleaned_id
 
     # 2. Timestamp
     raw_ts = alert_body.get("timestamp")
@@ -236,14 +263,20 @@ def canonicalize_wazuh_alert(event: Mapping[str, Any]) -> CanonicalRawAlert:
         raise CanonicalizationError("Wazuh alert missing required 'rule' dictionary")
 
     rule_id_raw = rule.get("id")
-    if rule_id_raw is None or not str(rule_id_raw).strip():
+    cleaned_rule_id = _clean_str_field(rule_id_raw)
+    if cleaned_rule_id is None:
         raise CanonicalizationError("Wazuh alert rule missing required 'rule.id'")
-    rule_id = str(rule_id_raw).strip()
+    rule_id = cleaned_rule_id
+
+    # Strict rule.level validation (FIX 4)
+    raw_level = rule.get("level")
+    if raw_level is None or isinstance(raw_level, bool):
+        raise CanonicalizationError("Wazuh alert rule missing required 'rule.level'")
 
     try:
-        rule_level = int(rule.get("level", 0))
+        rule_level = int(raw_level)
     except (ValueError, TypeError) as exc:
-        raise CanonicalizationError(f"Invalid rule level '{rule.get('level')}': {exc}") from exc
+        raise CanonicalizationError(f"Invalid rule.level '{raw_level}': {exc}") from exc
 
     if not (0 <= rule_level <= 15):
         raise CanonicalizationError(f"Rule level {rule_level} outside valid Wazuh range [0, 15]")
@@ -258,20 +291,24 @@ def canonicalize_wazuh_alert(event: Mapping[str, Any]) -> CanonicalRawAlert:
 
     rule_group_primary = resolve_primary_rule_group(clean_groups)
 
-    # 4. Agent Block
+    # 4. Agent Block (FIX 5: deterministic null and whitespace normalization)
     agent = alert_body.get("agent")
     if isinstance(agent, dict):
-        agent_id = str(agent.get("id", "000")).strip()
-        agent_name = str(agent.get("name", "")).strip()
+        agent_id_clean = _clean_str_field(agent.get("id"))
+        agent_name_clean = _clean_str_field(agent.get("name"))
+        agent_id = agent_id_clean if agent_id_clean is not None else "000"
     else:
         agent_id = "000"
-        agent_name = ""
+        agent_name_clean = None
 
-    # Fallback for manager / self alerts
-    if not agent_name:
+    # Fallback to manager name if agent name is not present
+    if agent_name_clean is not None:
+        agent_name = agent_name_clean
+    else:
         manager = alert_body.get("manager")
-        if isinstance(manager, dict) and manager.get("name"):
-            agent_name = str(manager.get("name")).strip()
+        manager_name_clean = _clean_str_field(manager.get("name")) if isinstance(manager, dict) else None
+        if manager_name_clean is not None:
+            agent_name = manager_name_clean
         else:
             agent_name = "unknown"
 

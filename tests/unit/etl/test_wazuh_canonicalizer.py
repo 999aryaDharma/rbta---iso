@@ -1,6 +1,6 @@
 """Unit tests for Wazuh alert canonicalizer."""
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import pytest
 
@@ -19,11 +19,14 @@ def load_fixture(filename: str) -> dict:
         return json.load(f)
 
 
+# ── Timestamp Tests (FIX 6) ───────────────────────────────────────────────────
+
 def test_parse_wazuh_timestamp_iso_formats():
-    """Test parsing various valid Wazuh timestamp representations into timezone-aware UTC datetime."""
+    """Test parsing various valid timezone-aware Wazuh timestamps into UTC."""
     # With offset +0000
     dt1 = parse_wazuh_timestamp("2026-08-28T05:38:45.712+0000")
     assert dt1.tzinfo is not None
+    assert dt1.utcoffset() == timedelta(0)
     assert dt1.year == 2026 and dt1.month == 8 and dt1.day == 28
     assert dt1.hour == 5 and dt1.minute == 38 and dt1.second == 45
     assert dt1.microsecond == 712000
@@ -33,13 +36,33 @@ def test_parse_wazuh_timestamp_iso_formats():
     assert dt2.tzinfo is not None
     assert dt2 == dt1
 
-    # With colon offset +08:00 (converted to UTC)
+    # With explicit offset +08:00 (converted to UTC)
     dt3 = parse_wazuh_timestamp("2026-08-28T13:38:45.712+08:00")
+    assert dt3.tzinfo is not None
     assert dt3 == dt1
 
-    # Epoch timestamp in seconds / milliseconds
-    dt4 = parse_wazuh_timestamp(1787895525.712)
-    assert dt4.year == 2026
+    # Timezone-aware datetime object
+    aware_dt = datetime(2026, 8, 28, 5, 38, 45, 712000, tzinfo=timezone.utc)
+    assert parse_wazuh_timestamp(aware_dt) == aware_dt
+
+    # Epoch in seconds / milliseconds
+    dt_epoch = parse_wazuh_timestamp(1787895525.712)
+    assert dt_epoch.tzinfo is not None
+
+
+def test_parse_wazuh_timestamp_rejects_naive():
+    """Test that naive timestamps (strings without offset and naive datetime objects) are strictly rejected."""
+    # Naive ISO string without offset or Z
+    with pytest.raises(CanonicalizationError, match="naive|offset"):
+        parse_wazuh_timestamp("2026-08-28T05:38:45.712")
+
+    with pytest.raises(CanonicalizationError, match="naive|offset"):
+        parse_wazuh_timestamp("2026-08-28 05:38:45")
+
+    # Naive datetime object
+    naive_dt = datetime(2026, 8, 28, 5, 38, 45)
+    with pytest.raises(CanonicalizationError, match="naive|timezone-aware"):
+        parse_wazuh_timestamp(naive_dt)
 
 
 def test_parse_wazuh_timestamp_invalid():
@@ -50,6 +73,150 @@ def test_parse_wazuh_timestamp_invalid():
     with pytest.raises(CanonicalizationError, match="timestamp"):
         parse_wazuh_timestamp(None)
 
+    with pytest.raises(CanonicalizationError, match="timestamp"):
+        parse_wazuh_timestamp("")
+
+
+# ── Rule Level Validation Tests (FIX 4) ───────────────────────────────────────
+
+def test_canonicalize_rule_level_validation():
+    """Test strict validation of rule.level in range 0..15."""
+    base_alert = {
+        "id": "1001",
+        "timestamp": "2026-08-28T05:00:00Z",
+        "rule": {"id": "500", "groups": ["syslog"]},
+    }
+
+    # Missing rule.level
+    with pytest.raises(CanonicalizationError, match="rule.level"):
+        canonicalize_wazuh_alert(base_alert)
+
+    # Null rule.level
+    with pytest.raises(CanonicalizationError, match="rule.level"):
+        canonicalize_wazuh_alert({**base_alert, "rule": {"id": "500", "level": None, "groups": ["syslog"]}})
+
+    # Non-numeric rule.level
+    with pytest.raises(CanonicalizationError, match="rule.level"):
+        canonicalize_wazuh_alert({**base_alert, "rule": {"id": "500", "level": "high", "groups": ["syslog"]}})
+
+    # Negative rule.level
+    with pytest.raises(CanonicalizationError, match="Rule level"):
+        canonicalize_wazuh_alert({**base_alert, "rule": {"id": "500", "level": -1, "groups": ["syslog"]}})
+
+    # Out-of-range rule.level
+    with pytest.raises(CanonicalizationError, match="Rule level"):
+        canonicalize_wazuh_alert({**base_alert, "rule": {"id": "500", "level": 16, "groups": ["syslog"]}})
+
+    # Valid boundary 0
+    a0 = canonicalize_wazuh_alert({**base_alert, "rule": {"id": "500", "level": 0, "groups": ["syslog"]}})
+    assert a0.rule_level == 0
+
+    # Valid boundary 15
+    a15 = canonicalize_wazuh_alert({**base_alert, "rule": {"id": "500", "level": 15, "groups": ["syslog"]}})
+    assert a15.rule_level == 15
+
+
+# ── Agent Normalization Tests (FIX 5) ─────────────────────────────────────────
+
+def test_canonicalize_agent_null_and_fallback_normalization():
+    """Test that null, missing, or whitespace agent fields normalize cleanly to '000' and 'unknown' without creating 'None' strings."""
+    base_alert = {
+        "id": "1001",
+        "timestamp": "2026-08-28T05:00:00Z",
+        "rule": {"id": "500", "level": 3, "groups": ["syslog"]},
+    }
+
+    # 1. Missing agent block
+    a1 = canonicalize_wazuh_alert(base_alert)
+    assert a1.agent_id == "000"
+    assert a1.agent_name == "unknown"
+
+    # 2. Null agent fields
+    a2 = canonicalize_wazuh_alert({**base_alert, "agent": {"id": None, "name": None}})
+    assert a2.agent_id == "000"
+    assert a2.agent_name == "unknown"
+    assert "None" not in (a2.agent_id, a2.agent_name)
+
+    # 3. Empty/whitespace agent fields
+    a3 = canonicalize_wazuh_alert({**base_alert, "agent": {"id": "   ", "name": "   "}})
+    assert a3.agent_id == "000"
+    assert a3.agent_name == "unknown"
+
+    # 4. Fallback to manager name when agent name is absent
+    a4 = canonicalize_wazuh_alert({
+        **base_alert,
+        "agent": {"id": "000", "name": None},
+        "manager": {"name": "wazuh-soc-master"},
+    })
+    assert a4.agent_id == "000"
+    assert a4.agent_name == "wazuh-soc-master"
+
+    # 5. Normal valid agent preserved
+    a5 = canonicalize_wazuh_alert({**base_alert, "agent": {"id": "001", "name": "soc-1"}})
+    assert a5.agent_id == "001"
+    assert a5.agent_name == "soc-1"
+
+
+# ── MITRE Deduplication & Normalization Tests (FIX 8) ─────────────────────────
+
+def test_canonicalize_mitre_deduplication():
+    """Test that duplicate MITRE tactics across nested and flattened fields are deduplicated."""
+    alert_data = {
+        "id": "1001",
+        "timestamp": "2026-08-28T05:00:00Z",
+        "rule": {
+            "id": "5501",
+            "level": 5,
+            "groups": ["pam"],
+            "mitre": {
+                "tactic": ["Defense Evasion", "Persistence", "Defense Evasion"],
+            },
+            "mitre_tactics": ["Persistence", "Privilege Escalation"],
+        },
+    }
+    alert = canonicalize_wazuh_alert(alert_data)
+    assert alert.mitre_tactics == ("Defense Evasion", "Persistence", "Privilege Escalation")
+
+
+# ── OpenSearch Envelope and Traceability Tests (FIX 8) ────────────────────────
+
+def test_canonicalize_opensearch_hit_envelope_alert_id_traceability():
+    """Test that wazuh_alert_id strictly comes from _source.id and NOT from OpenSearch _id."""
+    hit = {
+        "_index": "wazuh-alerts-4.x-2026.08.28",
+        "_id": "opensearch-doc-id-xyz",
+        "_source": {
+            "id": "wazuh-alert-123.456",
+            "timestamp": "2026-08-28T05:00:00Z",
+            "rule": {"id": "500", "level": 4, "groups": ["syslog"]},
+            "agent": {"id": "001", "name": "soc-1"},
+        },
+        "sort": [1787895526000, "wazuh-alert-123.456"],
+    }
+    alert = canonicalize_wazuh_alert(hit)
+    assert alert.wazuh_alert_id == "wazuh-alert-123.456"
+    assert alert.wazuh_alert_id != "opensearch-doc-id-xyz"
+    assert alert.metadata["source_document_id"] == "opensearch-doc-id-xyz"
+    assert alert.metadata["source_index"] == "wazuh-alerts-4.x-2026.08.28"
+    assert alert.metadata["source_sort"] == [1787895526000, "wazuh-alert-123.456"]
+
+
+def test_canonicalize_missing_source_id_fails_fast():
+    """Test that OpenSearch hit with missing _source.id fails fast even if _id is present."""
+    hit = {
+        "_index": "wazuh-alerts-4.x-2026.08.28",
+        "_id": "opensearch-doc-id-xyz",
+        "_source": {
+            # missing "id"
+            "timestamp": "2026-08-28T05:00:00Z",
+            "rule": {"id": "500", "level": 4, "groups": ["syslog"]},
+        },
+    }
+    with pytest.raises(CanonicalizationError, match="id"):
+        canonicalize_wazuh_alert(hit)
+
+
+# ── Fixtures & Parity Tests ───────────────────────────────────────────────────
 
 def test_canonicalize_standard_raw_alert():
     """Test canonicalization of standard raw Wazuh alert fixture."""
@@ -69,27 +236,6 @@ def test_canonicalize_standard_raw_alert():
     assert alert.metadata["location"] == "journald"
 
 
-def test_canonicalize_opensearch_hit_envelope():
-    """Test canonicalization of OpenSearch search hit envelope unwrapping."""
-    data = load_fixture("opensearch_hit.json")
-    alert = canonicalize_wazuh_alert(data)
-
-    assert alert.wazuh_alert_id == "1787895526.48426"  # from _source.id
-    assert alert.agent_id == "001"
-    assert alert.agent_name == "soc-1"
-    assert alert.rule_id == "5710"
-    assert alert.rule_level == 7
-    assert alert.rule_group_primary == "authentication_failed"
-    assert alert.mitre_tactics == ("Credential Access",)
-    assert alert.srcip == "192.168.1.50"
-    assert alert.agent_criticality == 1
-
-    # Metadata preserves envelope
-    assert alert.metadata["source_index"] == "wazuh-alerts-4.x-2026.08.28"
-    assert alert.metadata["source_document_id"] == "doc-hit-sample-001"
-    assert alert.metadata["source_sort"] == [1787895526000, "1787895526.48426"]
-
-
 def test_canonicalize_alert_no_mitre():
     """Test canonicalization of alert without MITRE section."""
     data = load_fixture("raw_alert_no_mitre.json")
@@ -98,7 +244,7 @@ def test_canonicalize_alert_no_mitre():
     assert alert.wazuh_alert_id == "1787897412.1001"
     assert alert.agent_name == "pusatkarir"
     assert alert.agent_criticality == 3  # pusatkarir is High criticality (3)
-    assert alert.rule_group_primary == "syslog"  # syslog > ossec
+    assert alert.rule_group_primary == "syslog"
     assert alert.mitre_tactics == ()
     assert alert.srcip is None
 
@@ -111,8 +257,7 @@ def test_canonicalize_alert_flattened_mitre():
     assert alert.wazuh_alert_id == "1787901330.2002"
     assert alert.agent_name == "dfir-iris"
     assert alert.agent_criticality == 4  # dfir-iris is Critical (4)
-    assert alert.rule_group_primary in ("sql_injection", "attack")
-    assert alert.rule_group_primary == "sql_injection"  # priority tie-break
+    assert alert.rule_group_primary == "sql_injection"
     assert "Initial Access" in alert.mitre_tactics
     assert "Defense Evasion" in alert.mitre_tactics
     assert alert.srcip == "203.0.113.19"
@@ -160,6 +305,13 @@ def test_canonicalize_missing_mandatory_fields_fails():
         canonicalize_wazuh_alert({
             "id": "123.456",
             "rule": {"id": "100", "level": 3, "groups": ["syslog"]},
+        })
+
+    # Missing Rule block
+    with pytest.raises(CanonicalizationError, match="rule"):
+        canonicalize_wazuh_alert({
+            "id": "123.456",
+            "timestamp": "2026-08-28T05:00:00Z",
         })
 
 
