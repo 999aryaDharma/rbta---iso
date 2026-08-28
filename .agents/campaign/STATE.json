@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "campaign": "rbta-if-research-s3-s9",
+  "repository": "999aryaDharma/rbta---iso",
+  "campaign_base_sha": "453e3c6f96ddb3aec5b17bf7a9be743038a11392",
+  "last_passed_gate": "S2",
+  "current_sprint": 3,
+  "status": "READY",
+  "active_branch": null,
+  "code_sha_tested": null,
+  "evidence_sha": null,
+  "last_completed_sprint": 2,
+  "blocked_reason": null,
+  "allowed_statuses": [
+    "READY",
+    "IMPLEMENTING",
+    "SELF_REVIEW",
+    "VERIFYING",
+    "REMEDIATING",
+    "GATE_PASS",
+    "BLOCKED_EXTERNAL",
+    "METHODOLOGY_CONFLICT",
+    "COMPLETE"
+  ]
+}
