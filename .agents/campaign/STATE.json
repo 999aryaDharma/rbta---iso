@@ -6,10 +6,10 @@
   "last_passed_gate": "S9",
   "current_sprint": 9,
   "status": "COMPLETE",
-  "active_branch": "fix/s7-no-drop-live-ingestion",
+  "active_branch": "fix/s7-final-no-drop-integrity",
   "final_remediation_gate": "PASS",
-  "code_sha_tested": "5f5e925ca6a8f68d325803ee701d0aa0d42be3b7",
-  "evidence_sha": "1100686459dc91b87e228a50748191f649193ce5",
+  "code_sha_tested": "b9a4e4c03d4889c9be6bd8af8e3befea680b0411",
+  "evidence_sha": "e615423380600d4c84984550b810d4e6e48856d5",
   "last_completed_sprint": 9,
   "blocked_reason": null,
   "allowed_statuses": [
