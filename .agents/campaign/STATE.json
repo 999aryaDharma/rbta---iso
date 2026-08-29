@@ -6,9 +6,10 @@
   "last_passed_gate": "S9",
   "current_sprint": 9,
   "status": "COMPLETE",
-  "active_branch": "refactor/sprint-9-api-outbox-shuffle",
-  "code_sha_tested": "58a24dd2eadbb40eac8b19eb2ecb0e17588592c8",
-  "evidence_sha": "3e2fd557945ae32822a10ce3102434a9ef1c9b6f",
+  "active_branch": "fix/final-remediation-s1-s9-v2",
+  "final_remediation_gate": "PASS",
+  "code_sha_tested": "8769da2a8f9002144088a5eb06e0ce3a72e0ab0b",
+  "evidence_sha": "f3cf6a05393ceffe30041a4ed5f5c164cf43220c",
   "last_completed_sprint": 9,
   "blocked_reason": null,
   "allowed_statuses": [
