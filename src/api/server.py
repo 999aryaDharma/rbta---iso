@@ -109,7 +109,8 @@ def create_production_app(
     # 5. Construct demonstration replay controller
     replay_controller: Optional[ReplayController] = None
     if scoring_pipe is not None:
-        replay_data_dir = Path(env_map.get("RBTA_REPLAY_DATA_DIR", "data/test_datasets")).resolve()
+        default_replay_dir = "/app/data/replay" if Path("/app/data/replay").exists() else "data/test_datasets"
+        replay_data_dir = Path(env_map.get("RBTA_REPLAY_DATA_DIR", default_replay_dir)).resolve()
         replay_controller = ReplayController(
             scoring_pipeline=scoring_pipe,
             replay_data_dir=replay_data_dir,

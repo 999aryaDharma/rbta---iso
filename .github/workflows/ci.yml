@@ -257,6 +257,7 @@ jobs:
             -e RBTA_MODEL_VERSION=reference-v1 \
             -e RBTA_SOURCE_MODE=DEFERRED \
             -e RBTA_LOG_LEVEL=DEBUG \
+            -e RBTA_REPLAY_DATA_DIR=/app/data/replay \
             -v "/tmp/rbta-ci/models:/app/artifacts/models:ro" \
             -v "/tmp/rbta-ci/replay:/app/data/replay:ro" \
             -v "/tmp/rbta-ci/state:/app/data/runtime:rw" \
