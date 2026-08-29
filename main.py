@@ -1,448 +1,297 @@
-"""
-main.py  —  Pipeline Orchestrator RBTA (Landauer et al. 2022 alignment)
-=======================================================================
-Urutan eksekusi mengikuti struktur evaluasi Landauer et al. (2022):
+"""Canonical Research Orchestrator for RBTA + Isolation Forest.
 
-  STEP 1  Preprocessing          → load_and_prepare()
-  STEP 2  [opsional] Injection   → attack_injector.run_injection()
-  STEP 3  Sensitivity Analysis   → metrics.sensitivity_analysis()
-                                   [Landauer Section 6.3]
-  STEP 4  RBTA optimal Δt        → rbta_core.run_rbta()
-                                   [Landauer Section 6.4-6.5]
-  STEP 5  Feature Engineering    → add_if_features() + enrich_features()
-  STEP 6  [opsional] Labels      → attack_injector.propagate_labels()
-  STEP 7  Fixed Window Baseline  → fixed_window_baseline.run_fixed_window()
-  STEP 8  ARR per Rule Group     → metrics.compute_arr_per_group()
-                                   [Landauer Section 6.8]
-  STEP 9  Isolation Forest       → isolation_forest.run_pipeline()
-  STEP 10 FPR vs Reduction       → metrics.compute_fpr_vs_reduction()
-                                   [Landauer Figure 12]
-  STEP 11 Noise Robustness Test  → robustness.noise_robustness_test()
-                                   [Landauer Section 6.9]
-  STEP 12 Runtime Proof O(n)     → metrics.runtime_complexity_proof()
-                                   [Landauer Section 6.10]
-  STEP 13a Scenario A: RBTA Eval → scenario_a_rbta_evaluation()
-  STEP 13b Scenario B: IF Eval   → scenario_b_if_evaluation()
-  STEP 14 Detail Plots           → severity dist, alert count dist, dll.
+Executes the end-to-end research methodology pipeline across all authoritative phases:
+Phase 1: Ingestion & Canonicalization
+Phase 2: RBTA Temporal Aggregation (Agent-Local ETW)
+Phase 3: Seven Canonical Feature Extraction
+Phase 4: Isolation Forest Reference Training & Model Publication
+Phase 5: Stream-Safe Anomaly Scoring & Decision Matrix
+Phase 6: Phase A Evaluation (Sensitivity, Baseline, Noise, Complexity)
+Phase 7: Phase B Evaluation (Structural Silhouette vs Permutations)
+Phase 8: Structured Run Artifact Publication
 """
 
-import gc
-import logging
+import argparse
+from datetime import datetime, timedelta, timezone
+import json
 import os
+from pathlib import Path
 import sys
 import time
-import traceback
-from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence
+import uuid
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
-log = logging.getLogger(__name__)
-
-# ── Path setup ────────────────────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(PROJECT_ROOT))
-
+import numpy as np
 import pandas as pd
 
-# ── Imports ───────────────────────────────────────────────────────────────────
-from src.etl.preprocessing_01       import load_and_prepare
-from src.engine.rbta_core           import run_rbta, validate_mapping, add_if_features
-from src.engine.fixed_window_baseline import run_fixed_window
-from src.engine.feature_engineering  import enrich_features
-from src.engine.isolation_forest     import run_pipeline as run_isolation_forest
-from src.evaluation.attack_injector  import run_injection, propagate_labels
-from src.evaluation.robustness       import (
-    noise_robustness_test, plot_robustness, print_robustness_table,
+from src.contracts.raw_alert import CanonicalRawAlert
+from src.etl.wazuh_canonicalizer import canonicalize_wazuh_alert
+from src.evaluation.fixed_window_baseline import run_fixed_window_baseline
+from src.evaluation.metrics import compute_arr
+from src.evaluation.noise_robustness import run_noise_robustness_evaluation
+from src.evaluation.runtime_complexity import run_runtime_complexity_evaluation
+from src.evaluation.sensitivity import run_delta_t_sensitivity_analysis
+from src.evaluation.structural_silhouette import run_structural_silhouette_evaluation
+from src.features.extractor import FEATURE_COLUMNS, SevenFeatureExtractor
+from src.model.registry import ModelRegistry
+from src.model.scoring_pipeline import (
+    ModelArtifactBundle,
+    ScoringPipeline,
+    train_reference_pipeline,
 )
-from src.evaluation.metrics          import (
-    sensitivity_analysis, find_elbow,
-    print_sensitivity_table, print_enhancement_report,
-    plot_sensitivity, plot_severity_dist, plot_alert_count_dist,
-    plot_watermark_stats, plot_elastic_dt_history,
-    compute_arr_per_group, plot_arr_per_group, print_arr_per_group,
-    compute_fpr_vs_reduction, plot_fpr_vs_reduction,
-    runtime_complexity_proof, plot_runtime_proof,
-    compute_pr_auc, plot_pr_curve,
-    scenario_a_rbta_evaluation,
-    scenario_b_if_evaluation,
-    comprehensive_report,
-    DELTA_T_VALUES, BUFFER_SIZE, MAX_LATENESS_SEC,
-)
-
-# ── Konfigurasi ───────────────────────────────────────────────────────────────
-RAW_CSV_PATH      = "data/raw/rbta_ready_ALL.csv"
-INJECTED_CSV_PATH = "data/injected/rbta_injected.csv"
-AGG_DIR           = "data/aggregated"
-FINAL_DIR         = "data/final"
-FIGURES_DIR       = "reports/figures"
-QUALITY_DIR       = "reports/data_quality"
-
-USE_INJECTED_DATA   = True  # True untuk evaluasi PR-AUC/FNR dengan ground truth
-INJECTION_SCENARIOS = ["A", "B", "C"]
-SKIP_F13            = True  # True untuk melewati f13 (cross_agent_spread) yang O(n²)
-
-# Konfigurasi robustness test (Landauer Section 6.9)
-RUN_ROBUSTNESS_TEST = True
-NOISE_RATES         = [0.0, 0.05, 0.10, 0.20, 0.30]
-
-# Konfigurasi runtime proof (Landauer Section 6.10)
-RUN_RUNTIME_PROOF = True
+from src.rbta.engine import RBTAEngine
+from src.runners.batch_runner import BatchResearchRunner
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Helpers
-# ══════════════════════════════════════════════════════════════════════════════
+def _generate_synthetic_research_fixture(n_alerts: int = 250, seed: int = 42) -> List[CanonicalRawAlert]:
+    """Generate deterministic synthetic raw alerts for smoke tests and research demonstrations."""
+    rng = np.random.default_rng(seed)
+    base_t = datetime(2026, 8, 28, 8, 0, 0, tzinfo=timezone.utc)
+    agents = [("001", "soc-srv1", 3), ("002", "soc-srv2", 2), ("003", "soc-db", 4), ("004", "soc-gw", 1)]
+    rule_groups = ["pam", "sshd", "web", "syslog", "firewall", "ids"]
 
-def safe_step(name: str, fn, *args, **kwargs):
-    log.info("=" * 70)
-    log.info("  %s", name)
-    log.info("=" * 70)
-    try:
-        result = fn(*args, **kwargs)
-        log.info("[OK] %s selesai.", name)
-        return result
-    except Exception as exc:
-        log.error("[ERROR] %s gagal: %s", name, exc)
-        traceback.print_exc()
-        return None
+    alerts: List[CanonicalRawAlert] = []
+    current_time = base_t
+
+    # 1. Background standard traffic (mostly benign, low severity)
+    for i in range(n_alerts - 30):
+        gap_sec = float(rng.exponential(scale=30.0) + 2.0)
+        current_time += timedelta(seconds=gap_sec)
+
+        agent_id, agent_name, agent_crit = agents[int(rng.integers(0, len(agents)))]
+        group = rule_groups[int(rng.integers(0, len(rule_groups)))]
+        sev = int(rng.integers(1, 6))  # Low-medium severity
+        rule_id = f"{int(rng.integers(1000, 5000))}"
+        mitre = ()
+
+        alerts.append(
+            CanonicalRawAlert(
+                wazuh_alert_id=f"alert_{i+1:05d}",
+                timestamp=current_time,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                rule_group_primary=group,
+                rule_level=sev,
+                rule_id=rule_id,
+                mitre_tactics=mitre,
+                srcip=None,
+                agent_criticality=agent_crit,
+            )
+        )
+
+    # 2. Burst of severe anomalous attack events (high severity, multiple critical MITRE tactics)
+    attack_time = current_time + timedelta(minutes=10)
+    for j in range(30):
+        attack_time += timedelta(seconds=float(rng.uniform(1.0, 5.0)))
+        alerts.append(
+            CanonicalRawAlert(
+                wazuh_alert_id=f"alert_{n_alerts - 30 + j + 1:05d}",
+                timestamp=attack_time,
+                agent_id="003",  # High criticality agent
+                agent_name="soc-db",
+                rule_group_primary="pam",
+                rule_level=14,  # High severity
+                rule_id=f"{9000 + (j % 5)}",
+                mitre_tactics=("Initial Access", "Execution", "Privilege Escalation"),
+                srcip="10.0.0.99",
+                agent_criticality=4,
+            )
+        )
+
+    return alerts
 
 
-def _make_dirs():
-    for d in [AGG_DIR, FINAL_DIR, FIGURES_DIR, QUALITY_DIR]:
-        os.makedirs(d, exist_ok=True)
+def run_canonical_research_pipeline(
+    raw_alerts: Optional[Sequence[CanonicalRawAlert]] = None,
+    raw_file_path: Optional[Path] = None,
+    output_base_dir: Path = Path("artifacts/research-runs"),
+    model_version: str = "rbta-if-canonical-v1",
+    base_delta_t_minutes: int = 15,
+    random_seed: int = 42,
+) -> Dict[str, Any]:
+    """Execute the canonical research orchestrator pipeline and save structured run artifacts."""
+    run_id = f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
+    run_dir = output_base_dir / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    t_start = time.perf_counter()
 
+    print("=" * 70)
+    print(f"RBTA + ISOLATION FOREST CANONICAL RESEARCH PIPELINE")
+    print(f"Run ID        : {run_id}")
+    print(f"Output Dir    : {run_dir.resolve()}")
+    print(f"Model Version : {model_version}")
+    print("=" * 70)
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Main Pipeline
-# ══════════════════════════════════════════════════════════════════════════════
+    # Phase 1: Ingestion & Canonicalization
+    print("\n[Phase 1] Ingestion & Canonicalization...")
+    alerts: List[CanonicalRawAlert] = []
+    if raw_alerts is not None:
+        alerts = list(raw_alerts)
+    elif raw_file_path is not None and raw_file_path.exists():
+        with raw_file_path.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    hit = json.loads(line)
+                    alerts.append(canonicalize_wazuh_alert(hit))
+    else:
+        print("  Using deterministic synthetic test fixture (250 alerts)...")
+        alerts = _generate_synthetic_research_fixture(n_alerts=250, seed=random_seed)
+
+    n_raw = len(alerts)
+    print(f"  Canonical raw alerts loaded: {n_raw}")
+
+    # Phase 2: RBTA Batch Aggregation
+    print("\n[Phase 2] RBTA Temporal Aggregation (Agent-Local ETW)...")
+    base_delta_t = timedelta(minutes=base_delta_t_minutes)
+    runner = BatchResearchRunner(base_delta_t=base_delta_t, adaptive=True)
+    agg_result = runner.run(alerts)
+    meta_alerts = agg_result.meta_alerts
+    n_meta = len(meta_alerts)
+    arr = compute_arr(n_raw, n_meta)
+    print(f"  Aggregated MetaAlerts: {n_meta}")
+    print(f"  Alert Reduction Rate (ARR): {arr:.2f}%")
+
+    # Phase 3: Feature Extraction
+    print("\n[Phase 3] Seven Canonical Feature Extraction...")
+    df_features = SevenFeatureExtractor.extract_features_df(meta_alerts)
+    print(f"  Extracted feature matrix shape: {df_features.shape}")
+    print(f"  Feature columns: {list(FEATURE_COLUMNS)}")
+
+    # Phase 4: Isolation Forest Model Training
+    print("\n[Phase 4] Isolation Forest Training & Artifact Publication...")
+    bundle = train_reference_pipeline(meta_alerts, random_state=random_seed, model_version=model_version)
+    models_dir = run_dir / "models"
+    registry = ModelRegistry(base_dir=models_dir)
+    published_dir = registry.publish_bundle(bundle, model_version=model_version)
+    print(f"  Published model bundle to: {published_dir}")
+    print(f"  Tukey Threshold (theta)  : {bundle.threshold.threshold:.4f} (Q3={bundle.threshold.q3:.4f}, IQR={bundle.threshold.iqr:.4f})")
+
+    # Phase 5: Online/Batch Scoring & Decision Matrix
+    print("\n[Phase 5] Anomaly Scoring & Decision Matrix Evaluation...")
+    pipeline = ScoringPipeline(bundle)
+    df_scored, scored_meta_alerts = pipeline.score_meta_alerts(meta_alerts)
+    scored_csv_path = run_dir / "meta_alerts_scored.csv"
+    df_scored.to_csv(scored_csv_path, index=False)
+    print(f"  Scored results exported to: {scored_csv_path}")
+
+    # Phase 6: Phase A Evaluation
+    print("\n[Phase 6] Phase A RBTA Evaluations...")
+    print("  Running Delta-t Sensitivity Analysis...")
+    sens_result = run_delta_t_sensitivity_analysis(alerts)
+    print(f"    Recommended Elbow Delta-t: {sens_result.recommended_elbow_delta_t} minutes")
+
+    print("  Running Fixed Tumbling Window Baseline...")
+    baseline_result = run_fixed_window_baseline(alerts, window_duration=base_delta_t)
+    print(f"    Fixed Window Baseline ARR: {baseline_result.arr:.2f}% (vs RBTA: {arr:.2f}%)")
+
+    print("  Running Noise Robustness Evaluation...")
+    noise_result = run_noise_robustness_evaluation(alerts, delta_t=base_delta_t, random_seed=random_seed)
+
+    print("  Running Runtime Complexity Evaluation...")
+    complexity_result = run_runtime_complexity_evaluation(alerts, n_subsets=6, delta_t=base_delta_t)
+    print(f"    Runtime O(n log k) Linear Fit R^2: {complexity_result.r_squared:.4f} (Slope: {complexity_result.slope:.6f} ms/alert)")
+
+    phase_a_summary = {
+        "rbta_arr": arr,
+        "fixed_baseline_arr": baseline_result.arr,
+        "arr_advantage_percent_points": round(arr - baseline_result.arr, 2),
+        "recommended_elbow_delta_t_minutes": sens_result.recommended_elbow_delta_t,
+        "runtime_r_squared": complexity_result.r_squared,
+        "mean_throughput_alerts_per_ms": complexity_result.mean_throughput,
+        "sensitivity_curve": sens_result.summary_df.to_dict(orient="records"),
+        "noise_robustness": noise_result.summary_df.to_dict(orient="records"),
+        "complexity_subsets": complexity_result.subset_df.to_dict(orient="records"),
+    }
+    with (run_dir / "phase_a_results.json").open("w", encoding="utf-8") as f:
+        json.dump(phase_a_summary, f, indent=2)
+
+    # Phase 7: Phase B Evaluation
+    print("\n[Phase 7] Phase B Structural Silhouette Evaluation...")
+    silhouette_result = run_structural_silhouette_evaluation(
+        scored_meta_alerts, bundle, n_permutations=100, random_seed=random_seed
+    )
+    phase_b_summary = {
+        "is_calculable": silhouette_result.is_calculable,
+        "uncalculable_reason": silhouette_result.uncalculable_reason,
+        "observed_silhouette": silhouette_result.observed_silhouette,
+        "null_distribution_mean": silhouette_result.random_mean,
+        "null_distribution_std": silhouette_result.random_std,
+        "null_distribution_min": silhouette_result.random_min,
+        "null_distribution_max": silhouette_result.random_max,
+        "observed_percentile": silhouette_result.observed_percentile,
+        "z_score": silhouette_result.z_score,
+        "empirical_p_value": silhouette_result.empirical_p_value,
+        "n_permutations": silhouette_result.n_valid_permutations,
+    }
+    with (run_dir / "phase_b_results.json").open("w", encoding="utf-8") as f:
+        json.dump(phase_b_summary, f, indent=2)
+
+    if silhouette_result.is_calculable:
+        print(f"  Observed Silhouette Score : {silhouette_result.observed_silhouette:.4f}")
+        print(f"  Null Distribution Mean    : {silhouette_result.random_mean:.4f} +/- {silhouette_result.random_std:.4f}")
+        print(f"  Standardized Z-Score      : {silhouette_result.z_score:.2f}")
+        print(f"  Empirical p-value         : {silhouette_result.empirical_p_value:.4f}")
+    else:
+        print(f"  Silhouette evaluation not calculable: {silhouette_result.uncalculable_reason}")
+
+    # Phase 8: Structured Run Artifact Publication
+    elapsed_total = time.perf_counter() - t_start
+    manifest = {
+        "run_id": run_id,
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "elapsed_seconds": round(elapsed_total, 3),
+        "n_raw_alerts": n_raw,
+        "n_meta_alerts": n_meta,
+        "arr": arr,
+        "model_version": model_version,
+        "random_seed": random_seed,
+        "base_delta_t_minutes": base_delta_t_minutes,
+        "published_artifacts": {
+            "phase_a_results": "phase_a_results.json",
+            "phase_b_results": "phase_b_results.json",
+            "meta_alerts_scored": "meta_alerts_scored.csv",
+            "research_summary": "research_summary.json",
+        },
+    }
+    with (run_dir / "run_manifest.json").open("w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+
+    research_summary = {
+        "manifest": manifest,
+        "phase_a": phase_a_summary,
+        "phase_b": phase_b_summary,
+    }
+    with (run_dir / "research_summary.json").open("w", encoding="utf-8") as f:
+        json.dump(research_summary, f, indent=2)
+
+    print("\n" + "=" * 70)
+    print(f"CANONICAL RESEARCH PIPELINE COMPLETED IN {elapsed_total:.2f}s")
+    print(f"All artifacts published to: {run_dir.resolve()}")
+    print("=" * 70)
+
+    return research_summary
+
 
 def main() -> None:
-    t_global = time.perf_counter()
-    _make_dirs()
-
-    log.info("#" * 70)
-    log.info("  RBTA PIPELINE — Landauer et al. (2022) alignment")
-    log.info("  INSTIKI SOC Alert Fatigue Research")
-    log.info("#" * 70)
-
-    # =========================================================================
-    # STEP 1: Preprocessing
-    # =========================================================================
-    df_raw_original = safe_step(
-        "STEP 1 — PREPROCESSING",
-        load_and_prepare,
-        RAW_CSV_PATH,
+    """CLI entrypoint for running the research orchestrator."""
+    parser = argparse.ArgumentParser(
+        description="RBTA + Isolation Forest Canonical Research Orchestrator"
     )
-    if df_raw_original is None:
-        log.error("Preprocessing gagal. Pipeline dihentikan.")
-        return
+    parser.add_argument("--input", type=Path, default=None, help="Path to raw JSONL Wazuh alerts file")
+    parser.add_argument("--output-dir", type=Path, default=Path("artifacts/research-runs"), help="Output directory")
+    parser.add_argument("--model-version", type=str, default="rbta-if-canonical-v1", help="Model version identifier")
+    parser.add_argument("--delta-t", type=int, default=15, help="Base Delta-t window in minutes (default 15)")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed (default 42)")
 
-    # =========================================================================
-    # STEP 2: [opsional] Attack Injection
-    # =========================================================================
-    df_raw_injected = None
-
-    if USE_INJECTED_DATA:
-        injection_result = safe_step(
-            "STEP 2 — ATTACK INJECTION (scenarios: %s)" % INJECTION_SCENARIOS,
-            run_injection,
-            input_path  = RAW_CSV_PATH,
-            output_path = INJECTED_CSV_PATH,
-            scenarios   = INJECTION_SCENARIOS,
-        )
-        if injection_result is not None:
-            # Preprocessing pada data injected
-            from src.etl.preprocessing_01 import REQUIRED_COLS, OPTIONAL_COLS
-            all_cols = {**REQUIRED_COLS, **OPTIONAL_COLS}
-            available = {k: v for k, v in all_cols.items() if k in injection_result.columns}
-            selected  = [c for c in available.keys() if c in injection_result.columns]
-            df_raw_injected = injection_result[selected].rename(columns=available).copy()
-            
-            # [FIX-1] Preserve kolom kritis untuk label propagation dan traceability
-            # wazuh_alert_id: diperlukan untuk propagate_labels (set intersection)
-            # is_synthetic: ground truth label
-            # scenario_id: scenario attribution
-            for col in ["wazuh_alert_id", "is_synthetic", "scenario_id"]:
-                if col in injection_result.columns:
-                    df_raw_injected[col] = injection_result[col].values
-                    log.info("[FIX-1] Kolom %s dipreserve (%d values)", col, len(df_raw_injected[col]))
-            
-            df_raw_injected["timestamp"] = pd.to_datetime(
-                df_raw_injected["timestamp"], errors="coerce", utc=True
-            ).dt.tz_localize(None)
-            log.info("Dataset injected siap: %d baris", len(df_raw_injected))
-    else:
-        log.info("STEP 2 — SKIP (USE_INJECTED_DATA=False)")
-
-    # Dataset pipeline utama
-    df_pipeline = df_raw_injected if df_raw_injected is not None else df_raw_original
-
-    # =========================================================================
-    # STEP 3: Sensitivity Analysis (Landauer Section 6.3)
-    # =========================================================================
-    sens_result = safe_step(
-        "STEP 3 — SENSITIVITY ANALYSIS [Landauer Section 6.3]",
-        sensitivity_analysis,
-        df_pipeline, DELTA_T_VALUES,
-        buffer_size=BUFFER_SIZE, max_lateness_sec=MAX_LATENESS_SEC,
+    args = parser.parse_args()
+    run_canonical_research_pipeline(
+        raw_file_path=args.input,
+        output_base_dir=args.output_dir,
+        model_version=args.model_version,
+        base_delta_t_minutes=args.delta_t,
+        random_seed=args.seed,
     )
-
-    optimal_dt = 15  # fallback
-    df_sens, meta_map, elastic_map, wmark_map = pd.DataFrame(), {}, {}, {}
-
-    if sens_result is not None:
-        df_sens, meta_map, elastic_map, wmark_map = sens_result
-        optimal_dt = find_elbow(df_sens)
-        print_sensitivity_table(df_sens)
-        df_sens.to_csv(f"{QUALITY_DIR}/sensitivity_results.csv", index=False)
-        safe_step("  PLOT: Sensitivity", plot_sensitivity, df_sens, FIGURES_DIR)
-
-    log.info("Δt optimal = %d menit", optimal_dt)
-
-    # =========================================================================
-    # STEP 4: RBTA dengan Δt optimal (Landauer Section 6.4-6.5)
-    # =========================================================================
-    rbta_result = safe_step(
-        f"STEP 4 — RBTA (Δt={optimal_dt} menit) [Landauer Section 6.4-6.5]",
-        run_rbta,
-        df_pipeline,
-        delta_t_minutes  = optimal_dt,
-        buffer_size      = BUFFER_SIZE,
-        max_lateness_sec = MAX_LATENESS_SEC,
-        enable_adaptive  = False,
-    )
-
-    df_meta_rbta = None
-    idx_map_rbta, elastic_rbta, wmark_rbta = {}, None, None
-
-    if rbta_result is not None:
-        df_meta_rbta, df_compound, idx_map_rbta, elastic_rbta, wmark_rbta = rbta_result
-        safe_step("  VALIDATE", validate_mapping, df_pipeline, df_meta_rbta, idx_map_rbta)
-
-        if not df_compound.empty:
-            df_compound.to_csv(f"{AGG_DIR}/meta_alerts_compound.csv", index=False)
-
-        # =====================================================================
-        # STEP 5: Feature Engineering
-        # =====================================================================
-        for step_name, fn, kwargs in [
-            ("f1-f9", add_if_features, {}),
-            ("f10-f11", enrich_features, {}),  # [FIX-2] v2: hanya f11 deviation, skip_f13 default=True
-        ]:
-            r = safe_step(f"STEP 5 — {step_name}", fn, df_meta_rbta, **kwargs)
-            if r is not None:
-                df_meta_rbta = r
-
-        # =====================================================================
-        # STEP 6: [opsional] Label Propagation
-        # =====================================================================
-        if USE_INJECTED_DATA and df_raw_injected is not None:
-            r = safe_step(
-                "STEP 6 — LABEL PROPAGATION",
-                propagate_labels,
-                df_meta_rbta, df_raw_injected, idx_map_rbta,
-            )
-            if r is not None:
-                df_meta_rbta = r
-        else:
-            log.info("STEP 6 — SKIP")
-
-        df_meta_rbta.to_csv(f"{AGG_DIR}/meta_alerts_rbta.csv", index=False)
-        log.info("Meta-alerts RBTA disimpan: %s/meta_alerts_rbta.csv", AGG_DIR)
-
-    # =========================================================================
-    # STEP 7: Fixed Window Baseline
-    # =========================================================================
-    df_meta_fixed  = None
-    fixed_result   = safe_step(
-        f"STEP 7 — FIXED WINDOW BASELINE (Δt={optimal_dt} menit)",
-        run_fixed_window, df_pipeline, delta_t_minutes=optimal_dt,
-    )
-    if fixed_result is not None:
-        df_meta_fixed, _ = fixed_result
-        if not df_meta_fixed.empty:
-            df_meta_fixed.to_csv(f"{AGG_DIR}/meta_alerts_fixed_window.csv", index=False)
-
-    # =========================================================================
-    # STEP 8: ARR per Rule Group (Landauer Section 6.8)
-    # =========================================================================
-    df_per_group = None
-    if df_meta_rbta is not None and not df_meta_rbta.empty:
-        df_per_group = safe_step(
-            "STEP 8 — ARR PER RULE GROUP [Landauer Section 6.8]",
-            compute_arr_per_group,
-            df_pipeline, df_meta_rbta, df_meta_fixed,
-        )
-        if df_per_group is not None:
-            print_arr_per_group(df_per_group)
-            df_per_group.to_csv(f"{QUALITY_DIR}/arr_per_rule_group.csv", index=False)
-            safe_step("  PLOT: ARR per Group",
-                      plot_arr_per_group, df_per_group, FIGURES_DIR)
-
-    # =========================================================================
-    # STEP 9: Isolation Forest
-    # =========================================================================
-    df_scored = None
-    rbta_csv  = f"{AGG_DIR}/meta_alerts_rbta.csv"
-
-    if os.path.exists(rbta_csv):
-        if_result = safe_step(
-            "STEP 9 — ISOLATION FOREST",
-            run_isolation_forest,
-            rbta_csv, FINAL_DIR, "auto", 200, "iqr", None, 42,
-        )
-        if if_result is not None:
-            df_scored = if_result[0]
-
-    # =========================================================================
-    # FIX-3: Propagate ground_truth ke df_scored (STEP 9→10)
-    # =========================================================================
-    if (df_scored is not None and df_meta_rbta is not None 
-        and "ground_truth" in df_meta_rbta.columns 
-        and "meta_id" in df_meta_rbta.columns):
-        gt_map = df_meta_rbta.set_index("meta_id")["ground_truth"]
-        df_scored["ground_truth"] = (
-            df_scored["meta_id"]
-            .map(gt_map)
-            .fillna(0)
-            .astype(int)
-        )
-        n_gt = int(df_scored["ground_truth"].sum())
-        log.info(
-            "[FIX-3] Ground truth propagated → df_scored: %d positif dari %d total",
-            n_gt, len(df_scored),
-        )
-
-    # =========================================================================
-    # STEP 10: FPR vs Reduction Rate (Landauer Figure 12)
-    # =========================================================================
-    if df_scored is not None:
-        df_tradeoff = safe_step(
-            "STEP 10 — FPR vs REDUCTION RATE [Landauer Figure 12]",
-            compute_fpr_vs_reduction, df_scored,
-        )
-        if df_tradeoff is not None and not df_tradeoff.empty:
-            df_tradeoff.to_csv(f"{QUALITY_DIR}/fpr_vs_reduction.csv", index=False)
-            safe_step("  PLOT: FPR vs Reduction",
-                      plot_fpr_vs_reduction, df_tradeoff, FIGURES_DIR)
-
-    # =========================================================================
-    # STEP 11: Noise Robustness Test (Landauer Section 6.9)
-    # =========================================================================
-    if RUN_ROBUSTNESS_TEST:
-        robust_result = safe_step(
-            "STEP 11 — NOISE ROBUSTNESS TEST [Landauer Section 6.9]",
-            noise_robustness_test,
-            df_raw_original,
-            delta_t_minutes  = optimal_dt,
-            buffer_size      = BUFFER_SIZE,
-            max_lateness_sec = MAX_LATENESS_SEC,
-            noise_rates      = NOISE_RATES,
-        )
-        if robust_result is not None:
-            print_robustness_table(robust_result)
-            robust_result.to_csv(f"{QUALITY_DIR}/robustness_results.csv", index=False)
-            safe_step("  PLOT: Robustness",
-                      plot_robustness, robust_result, FIGURES_DIR)
-    else:
-        log.info("STEP 11 — SKIP (RUN_ROBUSTNESS_TEST=False)")
-
-    # =========================================================================
-    # STEP 12: Runtime Complexity Proof (Landauer Section 6.10)
-    # =========================================================================
-    if RUN_RUNTIME_PROOF:
-        runtime_result = safe_step(
-            "STEP 12 — RUNTIME COMPLEXITY PROOF O(n log k) [Landauer Section 6.10]",
-            runtime_complexity_proof,
-            df_raw_original,
-            delta_t_minutes = optimal_dt,
-            buffer_size     = BUFFER_SIZE,
-        )
-        if runtime_result is not None:
-            runtime_result.to_csv(f"{QUALITY_DIR}/runtime_proof.csv", index=False)
-            safe_step("  PLOT: Runtime Proof",
-                      plot_runtime_proof, runtime_result, BUFFER_SIZE, FIGURES_DIR)
-    else:
-        log.info("STEP 12 — SKIP (RUN_RUNTIME_PROOF=False)")
-
-    # =========================================================================
-    # STEP 13: Scenario-Based Evaluation (Two Separate Evaluation Frameworks)
-    # =========================================================================
-    # Scenario A: RBTA evaluation (metrik utama untuk sidang)
-    if df_meta_rbta is not None and not df_meta_rbta.empty:
-        safe_step(
-            "STEP 13A — SCENARIO A: RBTA EVALUATION (Metrik Utama)",
-            scenario_a_rbta_evaluation,
-            df_meta_rbta, df_meta_fixed, df_per_group, QUALITY_DIR,
-        )
-    else:
-        log.warning("STEP 13A — SKIP (df_meta_rbta tidak tersedia)")
-
-    # Scenario B: IF evaluation (komponen pendukung, proof of concept)
-    scored_csv = f"{FINAL_DIR}/meta_alerts_scored.csv"
-    if df_scored is None and os.path.exists(scored_csv):
-        df_scored = pd.read_csv(scored_csv)
-
-    if df_scored is not None:
-        safe_step(
-            "STEP 13B — SCENARIO B: IF EVALUATION (Proof of Concept)",
-            scenario_b_if_evaluation,
-            df_scored, QUALITY_DIR,
-        )
-
-        has_gt = ("ground_truth" in df_scored.columns
-                  and df_scored["ground_truth"].sum() > 0)
-        if has_gt:
-            pr_auc = compute_pr_auc(df_scored)
-            safe_step("  PLOT: PR Curve",
-                      plot_pr_curve, df_scored, pr_auc, FIGURES_DIR)
-    else:
-        log.warning("STEP 13B — SKIP (df_scored tidak tersedia)")
-
-    # =========================================================================
-    # STEP 14: Detail plots per Δt (reuse cache)
-    # =========================================================================
-    log.info("STEP 14 — DETAIL PLOTS (cache sensitivity)")
-    for dt in DELTA_T_VALUES:
-        df_dt       = meta_map.get(dt)
-        elastic_obj = elastic_map.get(dt)
-        wmark_obj   = wmark_map.get(dt)
-
-        if df_dt is not None and not df_dt.empty:
-            try:
-                plot_severity_dist(df_dt, dt, output_dir=FIGURES_DIR)
-                plot_alert_count_dist(df_dt, dt, output_dir=FIGURES_DIR)
-            except Exception as e:
-                log.warning("Plot Δt=%d gagal: %s", dt, e)
-
-        if dt == optimal_dt and elastic_obj and wmark_obj:
-            try:
-                plot_elastic_dt_history(elastic_obj, dt, output_dir=FIGURES_DIR)
-                plot_watermark_stats(wmark_obj, output_dir=FIGURES_DIR)
-                print_enhancement_report(wmark_obj, elastic_obj, BUFFER_SIZE)
-            except Exception as e:
-                log.warning("Enhancement plot gagal: %s", e)
-
-    # =========================================================================
-    # Summary
-    # =========================================================================
-    elapsed = (time.perf_counter() - t_global) / 60
-    log.info("#" * 70)
-    log.info("  PIPELINE SELESAI")
-    log.info("  Total time    : %.2f menit", elapsed)
-    log.info("  Δt optimal    : %d menit", optimal_dt)
-    log.info("  Injeksi aktif : %s", USE_INJECTED_DATA)
-    log.info("  Robustness    : %s", RUN_ROBUSTNESS_TEST)
-    log.info("  Runtime proof : %s", RUN_RUNTIME_PROOF)
-    log.info("  Output dir    : %s/ dan %s/", AGG_DIR, FINAL_DIR)
-    log.info("  Grafik        : %s/", FIGURES_DIR)
-    log.info("  Report        : %s/", QUALITY_DIR)
-    log.info("#" * 70)
-
-    del df_raw_original, df_raw_injected
-    gc.collect()
 
 
 if __name__ == "__main__":
