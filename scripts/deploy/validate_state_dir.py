@@ -15,7 +15,7 @@ def check_state_dir_permissions(
     target_uid: int = REQUIRED_UID,
     target_gid: int = REQUIRED_GID,
 ) -> tuple[bool, str]:
-    """Validate that state directory satisfies the runtime non-root UID/GID ownership and secure write contract.
+    """Validate that state directory satisfies the runtime non-root UID/GID ownership and secure write/execute contract.
 
     Parameters
     ----------
@@ -56,6 +56,14 @@ def check_state_dir_permissions(
         if not (mode & stat.S_IWUSR):
             return False, (
                 f"State directory '{state_dir}' is not writable by owner (mode: {oct(mode)}).\n"
+                f"Remediation (run on host):\n"
+                f"  sudo chmod 0750 {state_dir}"
+            )
+
+        if not (mode & stat.S_IXUSR):
+            return False, (
+                f"State directory '{state_dir}' is not executable/traversable by owner (mode: {oct(mode)}).\n"
+                f"Directories require execute permission for container UID {target_uid} to access files within.\n"
                 f"Remediation (run on host):\n"
                 f"  sudo chmod 0750 {state_dir}"
             )

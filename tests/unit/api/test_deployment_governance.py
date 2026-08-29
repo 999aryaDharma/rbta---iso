@@ -248,6 +248,65 @@ def test_state_dir_validation_behavioral_rejects_world_writable(tmp_path: Path, 
     assert "forbidden" in msg.lower()
 
 
+def test_state_dir_validation_behavioral_rejects_missing_execute_0640(tmp_path: Path, monkeypatch):
+    """Behavioral test: state validator rejects directories without owner execute/traverse permission (e.g. 0640)."""
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    class MockStat0640:
+        st_uid = 10001
+        st_gid = 10001
+        st_mode = stat.S_IFDIR | stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP  # 0640 (rw-r-----)
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "stat", lambda *args, **kwargs: MockStat0640())
+
+    is_valid, msg = check_state_dir_permissions(state_dir, target_uid=10001, target_gid=10001)
+    assert is_valid is False
+    assert "executable" in msg.lower() or "traversable" in msg.lower()
+    assert "sudo chmod 0750" in msg
+
+
+def test_preflight_behavioral_empty_api_key(tmp_path: Path):
+    """Behavioral test: asus-preflight.sh fails when RBTA_API_KEY is empty in .env."""
+    if os.name != "posix":
+        pytest.skip("Bash script behavioral execution requires POSIX environment (Linux CI)")
+
+    preflight_script = REPO_ROOT / "scripts" / "deploy" / "asus-preflight.sh"
+    env_file = tmp_path / ".env"
+    env_file.write_text("RBTA_API_KEY=\nRBTA_MODEL_VERSION=deploy-smoke-v1\n", encoding="utf-8")
+
+    env = {**os.environ, "RBTA_ENV_FILE": str(env_file)}
+    res = subprocess.run(
+        ["bash", str(preflight_script)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0, "preflight must exit non-zero when RBTA_API_KEY is empty"
+    assert "RBTA_API_KEY is missing or empty" in res.stderr
+
+
+def test_preflight_behavioral_empty_model_version(tmp_path: Path):
+    """Behavioral test: asus-preflight.sh fails when RBTA_MODEL_VERSION is empty in .env."""
+    if os.name != "posix":
+        pytest.skip("Bash script behavioral execution requires POSIX environment (Linux CI)")
+
+    preflight_script = REPO_ROOT / "scripts" / "deploy" / "asus-preflight.sh"
+    env_file = tmp_path / ".env"
+    env_file.write_text("RBTA_API_KEY=ci-valid-key-placeholder\nRBTA_MODEL_VERSION=\n", encoding="utf-8")
+
+    env = {**os.environ, "RBTA_ENV_FILE": str(env_file)}
+    res = subprocess.run(
+        ["bash", str(preflight_script)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0, "preflight must exit non-zero when RBTA_MODEL_VERSION is empty"
+    assert "RBTA_MODEL_VERSION is missing or empty" in res.stderr
+
+
 def test_validate_model_script_cli(tmp_path: Path):
     """Verify validate_model.py script correctly accepts valid bundles and rejects invalid bundles."""
     validator_script = REPO_ROOT / "scripts" / "deploy" / "validate_model.py"
