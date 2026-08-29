@@ -1,6 +1,8 @@
 """Model artifact registry with atomic staging publication."""
 
+import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 from typing import Any, Dict, Optional, Union
@@ -31,12 +33,19 @@ REQUIRED_ARTIFACT_FILES = (
 class ModelRegistry:
     """Manages versioned model artifacts with atomic staging publication."""
 
-    def __init__(self, base_dir: Union[str, Path] = "artifacts/models") -> None:
+    def __init__(self, base_dir: Union[str, Path] = "artifacts/models", explicit_version: Optional[str] = None) -> None:
         self.base_dir: Path = Path(base_dir).resolve()
         self.staging_dir: Path = self.base_dir / ".staging"
+        self._explicit_version = explicit_version or os.getenv("RBTA_MODEL_VERSION")
 
     def get_active_version(self) -> Optional[str]:
         """Discover the most recently published model version in base_dir."""
+        if self._explicit_version:
+            version_dir = self.base_dir / self._explicit_version
+            if version_dir.exists() and version_dir.is_dir():
+                return self._explicit_version
+            return None
+
         if not self.base_dir.exists():
             return None
         versions = [p.name for p in self.base_dir.iterdir() if p.is_dir() and not p.name.startswith(".")]
@@ -89,6 +98,14 @@ class ModelRegistry:
 
             with (stage_dir / "metadata.json").open("w", encoding="utf-8") as f:
                 json.dump(bundle.metadata, f, indent=2)
+
+            manifest = {}
+            for fname in REQUIRED_ARTIFACT_FILES:
+                fpath = stage_dir / fname
+                sha256 = hashlib.sha256(fpath.read_bytes()).hexdigest()
+                manifest[fname] = sha256
+            with (stage_dir / "manifest.json").open("w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2)
 
             # 2. Validate roundtrip in staging
             self._validate_directory(stage_dir)
@@ -178,3 +195,15 @@ class ModelRegistry:
             raise ModelRegistryError(
                 f"Feature schema mismatch in '{dir_path}': expected {FEATURE_COLUMNS}, got {features}"
             )
+
+        manifest_file = dir_path / "manifest.json"
+        if manifest_file.exists():
+            with manifest_file.open("r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            for fname, expected_hash in manifest.items():
+                fpath = dir_path / fname
+                if not fpath.exists():
+                    raise ModelRegistryError(f"Manifest references missing file '{fname}'")
+                actual_hash = hashlib.sha256(fpath.read_bytes()).hexdigest()
+                if actual_hash != expected_hash:
+                    raise ModelRegistryError(f"Checksum mismatch for '{fname}': expected {expected_hash}, got {actual_hash}")

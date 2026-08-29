@@ -84,3 +84,49 @@ def test_registry_feature_schema_mismatch_fails(tmp_path: Path):
 
     with pytest.raises(ModelRegistryError, match="Feature schema mismatch"):
         registry.load_bundle("v_bad_schema")
+
+
+def test_registry_manifest_created_and_verified(tmp_path: Path):
+    """Test that manifest.json is created with SHA-256 hashes and corrupting a file causes load to fail."""
+    metas = [make_meta(i) for i in range(1, 40)]
+    bundle = train_reference_pipeline(metas, random_state=42, model_version="v_manifest")
+
+    registry = ModelRegistry(base_dir=tmp_path)
+    published_path = registry.publish_bundle(bundle, model_version="v_manifest")
+
+    manifest_file = published_path / "manifest.json"
+    assert manifest_file.exists()
+
+    # Corrupt a file to trigger checksum mismatch
+    score_file = published_path / "score_calibration.json"
+    score_file.write_text('{"corrupted": true}', encoding="utf-8")
+
+    with pytest.raises(ModelRegistryError, match="Checksum mismatch"):
+        registry.load_bundle("v_manifest")
+
+
+def test_registry_explicit_version(tmp_path: Path):
+    """Test explicit_version selection works and pointing to non-existent dir returns None."""
+    metas = [make_meta(i) for i in range(1, 40)]
+    bundle = train_reference_pipeline(metas, random_state=42, model_version="v_explicit_1")
+    
+    registry = ModelRegistry(base_dir=tmp_path)
+    registry.publish_bundle(bundle, model_version="v_explicit_1")
+    registry.publish_bundle(bundle, model_version="v_explicit_2")
+
+    registry_explicit = ModelRegistry(base_dir=tmp_path, explicit_version="v_explicit_1")
+    assert registry_explicit.get_active_version() == "v_explicit_1"
+
+    registry_missing = ModelRegistry(base_dir=tmp_path, explicit_version="v_non_existent")
+    assert registry_missing.get_active_version() is None
+
+
+def test_registry_metadata_contains_reproducibility_fields(tmp_path: Path):
+    """Test that metadata includes git_commit, research_config_hash, feature_schema_version."""
+    metas = [make_meta(i) for i in range(1, 40)]
+    bundle = train_reference_pipeline(metas, random_state=42, model_version="v_meta")
+
+    assert "git_commit" in bundle.metadata
+    assert "research_config_hash" in bundle.metadata
+    assert "feature_schema_version" in bundle.metadata
+

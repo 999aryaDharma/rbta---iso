@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
+import subprocess
 import sys
 from typing import Any, Dict, List, Sequence, Tuple
 import numpy as np
@@ -97,6 +99,14 @@ def train_reference_pipeline(
     start_times = [m.start_time for m in metas if m.start_time is not None]
     end_times = [m.end_time for m in metas if m.end_time is not None]
 
+    try:
+        git_commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    except Exception:
+        git_commit = "unavailable"
+    
+    config_str = f"model_version={model_version},random_state={random_state},contamination=auto,n_estimators=200"
+    research_config_hash = hashlib.sha256(config_str.encode("utf-8")).hexdigest()
+
     metadata = {
         "model_version": model_version,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -110,6 +120,9 @@ def train_reference_pipeline(
         "training_period_start": min(start_times).isoformat() if start_times else None,
         "training_period_end": max(end_times).isoformat() if end_times else None,
         "score_calibration_version": calibration.version,
+        "git_commit": git_commit,
+        "research_config_hash": research_config_hash,
+        "feature_schema_version": schema["schema_version"],
     }
 
     return ModelArtifactBundle(
