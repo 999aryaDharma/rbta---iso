@@ -12,9 +12,10 @@ services:
     ports:
       - "127.0.0.1:${RBTA_HOST_PORT:-8000}:8000"
     environment:
-      - RBTA_API_KEY=${RBTA_API_KEY:-}
+      # Mandatory Fail-Closed Production Configuration
+      - RBTA_API_KEY=${RBTA_API_KEY:?RBTA_API_KEY is required for production deployment}
+      - RBTA_MODEL_VERSION=${RBTA_MODEL_VERSION:?RBTA_MODEL_VERSION is required for production deployment}
       - RBTA_MODEL_REGISTRY_DIR=/app/artifacts/models
-      - RBTA_MODEL_VERSION=${RBTA_MODEL_VERSION:-deploy-smoke-v1}
       - RBTA_STATE_FILE=/app/data/runtime/state.json
       - RBTA_HOST=0.0.0.0
       - RBTA_PORT=8000
@@ -36,9 +37,9 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2.00"
-          memory: 1024M
-          pids: 100
+          cpus: "${RBTA_CPU_LIMIT:-2.00}"
+          memory: "${RBTA_MEMORY_LIMIT:-1024M}"
+          pids: ${RBTA_PIDS_LIMIT:-100}
         reservations:
-          cpus: "0.25"
-          memory: 256M
+          cpus: "${RBTA_CPU_RESERVATION:-0.25}"
+          memory: "${RBTA_MEMORY_RESERVATION:-256M}"

@@ -47,9 +47,17 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Build Production Image
+      - name: Validate ASUS Docker Compose Specification
         run: |
-          docker build --no-cache -t rbta-service:ci .
+          RBTA_API_KEY=ci-dummy-token RBTA_MODEL_VERSION=ci-smoke-v1 docker compose -f deploy/asus/compose.yml config --quiet
+          echo "Docker Compose specification parsed successfully with required variables."
+
+      - name: Build Production Image with Provenance
+        run: |
+          docker build --no-cache \
+            --build-arg GIT_SHA="${{ github.sha }}" \
+            --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            -t rbta-service:ci .
 
       - name: Start Container Smoke Instance
         run: |
