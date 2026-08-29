@@ -71,3 +71,4 @@ docs/*
 # Data files (large)
 data/*
 !data/.gitkeep
+artifacts/research-runs/
