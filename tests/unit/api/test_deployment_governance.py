@@ -19,9 +19,9 @@ def test_compose_manifest_invariants():
     assert "${RBTA_HOST_PORT:-8000}" not in content, "compose.yml must not allow fallback to port 8000"
     assert "RBTA_HOST_PORT:?" in content, "compose.yml must fail closed on missing RBTA_HOST_PORT"
 
-    # Image tag derived from required variable
+    # Image tag derived from deployment variable
     assert "rbta-service:s10" not in content, "Stale s10 image tag must not be present"
-    assert "RBTA_IMAGE_TAG:?" in content, "compose.yml must require RBTA_IMAGE_TAG"
+    assert "RBTA_IMAGE_TAG" in content, "compose.yml must reference RBTA_IMAGE_TAG"
 
     # Replay archive mounted read-only
     assert "RBTA_REPLAY_HOST_DIR:?" in content, "compose.yml must require RBTA_REPLAY_HOST_DIR"

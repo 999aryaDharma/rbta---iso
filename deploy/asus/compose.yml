@@ -5,9 +5,9 @@ services:
       context: ../..
       dockerfile: Dockerfile
       args:
-        GIT_SHA: ${RBTA_CODE_SHA:?RBTA_CODE_SHA is required}
-        BUILD_DATE: ${RBTA_BUILD_DATE:?RBTA_BUILD_DATE is required}
-    image: rbta-service:${RBTA_IMAGE_TAG:?RBTA_IMAGE_TAG is required}
+        GIT_SHA: ${RBTA_CODE_SHA:-unknown}
+        BUILD_DATE: ${RBTA_BUILD_DATE:-}
+    image: rbta-service:${RBTA_IMAGE_TAG:-latest}
     restart: unless-stopped
     init: true
     user: "10001:10001"
