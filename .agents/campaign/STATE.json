@@ -8,8 +8,8 @@
   "status": "READY",
   "active_branch": "fix/s10-predeployment-final-readiness",
   "final_remediation_gate": "READY",
-  "code_sha_tested": "3c8ac078955d7f00c798ef5d0a33cb7e65a0edae",
-  "evidence_sha": "c0f8ff1870448f32409ea9ff06c8cd00e29df0d3",
+  "code_sha_tested": "abd91eaa33579fd840ace4c258b8828b4d5ac614",
+  "evidence_sha": "b3566c2ec3930ccb4be9bbe98e67037eae89141d",
   "last_completed_sprint": 9,
   "blocked_reason": null,
   "allowed_statuses": [
