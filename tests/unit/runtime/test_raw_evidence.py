@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import MappingProxyType
 import pytest
@@ -24,6 +24,7 @@ def make_alert(
     rule_level: int = 5,
     srcip: str = "192.168.1.100",
     metadata: dict | None = None,
+    timestamp: datetime | None = None,
 ) -> CanonicalRawAlert:
     meta = {
         "rule_description": "sshd brute force attempt",
@@ -38,7 +39,7 @@ def make_alert(
 
     return CanonicalRawAlert(
         wazuh_alert_id=alert_id,
-        timestamp=datetime(2026, 8, 29, 12, 0, 0, tzinfo=timezone.utc),
+        timestamp=timestamp or datetime(2026, 8, 29, 12, 0, 0, tzinfo=timezone.utc),
         agent_id=agent_id,
         agent_name="agent-ubuntu",
         rule_group_primary="authentication_failed",
@@ -170,3 +171,31 @@ def test_search_multi_field(store: RawAlertEvidenceStore):
     found_ip = store.search(query="172.16.0.2")
     assert len(found_ip) == 1
     assert found_ip[0]["wazuh_alert_id"] == "search-2"
+
+
+def test_count_by_hour_valid_and_corrupt_timestamp(store: RawAlertEvidenceStore):
+    from src.runtime.raw_evidence import RawEvidenceIntegrityError
+
+    base_t = datetime(2026, 8, 29, 10, 15, 0, tzinfo=timezone.utc)
+    alert1 = make_alert("hourly-1", timestamp=base_t)
+    alert2 = make_alert("hourly-2", timestamp=base_t + timedelta(minutes=30))
+    store.store(alert1)
+    store.store(alert2)
+
+    counts = store.count_by_hour(
+        start_time=base_t - timedelta(hours=1),
+        end_time=base_t + timedelta(hours=1),
+    )
+    assert counts.get("2026-08-29 10:00") == 2
+
+    # Inject corrupt timestamp directly into DB to test fail-closed integrity
+    with store._get_conn() as conn:
+        conn.execute(
+            "UPDATE raw_alert_evidence SET timestamp = '2026-08-29T10:invalid' WHERE wazuh_alert_id = 'hourly-1'"
+        )
+
+    with pytest.raises(RawEvidenceIntegrityError, match="Corrupt timestamp"):
+        store.count_by_hour(
+            start_time=base_t - timedelta(hours=1),
+            end_time=base_t + timedelta(hours=1),
+        )

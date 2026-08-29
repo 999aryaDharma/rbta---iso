@@ -18,6 +18,11 @@ class RawEvidenceConflictError(Exception):
     pass
 
 
+class RawEvidenceIntegrityError(Exception):
+    """Raised when persisted raw evidence data violates schema or timestamp integrity."""
+    pass
+
+
 class RawAlertEvidenceStore:
     """RawAlertEvidenceStore — SQLite-backed raw alert evidence persistence with WAL mode.
 
@@ -396,7 +401,7 @@ class RawAlertEvidenceStore:
         start_iso = st_utc.isoformat()
         end_iso = et_utc.isoformat()
 
-        sql = "SELECT timestamp FROM raw_alert_evidence WHERE timestamp >= ? AND timestamp <= ?"
+        sql = "SELECT wazuh_alert_id, timestamp FROM raw_alert_evidence WHERE timestamp >= ? AND timestamp <= ?"
         hourly_counts: Dict[str, int] = {}
         with self._get_conn() as conn:
             rows = conn.execute(sql, (start_iso, end_iso)).fetchall()
@@ -409,6 +414,8 @@ class RawAlertEvidenceStore:
                         dt = ts_raw.astimezone(timezone.utc)
                     hour_key = dt.strftime("%Y-%m-%d %H:00")
                     hourly_counts[hour_key] = hourly_counts.get(hour_key, 0) + 1
-                except Exception:
-                    pass
+                except Exception as exc:
+                    raise RawEvidenceIntegrityError(
+                        f"Corrupt timestamp '{ts_raw}' encountered in raw evidence record '{r['wazuh_alert_id']}': {exc}"
+                    ) from exc
         return hourly_counts

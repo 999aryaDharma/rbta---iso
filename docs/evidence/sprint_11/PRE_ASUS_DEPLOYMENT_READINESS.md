@@ -1,4 +1,18 @@
-# SPRINT 11 PRE-ASUS DEPLOYMENT READINESS EVIDENCE REPORT
+# SUPERSEDED — PREVIOUS PRE-ASUS READINESS EVIDENCE (INTERIM ARTIFACT)
+
+> **SUPERSEDED NOTICE**: This evidence artifact documented the initial code closeout for Sprint 11, but preceded the deep deployment-harness audit.
+> While core observability truth, source mode, dynamic status, and compose invariants passed, the initial claims regarding container validator availability (B14/B15) did not behaviorally prove:
+> - Container runtime validator availability in the production image (`src.deploy.runtime_validation`)
+> - UID 10001 behavioral state RW (flush, fsync, atomic rename) and replay RO write rejection
+> - Isolated engineering smoke execution with the real configured model registry
+> - Mandatory replay `*.jsonl` dataset presence and first-record canonicalization
+> - Actual execution of `scripts/deploy/asus-deploy.sh --verify-only` in GitHub CI
+>
+> The authoritative, behaviorally proven evidence is recorded in `docs/evidence/sprint_11/ASUS_DEPLOYMENT_HARNESS_FINAL.md`.
+
+---
+
+# SPRINT 11 PRE-ASUS DEPLOYMENT READINESS EVIDENCE REPORT (HISTORICAL)
 
 ## 1. Executive Summary & Authoritative Verification Matrix
 

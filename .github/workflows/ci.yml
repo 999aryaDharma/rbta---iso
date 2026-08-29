@@ -127,29 +127,120 @@ jobs:
           npm run test:e2e
 
   docker:
-    name: 4. Production Docker Build & Smoke
+    name: 4. Production Docker Build & Deployment Harness
     runs-on: ubuntu-latest
     needs: [test, frontend, frontend-e2e]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Set up Python 3.11 for CI Fixtures
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python Dependencies for CI Fixtures
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
       - name: Validate ASUS Docker Compose Specification
         run: |
           docker compose --env-file deploy/asus/.env.example -f deploy/asus/compose.yml config --quiet
           echo "Docker Compose specification parsed successfully with required variables."
 
-      - name: Build Production Image with Provenance
+      - name: Generate Sanitized CI Model & Replay Fixtures
         run: |
-          docker build --no-cache \
-            --build-arg GIT_SHA="${{ github.sha }}" \
-            --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-            -t rbta-service:ci .
+          mkdir -p /tmp/rbta-ci/models /tmp/rbta-ci/replay /tmp/rbta-ci/state
+          python -c "
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+          import json
+          from src.contracts.raw_alert import CanonicalRawAlert
+          from src.runners.batch_runner import BatchResearchRunner
+          from src.model.scoring_pipeline import train_reference_pipeline
+          from src.model.registry import ModelRegistry
+
+          base_t = datetime(2026, 8, 29, 10, 0, 0, tzinfo=timezone.utc)
+          alerts = [
+              CanonicalRawAlert(
+                  wazuh_alert_id=f'ci_alert_{i}',
+                  timestamp=base_t + timedelta(minutes=i*5),
+                  agent_id=f'00{1 + (i % 3)}',
+                  agent_name=f'agent-{1 + (i % 3)}',
+                  rule_group_primary='pam' if i % 2 == 0 else 'syslog',
+                  rule_level=(i % 12) + 1,
+                  rule_id=f'550{i % 6}',
+                  mitre_tactics=('credential-access',) if i % 3 == 0 else (),
+                  srcip=f'192.168.1.{50 + i % 10}',
+                  agent_criticality=(i % 3) + 1,
+              )
+              for i in range(35)
+          ]
+          runner = BatchResearchRunner(base_delta_t=timedelta(minutes=15), adaptive=False)
+          batch_res = runner.run(alerts)
+          bundle = train_reference_pipeline(batch_res.meta_alerts, random_state=42, model_version='reference-v1')
+          registry = ModelRegistry(base_dir=Path('/tmp/rbta-ci/models'))
+          registry.publish_bundle(bundle, model_version='reference-v1')
+
+          replay_file = Path('/tmp/rbta-ci/replay/ci-replay.jsonl')
+          event = {
+              'id': 'wazuh-ci-001',
+              'timestamp': '2026-08-29T10:15:00.000+0000',
+              'agent': {'id': '001', 'name': 'agent-ci'},
+              'rule': {'id': '5501', 'level': 7, 'groups': ['pam'], 'description': 'CI authentication event'},
+              'data': {'srcip': '192.168.1.100'}
+          }
+          replay_file.write_text(json.dumps(event) + '\n', encoding='utf-8')
+          print('Sanitized CI test fixtures generated successfully.')
+          "
+          cat << 'EOF' > /tmp/rbta-ci/.env
+          RBTA_API_KEY=ci-smoke-key-123
+          RBTA_MODEL_VERSION=reference-v1
+          RBTA_HOST_PORT=8011
+          RBTA_SOURCE_MODE=DEFERRED
+          RBTA_LOG_LEVEL=DEBUG
+          RBTA_STATE_HOST_DIR=/tmp/rbta-ci/state
+          RBTA_MODEL_HOST_DIR=/tmp/rbta-ci/models
+          RBTA_REPLAY_HOST_DIR=/tmp/rbta-ci/replay
+          EOF
+
+      - name: Execute Real ASUS Deployment Harness (--verify-only)
+        run: |
+          RBTA_ENV_FILE=/tmp/rbta-ci/.env RBTA_CODE_SHA="${{ github.sha }}" bash scripts/deploy/asus-deploy.sh --verify-only
+
+      - name: Verify Replay-Only Negative Preflight Rules
+        run: |
+          # 1. Empty replay directory fails preflight
+          mkdir -p /tmp/rbta-empty-replay
+          sed 's|RBTA_REPLAY_HOST_DIR=.*|RBTA_REPLAY_HOST_DIR=/tmp/rbta-empty-replay|' /tmp/rbta-ci/.env > /tmp/rbta-ci/.env.empty-replay
+          EXIT_CODE=0
+          RBTA_ENV_FILE=/tmp/rbta-ci/.env.empty-replay bash scripts/deploy/asus-preflight.sh || EXIT_CODE=$?
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "Security Error: Empty replay directory was accepted!"
+            exit 1
+          fi
+          echo "✓ Verified: Empty replay directory rejected."
+
+          # 2. Compressed-only replay archive fails preflight
+          mkdir -p /tmp/rbta-comp-replay
+          touch /tmp/rbta-comp-replay/campus-part1.jsonl.gz
+          sed 's|RBTA_REPLAY_HOST_DIR=.*|RBTA_REPLAY_HOST_DIR=/tmp/rbta-comp-replay|' /tmp/rbta-ci/.env > /tmp/rbta-ci/.env.comp-replay
+          EXIT_CODE=0
+          RBTA_ENV_FILE=/tmp/rbta-ci/.env.comp-replay bash scripts/deploy/asus-preflight.sh || EXIT_CODE=$?
+          if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "Security Error: Compressed-only replay archive was accepted!"
+            exit 1
+          fi
+          echo "✓ Verified: Compressed-only archive rejected."
 
       - name: Verify Container Fail-Closed on Missing RBTA_API_KEY
         run: |
+          CODE_SHA="${{ github.sha }}"
+          IMAGE_TAG="sha-${CODE_SHA:0:12}"
           EXIT_CODE=0
-          docker run --rm -e RBTA_MODEL_VERSION=ci-smoke-v1 rbta-service:ci || EXIT_CODE=$?
+          docker run --rm -e RBTA_MODEL_VERSION=reference-v1 "rbta-service:${IMAGE_TAG}" || EXIT_CODE=$?
           if [ "$EXIT_CODE" -eq 0 ]; then
             echo "Security Error: Container started without mandatory RBTA_API_KEY!"
             exit 1
@@ -158,18 +249,24 @@ jobs:
 
       - name: Start Production Container Smoke Instance
         run: |
-          docker run -d --name rbta-smoke -p 8000:8000 \
+          CODE_SHA="${{ github.sha }}"
+          IMAGE_TAG="sha-${CODE_SHA:0:12}"
+          docker run -d --name rbta-smoke -p 8011:8000 \
             -e RBTA_API_KEY=ci-smoke-key-123 \
-            -e RBTA_MODEL_VERSION=ci-smoke-v1 \
+            -e RBTA_MODEL_VERSION=reference-v1 \
+            -e RBTA_SOURCE_MODE=DEFERRED \
             -e RBTA_LOG_LEVEL=DEBUG \
-            rbta-service:ci
+            -v "/tmp/rbta-ci/models:/app/artifacts/models:ro" \
+            -v "/tmp/rbta-ci/replay:/app/data/replay:ro" \
+            -v "/tmp/rbta-ci/state:/app/data/runtime:rw" \
+            "rbta-service:${IMAGE_TAG}"
 
       - name: Verify Non-Root User Execution
         run: |
           UID_VAL=$(docker exec rbta-smoke id -u)
           echo "Container runtime UID: $UID_VAL"
-          if [ "$UID_VAL" -eq 0 ]; then
-            echo "Security Error: Container is running as root (UID 0)!"
+          if [ "$UID_VAL" -ne 10001 ]; then
+            echo "Security Error: Expected UID 10001, got UID $UID_VAL!"
             exit 1
           fi
 
@@ -191,63 +288,13 @@ jobs:
             exit 1
           fi
 
-      - name: Verify Root Redirect & Dashboard Index (/dashboard/)
+      - name: Execute Full Read-Only Production Smoke Verification
         run: |
-          docker exec rbta-smoke python -c "import urllib.request; res = urllib.request.urlopen('http://127.0.0.1:8000/dashboard/', timeout=2); body = res.read().decode('utf-8'); assert res.status == 200 and 'id=\"root\"' in body"
-          echo "Dashboard index.html served successfully."
-
-      - name: Verify Static JS/CSS Asset Serving
-        run: |
-          docker exec rbta-smoke python -c "
-          import urllib.request, os, glob
-          assets = glob.glob('/app/dashboard/dist/assets/index-*.js')
-          assert assets, 'No JS bundle found in dist/assets'
-          js_name = os.path.basename(assets[0])
-          url = f'http://127.0.0.1:8000/dashboard/assets/{js_name}'
-          res = urllib.request.urlopen(url, timeout=2)
-          assert res.status == 200, f'Expected 200 got {res.status}'
-          print(f'Asset {js_name} served successfully with 200.')
-          "
-
-      - name: Verify Nested SPA Route Serving
-        run: |
-          docker exec rbta-smoke python -c "
-          import urllib.request
-          res = urllib.request.urlopen('http://127.0.0.1:8000/dashboard/meta-alerts/101/raw-alerts/wazuh-alt-001', timeout=2)
-          assert res.status == 200
-          body = res.read().decode('utf-8')
-          assert 'id=\"root\"' in body, 'SPA fallback must serve index.html with root div'
-          print('Nested SPA client route served successfully with 200 fallback.')
-          "
-
-      - name: Verify API Authentication & 404 Isolation
-        run: |
-          docker exec rbta-smoke python -c "
-          import urllib.request, urllib.error
-          # 1. Missing auth returns 401
-          try:
-              urllib.request.urlopen('http://127.0.0.1:8000/api/v1/auth/check', timeout=2)
-              raise AssertionError('Expected 401 Unauthorized for missing token')
-          except urllib.error.HTTPError as e:
-              assert e.code == 401, f'Expected 401 got {e.code}'
-
-          # 2. Valid token returns 200
-          req = urllib.request.Request('http://127.0.0.1:8000/api/v1/auth/check', headers={'Authorization': 'Bearer ci-smoke-key-123'})
-          res = urllib.request.urlopen(req, timeout=2)
-          assert res.status == 200
-
-          # 3. Missing API route returns JSON 404 (does NOT fallback to HTML)
-          try:
-              urllib.request.urlopen('http://127.0.0.1:8000/api/v1/nonexistent-route', timeout=2)
-              raise AssertionError('Expected 404 for missing API endpoint')
-          except urllib.error.HTTPError as e:
-              assert e.code == 404
-              assert 'application/json' in e.headers.get('Content-Type', '')
-          print('API authentication and JSON 404 behavior verified.')
-          "
+          RBTA_ENV_FILE=/tmp/rbta-ci/.env bash scripts/deploy/smoke.sh
 
       - name: Stop and Cleanup Container
         if: always()
         run: |
           docker stop rbta-smoke || true
           docker rm rbta-smoke || true
+          rm -rf /tmp/rbta-ci /tmp/rbta-empty-replay /tmp/rbta-comp-replay || true
