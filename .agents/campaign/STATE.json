@@ -6,10 +6,10 @@
   "last_passed_gate": "S9",
   "current_sprint": 11,
   "status": "READY",
-  "active_branch": "fix/s11-pre-asus-deployment-final",
+  "active_branch": "fix/s11-asus-deployment-harness-final",
   "final_remediation_gate": "PASS",
-  "code_sha_tested": "bb6ba8a4d4bc09b81375e02716c761117969c4f6",
-  "evidence_sha": "aab59df409e6463674718e68529ce9e3a2f326ce",
+  "code_sha_tested": "c23a9ed245267019b89bd8946674695c1c938a44",
+  "evidence_sha": "63c112f40009a40370d491d0766174209536b0ec",
   "last_completed_sprint": 9,
   "blocked_reason": null,
   "allowed_statuses": [
