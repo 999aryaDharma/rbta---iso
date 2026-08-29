@@ -47,6 +47,8 @@ class WazuhIndexerClient:
         verify_tls: Union[bool, str] = True,
         timeout: Tuple[float, float] = (5.0, 30.0),
         max_retries: int = 3,
+        sleep_fn=None,
+        random_fn=None,
     ) -> None:
         self.base_url: str = (base_url or os.getenv("WAZUH_INDEXER_URL", "https://localhost:9200")).rstrip("/")
         self.username: Optional[str] = username or os.getenv("WAZUH_INDEXER_USERNAME")
@@ -54,6 +56,9 @@ class WazuhIndexerClient:
         self.verify_tls: Union[bool, str] = verify_tls
         self.timeout: Tuple[float, float] = timeout
         self.max_retries: int = max_retries
+
+        self._sleep_fn = sleep_fn or time.sleep
+        self._random_fn = random_fn or (lambda: __import__('random').random())
 
         self._session = requests.Session()
         if self.username and self.password:
@@ -88,9 +93,10 @@ class WazuhIndexerClient:
                         f"Authentication failed ({resp.status_code}) against Wazuh Indexer at '{self.base_url}': {resp.text}"
                     )
 
-                # Transient server errors (502, 503, 504) -> retry
-                if resp.status_code in (502, 503, 504) and attempt < self.max_retries:
-                    time.sleep(0.5 * attempt)
+                # Transient server errors (429, 502, 503, 504) -> retry
+                if resp.status_code in (429, 502, 503, 504) and attempt < self.max_retries:
+                    delay = min(30.0, (2 ** (attempt - 1)) * 0.5) + self._random_fn() * 0.5
+                    self._sleep_fn(delay)
                     continue
 
                 resp.raise_for_status()
@@ -99,7 +105,8 @@ class WazuhIndexerClient:
             except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
                 if attempt >= self.max_retries:
                     raise WazuhClientError(f"Network failure calling '{url}' after {self.max_retries} attempts: {exc}") from exc
-                time.sleep(0.5 * attempt)
+                delay = min(30.0, (2 ** (attempt - 1)) * 0.5) + self._random_fn() * 0.5
+                self._sleep_fn(delay)
             except WazuhAuthError:
                 raise
             except requests.exceptions.HTTPError as exc:

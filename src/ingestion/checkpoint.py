@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any, List, Optional, Union
 
 
+class CheckpointError(RuntimeError):
+    """Raised when checkpoint file is corrupt or has invalid fields."""
+    pass
+
+
 @dataclass
 class HistoricalCheckpoint:
     """State of historical ingestion progress across daily indices.
@@ -73,18 +78,29 @@ class CheckpointManager:
         try:
             with self.filepath.open("r", encoding="utf-8") as f:
                 data = json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise CheckpointError(f"Corrupt checkpoint file '{self.filepath}': {exc}") from exc
 
-            return HistoricalCheckpoint(
-                mode=str(data.get("mode", "historical")),
-                current_index=data.get("current_index"),
-                last_sort=data.get("last_sort"),
-                processed_count=int(data.get("processed_count", 0)),
-                last_wazuh_alert_id=data.get("last_wazuh_alert_id"),
-                completed_indices=list(data.get("completed_indices", [])),
-                updated_at=str(data.get("updated_at", datetime.now(timezone.utc).isoformat())),
-            )
-        except Exception:
-            return HistoricalCheckpoint()
+        # Validate field types
+        if not isinstance(data, dict):
+            raise CheckpointError(f"Checkpoint is not a JSON object: {type(data).__name__}")
+        if "completed_indices" in data and not isinstance(data["completed_indices"], list):
+            raise CheckpointError(f"Invalid 'completed_indices' type: {type(data['completed_indices']).__name__}")
+        if "processed_count" in data:
+            try:
+                int(data["processed_count"])
+            except (ValueError, TypeError) as exc:
+                raise CheckpointError(f"Invalid 'processed_count': {data['processed_count']}") from exc
+
+        return HistoricalCheckpoint(
+            mode=str(data.get("mode", "historical")),
+            current_index=data.get("current_index"),
+            last_sort=data.get("last_sort"),
+            processed_count=int(data.get("processed_count", 0)),
+            last_wazuh_alert_id=data.get("last_wazuh_alert_id"),
+            completed_indices=list(data.get("completed_indices", [])),
+            updated_at=str(data.get("updated_at", datetime.now(timezone.utc).isoformat())),
+        )
 
     def save(self, checkpoint: HistoricalCheckpoint) -> None:
         """Save checkpoint to disk atomically via temporary file."""

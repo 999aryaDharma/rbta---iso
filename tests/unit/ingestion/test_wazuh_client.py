@@ -67,3 +67,39 @@ def test_wazuh_client_partial_pit_rejected():
     with patch.object(client._session, "request", return_value=mock_resp):
         with pytest.raises(WazuhClientError, match="Partial PIT creation rejected"):
             client.create_point_in_time("wazuh-alerts-4.x-2026.04.02")
+
+
+def test_wazuh_client_retry_429():
+    mock_sleep = MagicMock()
+    mock_random = MagicMock(return_value=0.1)
+    client = WazuhIndexerClient(base_url="https://wazuh-indexer:9200", sleep_fn=mock_sleep, random_fn=mock_random)
+
+    mock_resp_429 = MagicMock()
+    mock_resp_429.status_code = 429
+    
+    mock_resp_200 = MagicMock()
+    mock_resp_200.status_code = 200
+    mock_resp_200.json.return_value = {"pit_id": "pit_success"}
+
+    with patch.object(client._session, "request", side_effect=[mock_resp_429, mock_resp_200]):
+        client.create_point_in_time("test")
+        
+        assert mock_sleep.call_count == 1
+        expected_delay = 0.5 + 0.1 * 0.5 # 2**(1-1)*0.5 + 0.05 = 0.55
+        mock_sleep.assert_called_with(expected_delay)
+
+
+def test_wazuh_client_retry_exhausted():
+    mock_sleep = MagicMock()
+    client = WazuhIndexerClient(base_url="https://wazuh-indexer:9200", max_retries=3, sleep_fn=mock_sleep)
+
+    mock_resp_502 = MagicMock()
+    mock_resp_502.status_code = 502
+    mock_resp_502.text = "Bad Gateway"
+    mock_resp_502.raise_for_status.side_effect = requests.exceptions.HTTPError("502 Server Error")
+
+    with patch.object(client._session, "request", return_value=mock_resp_502):
+        with pytest.raises(WazuhClientError, match="HTTP error"):
+            client.create_point_in_time("test")
+        
+        assert mock_sleep.call_count == 2
