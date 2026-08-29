@@ -115,6 +115,8 @@ class LiveRBTAService:
         adaptive: bool = True,
         raw_evidence_store: Optional[Any] = None,
         source_mode: str = 'LIVE',
+        escalation_sink: Optional[Any] = None,
+        run_id: Optional[str] = None,
     ) -> None:
         self.scoring_pipeline: ScoringPipeline = scoring_pipeline
         self.state_manager: DurableStateManager = state_manager or DurableStateManager()
@@ -122,6 +124,8 @@ class LiveRBTAService:
         self.adaptive: bool = adaptive
         self.raw_evidence_store = raw_evidence_store
         self.source_mode = source_mode
+        self.escalation_sink = escalation_sink
+        self.run_id = run_id
 
         self.engine: RBTAEngine = RBTAEngine(base_delta_t=self.base_delta_t, adaptive=self.adaptive)
         self.pending_scoring: List[MetaAlert] = []
@@ -211,6 +215,11 @@ class LiveRBTAService:
             scored = self.scoring_pipeline.score_single(meta)
             self.outbox.append(scored)
             self.finalized_history.append(scored)
+            if self.escalation_sink is not None and scored.action == "ESCALATE":
+                try:
+                    self.escalation_sink.emit(scored, self.run_id or "live")
+                except Exception as exc:
+                    logger.error("Failed to emit escalation to sink: %s", exc)
             new_scored.append(scored)
             self.pending_scoring.pop(0)
             self._persist_to_disk()

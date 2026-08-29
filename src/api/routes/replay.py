@@ -34,6 +34,15 @@ def replay_status(
     return controller.get_status()
 
 
+@router.get("/telegram-payloads")
+def list_telegram_payloads(
+    limit: int = 50,
+    controller: ReplayController = Depends(_get_replay_controller),
+    api_key: str = Depends(get_api_key),
+) -> Dict[str, Any]:
+    return controller.get_telegram_payloads(limit=min(limit, 100))
+
+
 @router.post("/start")
 def replay_start(
     req: ReplayStartRequest,

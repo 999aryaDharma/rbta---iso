@@ -18,18 +18,24 @@ import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button } from '@cloudflare/kumo/components/button';
 import { formatNumber, formatDuration } from '@/lib/formatters';
 import { Play, Pause, Stop, ArrowClockwise, FastForward, ArrowRight } from '@phosphor-icons/react';
+import { ReplayPipelineVisualizer, type PipelineStageId } from './ReplayPipelineVisualizer';
+import { CurrentMetaAlertCard } from './CurrentMetaAlertCard';
+import { PipelineStageDetail } from './PipelineStageDetail';
+import { ProcessingTrace } from './ProcessingTrace';
+import { DeferredTelegramOutbox } from './DeferredTelegramOutbox';
 
 export function ReplayPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: datasetsData } = useQuery({ queryKey: ['replay-datasets'], queryFn: fetchReplayDatasets });
-  const { data: status } = usePollingQuery(['replay'], fetchReplayStatus, 1000);
+  const { data: status } = usePollingQuery(['replay'], fetchReplayStatus, 500);
 
   const [selectedDataset, setSelectedDataset] = useState<string>('');
   const [speed, setSpeed] = useState<'1' | '10' | '100' | 'MAX'>('MAX');
   const [isLoading, setIsLoading] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [activeStage, setActiveStage] = useState<PipelineStageId>('RBTA');
 
   // Set default dataset once loaded
   React.useEffect(() => {
@@ -52,6 +58,7 @@ export function ReplayPage() {
     try {
       await action();
       await queryClient.invalidateQueries({ queryKey: ['replay'] });
+      await queryClient.invalidateQueries({ queryKey: ['telegram-payloads'] });
     } finally {
       setIsLoading(false);
     }
@@ -72,7 +79,11 @@ export function ReplayPage() {
 
   const withRunId = (path: string) => (status?.run_id ? `${path}${path.includes('?') ? '&' : '?'}run_id=${encodeURIComponent(status.run_id)}` : path);
 
-  const isAllDatasets = status?.dataset === '__ALL__' || status?.dataset === 'ALL' || status?.dataset_mode === 'all';
+  const telemetry = status?.telemetry || undefined;
+  const rawProcessed = telemetry?.raw.processed ?? status?.processed_count ?? 0;
+  const metaFinalized = telemetry?.rbta.finalized_meta_alerts ?? 0;
+  const latestMeta = telemetry?.latest_meta_alert;
+  const decisionCounts = telemetry?.decision_counts;
 
   return (
     <>
@@ -217,7 +228,7 @@ export function ReplayPage() {
             variant="default"
             size="base"
             title="Replay Finished Successfully"
-            description={`Processed all ${status.total_count} alerts in ${formatDuration(status.wall_clock_elapsed_seconds)} (${status.events_per_second.toFixed(1)} ev/s).`}
+            description={`Processed all ${formatNumber(status.total_count)} alerts in ${formatDuration(status.wall_clock_elapsed_seconds)} (${status.events_per_second.toFixed(1)} ev/s).`}
           >
             <Banner.Action onClick={() => navigate(withRunId('/meta-alerts'))}>
               Investigate MetaAlerts <ArrowRight size={14} />
@@ -225,7 +236,36 @@ export function ReplayPage() {
           </Banner>
         )}
 
-        {/* Telemetry Metrics */}
+        {/* Processing Pipeline Visualizer */}
+        <ReplayPipelineVisualizer
+          status={status}
+          telemetry={telemetry}
+          activeStage={activeStage}
+          onSelectStage={setActiveStage}
+        />
+
+        {/* Current Scored MetaAlert Card */}
+        <CurrentMetaAlertCard
+          latestMeta={latestMeta}
+          rawProcessed={rawProcessed}
+          metaFinalized={metaFinalized}
+          decisionCounts={decisionCounts}
+        />
+
+        {/* Selected Pipeline Stage Deep Inspector */}
+        <PipelineStageDetail
+          activeStage={activeStage}
+          telemetry={telemetry}
+          status={status}
+        />
+
+        {/* Live Processing Trace Ring Buffer */}
+        <ProcessingTrace trace={telemetry?.trace} />
+
+        {/* Deferred Telegram Payload Outbox */}
+        <DeferredTelegramOutbox />
+
+        {/* Telemetry KPI Metrics */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <MetricCard label="Playback Status" value={status?.status || 'IDLE'} />
           <MetricCard label="Processed Events" value={status ? formatNumber(status.processed_count) : '0'} />
@@ -244,22 +284,18 @@ export function ReplayPage() {
               <span className="text-kumo-subtle">Dataset:</span>
               <span className="text-kumo-default">{status.dataset}</span>
             </div>
-            {isAllDatasets && (
+            {status.dataset_mode === 'all' && (
               <>
                 <div className="flex justify-between">
                   <span className="text-kumo-subtle">Current File Name:</span>
-                  <span className="text-kumo-default">{(status as any).current_file_name || '—'}</span>
+                  <span className="text-kumo-default">{status.current_dataset || '—'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-kumo-subtle">File Index / Total:</span>
                   <span className="text-kumo-default">
-                    {(status as any).file_index !== undefined ? `${(status as any).file_index} / ${(status as any).file_total}` : '—'}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-kumo-subtle">Global Progress:</span>
-                  <span className="text-kumo-default">
-                    {(status as any).global_progress !== undefined ? `${((status as any).global_progress * 100).toFixed(1)}%` : '—'}
+                    {status.current_dataset_index !== undefined && status.dataset_count !== undefined
+                      ? `${(status.current_dataset_index || 0) + 1} / ${status.dataset_count}`
+                      : '—'}
                   </span>
                 </div>
               </>

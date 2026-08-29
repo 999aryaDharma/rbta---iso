@@ -1,3 +1,5 @@
+from collections import deque
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -11,6 +13,7 @@ from src.etl.wazuh_canonicalizer import canonicalize_wazuh_alert
 from src.contracts.raw_alert import CanonicalRawAlert
 from src.model.scoring_pipeline import ScoringPipeline
 from src.runtime.durable_state import DurableStateManager
+from src.runtime.escalation_sink import DeferredTelegramFileSink
 from src.runtime.raw_evidence import RawAlertEvidenceStore
 from src.runtime.service import LiveRBTAService
 
@@ -69,6 +72,13 @@ class ReplayController:
 
         self.current_service: Optional[LiveRBTAService] = None
         self.current_evidence_store: Optional[RawAlertEvidenceStore] = None
+        self.escalation_sink: Optional[DeferredTelegramFileSink] = None
+
+        # Telemetry, metrics, and trace ring buffer
+        self._trace_buffer: deque = deque(maxlen=100)
+        self.decision_counts: Dict[str, int] = {"ESCALATE": 0, "SUPPRESS": 0, "DAILY_DIGEST": 0}
+        self._latest_scored_meta: Optional[Any] = None
+        self._last_raw_alert_info: Optional[Dict[str, Any]] = None
 
 
     def list_datasets(self) -> List[Dict[str, Any]]:
@@ -128,12 +138,19 @@ class ReplayController:
 
         state_mgr = DurableStateManager(run_workspace / "state.json")
         evidence_store = RawAlertEvidenceStore(run_workspace / "raw_alert_evidence.sqlite3")
+        if "RBTA_TELEGRAM_PAYLOAD_PATH" in os.environ:
+            telegram_sink_path = Path(os.environ["RBTA_TELEGRAM_PAYLOAD_PATH"]).resolve()
+        else:
+            telegram_sink_path = (self.runs_dir.parent / "telegram_escalate_payloads.txt").resolve()
+        escalation_sink = DeferredTelegramFileSink(telegram_sink_path)
 
         service = LiveRBTAService(
             scoring_pipeline=self.scoring_pipeline,
             state_manager=state_mgr,
             raw_evidence_store=evidence_store,
             source_mode="REPLAY",
+            escalation_sink=escalation_sink,
+            run_id=new_run_id,
         )
 
         self.run_id = new_run_id
@@ -145,6 +162,7 @@ class ReplayController:
         self.speed_factor = speed_factor
         self.current_service = service
         self.current_evidence_store = evidence_store
+        self.escalation_sink = escalation_sink
         self.processed_count = 0
         self.total_count = 0
         self.current_event_time = None
@@ -152,6 +170,12 @@ class ReplayController:
         self.wall_clock_elapsed = 0.0
         self.last_error = None
         self.status = "IDLE"
+
+        # Clear/initialize live telemetry
+        self._trace_buffer.clear()
+        self.decision_counts = {"ESCALATE": 0, "SUPPRESS": 0, "DAILY_DIGEST": 0}
+        self._latest_scored_meta = None
+        self._last_raw_alert_info = None
 
         self._persist_run_meta()
         return new_run_id
@@ -386,11 +410,74 @@ class ReplayController:
 
                         # Ingest alert into isolated run service
                         assert self.current_service is not None
-                        self.current_service.ingest_alert(canonical_alert)
+                        scored_metas = self.current_service.ingest_alert(canonical_alert)
+                        now_ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
 
                         with self._lock:
                             self.processed_count += 1
                             self.current_event_time = canonical_alert.timestamp.isoformat()
+                            self._last_raw_alert_info = {
+                                "alert_id": canonical_alert.wazuh_alert_id,
+                                "agent_id": canonical_alert.agent_id,
+                                "agent_name": canonical_alert.agent_name,
+                                "rule_group": canonical_alert.rule_group_primary,
+                                "rule_id": canonical_alert.rule_id,
+                                "level": canonical_alert.rule_level,
+                                "timestamp": canonical_alert.timestamp.isoformat(),
+                            }
+
+                            if self.processed_count % 30 == 1:
+                                self._trace_buffer.append({
+                                    "timestamp": now_ts,
+                                    "stage": "RAW",
+                                    "message": f"Alert {canonical_alert.wazuh_alert_id} received",
+                                    "detail": f"Agent {canonical_alert.agent_id} ({canonical_alert.agent_name}) | {canonical_alert.rule_group_primary}",
+                                })
+                                self._trace_buffer.append({
+                                    "timestamp": now_ts,
+                                    "stage": "CANONICAL",
+                                    "message": "CanonicalRawAlert generated",
+                                    "detail": f"Rule {canonical_alert.rule_id} (Level {canonical_alert.rule_level})",
+                                })
+
+                            if scored_metas:
+                                for sm in scored_metas:
+                                    self._latest_scored_meta = sm
+                                    action = sm.action if sm.action in self.decision_counts else "SUPPRESS"
+                                    self.decision_counts[action] = self.decision_counts.get(action, 0) + 1
+
+                                    self._trace_buffer.append({
+                                        "timestamp": now_ts,
+                                        "stage": "FINALIZE",
+                                        "message": f"MetaAlert #{sm.meta_id} finalized",
+                                        "detail": f"{sm.alert_count} raw alerts -> MetaAlert ({sm.rule_group_primary})",
+                                    })
+                                    self._trace_buffer.append({
+                                        "timestamp": now_ts,
+                                        "stage": "FEATURES",
+                                        "message": "Seven-feature vector extracted",
+                                        "detail": f"Max sev {sm.max_severity}, tactics {len(sm.mitre_tactics)}",
+                                    })
+                                    self._trace_buffer.append({
+                                        "timestamp": now_ts,
+                                        "stage": "SCORE",
+                                        "message": "Isolation Forest scored",
+                                        "detail": f"Anomaly score {sm.anomaly_score:.6f} (raw {sm.raw_model_score:.6f})",
+                                    })
+                                    self._trace_buffer.append({
+                                        "timestamp": now_ts,
+                                        "stage": "DECISION",
+                                        "message": f"{sm.decision} -> {sm.action}",
+                                        "detail": f"Threshold {sm.threshold_used:.6f} (margin {sm.anomaly_score - sm.threshold_used:+.6f})",
+                                    })
+                                    if sm.action == "ESCALATE":
+                                        self._trace_buffer.append({
+                                            "timestamp": now_ts,
+                                            "stage": "OUTPUT",
+                                            "message": "Deferred Telegram payload written",
+                                            "detail": f"MetaAlert #{sm.meta_id} ({sm.decision})",
+                                        })
+
                             if self.wall_clock_start is not None:
                                 self.wall_clock_elapsed = max(0.0, time.time() - self.wall_clock_start)
                 
@@ -401,7 +488,33 @@ class ReplayController:
             if not self._stop_event.is_set():
                 # Drain remaining active buckets at natural EOF
                 if self.current_service:
-                    self.current_service.shutdown(drain=True)
+                    drained_metas = self.current_service.shutdown(drain=True)
+                    if drained_metas:
+                        with self._lock:
+                            now_ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+                            for sm in drained_metas:
+                                self._latest_scored_meta = sm
+                                action = sm.action if sm.action in self.decision_counts else "SUPPRESS"
+                                self.decision_counts[action] = self.decision_counts.get(action, 0) + 1
+                                self._trace_buffer.append({
+                                    "timestamp": now_ts,
+                                    "stage": "FINALIZE",
+                                    "message": f"MetaAlert #{sm.meta_id} finalized (drain)",
+                                    "detail": f"{sm.alert_count} raw alerts -> MetaAlert ({sm.rule_group_primary})",
+                                })
+                                self._trace_buffer.append({
+                                    "timestamp": now_ts,
+                                    "stage": "DECISION",
+                                    "message": f"{sm.decision} -> {sm.action}",
+                                    "detail": f"Anomaly {sm.anomaly_score:.6f} vs threshold {sm.threshold_used:.6f}",
+                                })
+                                if sm.action == "ESCALATE":
+                                    self._trace_buffer.append({
+                                        "timestamp": now_ts,
+                                        "stage": "OUTPUT",
+                                        "message": "Deferred Telegram payload written",
+                                        "detail": f"MetaAlert #{sm.meta_id} ({sm.decision})",
+                                    })
 
                 with self._lock:
                     self.status = "COMPLETED"
@@ -424,7 +537,7 @@ class ReplayController:
                 self._persist_run_meta()
 
     def get_status(self) -> Dict[str, Any]:
-        """Return standardized status DTO for the replay controller."""
+        """Return standardized status DTO with comprehensive pipeline telemetry for the replay controller."""
         with self._lock:
             elapsed = self.wall_clock_elapsed
             if self.status == "RUNNING" and self.wall_clock_start is not None:
@@ -433,6 +546,63 @@ class ReplayController:
             eps = (self.processed_count / elapsed) if elapsed > 0 else 0.0
             progress = (self.processed_count / self.total_count) if self.total_count > 0 else 0.0
             model_ver = getattr(self.scoring_pipeline.bundle, "model_version", "v1") if self.scoring_pipeline and hasattr(self.scoring_pipeline, "bundle") else "v1"
+
+            latest_meta_dict = None
+            if self._latest_scored_meta:
+                sm = self._latest_scored_meta
+                latest_meta_dict = {
+                    "meta_id": sm.meta_id,
+                    "agent_id": sm.agent_id,
+                    "agent_name": sm.agent_name,
+                    "rule_group_primary": sm.rule_group_primary,
+                    "start_time": sm.start_time.isoformat() if sm.start_time else None,
+                    "end_time": sm.end_time.isoformat() if sm.end_time else None,
+                    "alert_count": sm.alert_count,
+                    "max_severity": sm.max_severity,
+                    "mitre_tactics": list(sm.mitre_tactics),
+                    "seven_features": dict(sm.seven_features) if sm.seven_features else {},
+                    "raw_model_score": round(float(sm.raw_model_score), 6),
+                    "anomaly_score": round(float(sm.anomaly_score), 6),
+                    "threshold_used": round(float(sm.threshold_used), 6),
+                    "margin": round(float(sm.anomaly_score - sm.threshold_used), 6),
+                    "decision": sm.decision,
+                    "action": sm.action,
+                    "escalate": sm.escalate,
+                    "model_version": sm.model_version,
+                }
+
+            active_buckets = 0
+            active_agents = 0
+            finalized_count = 0
+            if self.current_service:
+                active_buckets = len(self.current_service.engine._active_buckets) if hasattr(self.current_service.engine, "_active_buckets") else 0
+                active_agents = len(self.current_service.engine._temporal_states) if hasattr(self.current_service.engine, "_temporal_states") else 0
+                finalized_count = len(self.current_service.finalized_history)
+
+            evidence_count = self.current_evidence_store.count() if self.current_evidence_store else self.processed_count
+            telegram_count = self.escalation_sink.get_total_count() if self.escalation_sink else 0
+            latest_payloads = self.escalation_sink.get_latest_payloads(1) if self.escalation_sink else []
+            latest_payload = latest_payloads[0] if latest_payloads else None
+
+            telemetry = {
+                "raw": {
+                    "processed": self.processed_count,
+                    "evidence_count": evidence_count,
+                    "last_alert": self._last_raw_alert_info,
+                },
+                "rbta": {
+                    "active_buckets": active_buckets,
+                    "finalized_meta_alerts": finalized_count,
+                    "active_agents": active_agents,
+                },
+                "latest_meta_alert": latest_meta_dict,
+                "decision_counts": dict(self.decision_counts),
+                "output": {
+                    "telegram_deferred_count": telegram_count,
+                    "latest_payload": latest_payload,
+                },
+                "trace": list(self._trace_buffer)[-50:],
+            }
 
             return {
                 "run_id": self.run_id,
@@ -452,4 +622,23 @@ class ReplayController:
                 "model_version": model_ver,
                 "error": self.last_error.get("error_message") if self.last_error else None,
                 "last_error": self.last_error,
+                "telemetry": telemetry,
+            }
+
+    def get_telegram_payloads(self, limit: int = 50) -> Dict[str, Any]:
+        """Return latest deferred Telegram payloads and total count."""
+        with self._lock:
+            if not self.escalation_sink:
+                if "RBTA_TELEGRAM_PAYLOAD_PATH" in os.environ:
+                    telegram_sink_path = Path(os.environ["RBTA_TELEGRAM_PAYLOAD_PATH"]).resolve()
+                else:
+                    telegram_sink_path = (self.runs_dir.parent / "telegram_escalate_payloads.txt").resolve()
+                sink = DeferredTelegramFileSink(telegram_sink_path)
+                return {
+                    "items": sink.get_latest_payloads(limit=limit),
+                    "total_count": sink.get_total_count(),
+                }
+            return {
+                "items": self.escalation_sink.get_latest_payloads(limit=limit),
+                "total_count": self.escalation_sink.get_total_count(),
             }

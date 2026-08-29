@@ -355,6 +355,34 @@ async function setupRouteMocks(page: Page) {
     await route.fulfill({ status: 200, json: replayState });
   });
 
+  await page.route(/\/api\/v1\/replay\/telegram-payloads/, async (route: Route) => {
+    await route.fulfill({
+      status: 200,
+      json: {
+        items: [
+          {
+            timestamp: '2026-08-29T10:06:50.000Z',
+            run_id: 'replay-test-run-001',
+            meta_id: 5,
+            idempotency_key: 'replay-test-run-001:5',
+            decision: 'CRITICAL',
+            action: 'ESCALATE',
+            anomaly_score: 0.425123,
+            threshold: 0.402877,
+            model_version: 'rbta-if-v1',
+            agent_id: 'agent-001',
+            agent_name: 'prod-wazuh-worker',
+            rule_group_primary: 'authentication_failed',
+            alert_count: 10,
+            max_severity: 9,
+            message: '[CRITICAL] MetaAlert #5 | authentication_failed | 10 alerts | severity 9 | anomaly 0.425123 > threshold 0.402877',
+          },
+        ],
+        total_count: 1,
+      },
+    });
+  });
+
   await page.route(/\/api\/v1\/replay\/start/, async (route: Route) => {
     const postData = route.request().postDataJSON() || {};
     replayState = {
@@ -366,6 +394,78 @@ async function setupRouteMocks(page: Page) {
       processed_count: 250,
       progress: 25.0,
       events_per_second: 150,
+      telemetry: {
+        raw: {
+          processed: 250,
+          evidence_count: 250,
+          last_alert: { alert_id: 'wazuh-alt-001', rule_group: 'authentication_failed', level: 9 },
+        },
+        rbta: {
+          active_buckets: 3,
+          finalized_meta_alerts: 5,
+          active_agents: 1,
+        },
+        latest_meta_alert: {
+          meta_id: 5,
+          agent_id: 'agent-001',
+          agent_name: 'prod-wazuh-worker',
+          rule_group_primary: 'authentication_failed',
+          alert_count: 10,
+          max_severity: 9,
+          mitre_tactics: ['initial-access', 'credential-access'],
+          seven_features: {
+            max_severity: 9.0,
+            mitre_tactic_count: 2.0,
+            critical_mitre_tactic_present: 1.0,
+            alert_count_log: 2.397895,
+            rule_diversity_shannon: 0.693147,
+            severity_dispersion: 0.45,
+            agent_criticality: 2.0,
+          },
+          raw_model_score: 0.152345,
+          anomaly_score: 0.425123,
+          threshold_used: 0.402877,
+          margin: 0.022246,
+          decision: 'CRITICAL',
+          action: 'ESCALATE',
+          escalate: true,
+          model_version: 'rbta-if-v1',
+        },
+        decision_counts: {
+          ESCALATE: 2,
+          SUPPRESS: 3,
+          DAILY_DIGEST: 0,
+        },
+        output: {
+          telegram_deferred_count: 2,
+          latest_payload: {
+            timestamp: '2026-08-29T10:06:50.000Z',
+            run_id: 'replay-test-run-001',
+            meta_id: 5,
+            idempotency_key: 'replay-test-run-001:5',
+            decision: 'CRITICAL',
+            action: 'ESCALATE',
+            anomaly_score: 0.425123,
+            threshold: 0.402877,
+            model_version: 'rbta-if-v1',
+            agent_id: 'agent-001',
+            agent_name: 'prod-wazuh-worker',
+            rule_group_primary: 'authentication_failed',
+            alert_count: 10,
+            max_severity: 9,
+            message: '[CRITICAL] MetaAlert #5 | authentication_failed | 10 alerts | severity 9 | anomaly 0.425123 > threshold 0.402877',
+          },
+        },
+        trace: [
+          { timestamp: '10:00:01.120', stage: 'RAW', message: 'Alert wazuh-alt-001 received', detail: 'Agent 001 | authentication_failed' },
+          { timestamp: '10:00:01.125', stage: 'CANONICAL', message: 'CanonicalRawAlert generated', detail: 'Rule 5710 (Level 9)' },
+          { timestamp: '10:00:02.340', stage: 'FINALIZE', message: 'MetaAlert #5 finalized', detail: '10 raw alerts -> MetaAlert' },
+          { timestamp: '10:00:02.345', stage: 'FEATURES', message: 'Seven-feature vector extracted', detail: 'Max sev 9, tactics 2' },
+          { timestamp: '10:00:02.350', stage: 'SCORE', message: 'Isolation Forest scored', detail: 'Anomaly score 0.425123' },
+          { timestamp: '10:00:02.352', stage: 'DECISION', message: 'CRITICAL -> ESCALATE', detail: 'Threshold 0.402877 (margin +0.022246)' },
+          { timestamp: '10:00:02.355', stage: 'OUTPUT', message: 'Deferred Telegram payload written', detail: 'MetaAlert #5 (CRITICAL)' },
+        ],
+      } as any,
     };
     await route.fulfill({ status: 200, json: replayState });
   });
@@ -671,7 +771,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
 
     const startBtn = page.locator('button:has-text("Start Replay")');
     await startBtn.click();
-    await expect(page.locator('text=RUNNING')).toBeVisible();
+    await expect(page.locator('text=RUNNING').first()).toBeVisible();
   });
 
   test('21. MetaAlerts search input updates table query and preserves run_id', async ({ page }) => {
@@ -684,5 +784,58 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     await searchInput.fill('authentication_failed');
     await expect(page.locator('text=authentication_failed').first()).toBeVisible();
     expect(page.url()).toContain('run_id=test-run-123');
+  });
+
+  test('22. Pipeline visualizer renders all 9 stages and clicking nodes updates stage inspector', async ({ page }) => {
+    await page.addInitScript((key) => {
+      window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
+    }, VALID_API_KEY);
+    await page.goto('/dashboard/replay');
+
+    const startBtn = page.locator('button:has-text("Start Replay")');
+    await startBtn.click();
+    await expect(page.locator('text=Operational Processing Pipeline')).toBeVisible();
+
+    // Verify 9 stages exist
+    await expect(page.locator('text=1. Dataset')).toBeVisible();
+    await expect(page.locator('text=2. Canonicalize')).toBeVisible();
+    await expect(page.locator('text=3. Raw Evidence')).toBeVisible();
+    await expect(page.locator('text=4. RBTA Window')).toBeVisible();
+    await expect(page.locator('text=5. MetaAlert')).toBeVisible();
+    await expect(page.locator('text=6. 7 Features')).toBeVisible();
+    await expect(page.locator('text=7. IsoForest')).toBeVisible();
+    await expect(page.locator('text=8. Decision')).toBeVisible();
+    await expect(page.locator('text=9. Output Sink')).toBeVisible();
+
+    // Click 6. 7 Features to open stage detail
+    await page.locator('button:has-text("6. 7 Features")').click();
+    await expect(page.locator('text=Stage Inspection: FEATURES')).toBeVisible();
+  });
+
+  test('23. Seven-feature inspector displays exact numerical feature vector', async ({ page }) => {
+    await page.addInitScript((key) => {
+      window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
+    }, VALID_API_KEY);
+    await page.goto('/dashboard/replay');
+
+    const startBtn = page.locator('button:has-text("Start Replay")');
+    await startBtn.click();
+
+    await page.locator('button:has-text("6. 7 Features")').click();
+    await expect(page.locator('text=max_severity')).toBeVisible();
+    await expect(page.locator('text=mitre_tactic_count')).toBeVisible();
+    await expect(page.locator('text=critical_mitre_tactic_present')).toBeVisible();
+    await expect(page.locator('text=rule_diversity_shannon')).toBeVisible();
+  });
+
+  test('24. Deferred Telegram outbox table renders recorded ESCALATE payloads', async ({ page }) => {
+    await page.addInitScript((key) => {
+      window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
+    }, VALID_API_KEY);
+    await page.goto('/dashboard/replay');
+
+    await expect(page.locator('text=Deferred Telegram Payload Outbox')).toBeVisible();
+    await expect(page.locator('text=1 ESCALATE Payloads')).toBeVisible();
+    await expect(page.locator('text=replay-test-run-001:5')).toBeVisible();
   });
 });

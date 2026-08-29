@@ -121,6 +121,87 @@ export const RawAlertListSchema = z.object({
 
 export type RawAlertList = z.infer<typeof RawAlertListSchema>;
 
+export const PipelineTraceItemSchema = z.object({
+  timestamp: z.string(),
+  stage: z.string(),
+  message: z.string(),
+  detail: z.string().optional(),
+});
+
+export type PipelineTraceItem = z.infer<typeof PipelineTraceItemSchema>;
+
+export const PipelineLatestMetaAlertSchema = z.object({
+  meta_id: z.number(),
+  agent_id: z.string(),
+  agent_name: z.string(),
+  rule_group_primary: z.string(),
+  start_time: z.string().nullable().optional(),
+  end_time: z.string().nullable().optional(),
+  alert_count: z.number(),
+  max_severity: z.number(),
+  mitre_tactics: z.array(z.string()).optional(),
+  seven_features: z.record(z.string(), z.number()).optional(),
+  raw_model_score: z.number().optional(),
+  anomaly_score: z.number().optional(),
+  threshold_used: z.number().optional(),
+  margin: z.number().optional(),
+  decision: z.string().optional(),
+  action: z.string().optional(),
+  escalate: z.boolean().optional(),
+  model_version: z.string().optional(),
+});
+
+export type PipelineLatestMetaAlert = z.infer<typeof PipelineLatestMetaAlertSchema>;
+
+export const PipelineTelemetrySchema = z.object({
+  raw: z.object({
+    processed: z.number(),
+    evidence_count: z.number(),
+    last_alert: z.record(z.string(), z.unknown()).nullable().optional(),
+  }),
+  rbta: z.object({
+    active_buckets: z.number(),
+    finalized_meta_alerts: z.number(),
+    active_agents: z.number(),
+  }),
+  latest_meta_alert: PipelineLatestMetaAlertSchema.nullable().optional(),
+  decision_counts: z.record(z.string(), z.number()).optional(),
+  output: z.object({
+    telegram_deferred_count: z.number(),
+    latest_payload: z.record(z.string(), z.unknown()).nullable().optional(),
+  }),
+  trace: z.array(PipelineTraceItemSchema).optional(),
+});
+
+export type PipelineTelemetry = z.infer<typeof PipelineTelemetrySchema>;
+
+export const TelegramPayloadSchema = z.object({
+  timestamp: z.string(),
+  run_id: z.string(),
+  meta_id: z.number(),
+  idempotency_key: z.string(),
+  decision: z.string(),
+  action: z.string(),
+  anomaly_score: z.number(),
+  threshold: z.number(),
+  model_version: z.string(),
+  agent_id: z.string(),
+  agent_name: z.string(),
+  rule_group_primary: z.string(),
+  alert_count: z.number(),
+  max_severity: z.number(),
+  message: z.string(),
+});
+
+export type TelegramPayload = z.infer<typeof TelegramPayloadSchema>;
+
+export const TelegramPayloadListSchema = z.object({
+  items: z.array(TelegramPayloadSchema),
+  total_count: z.number(),
+});
+
+export type TelegramPayloadList = z.infer<typeof TelegramPayloadListSchema>;
+
 export const ReplayStatusSchema = z.object({
   run_id: z.string().nullable(),
   status: z.enum(['IDLE', 'RUNNING', 'PAUSED', 'STOPPED', 'COMPLETED', 'ERROR']),
@@ -139,6 +220,7 @@ export const ReplayStatusSchema = z.object({
   current_dataset_index: z.number().nullable().optional(),
   error: z.string().nullable().optional(),
   last_error: z.record(z.string(), z.unknown()).nullable().optional(),
+  telemetry: PipelineTelemetrySchema.nullable().optional(),
 });
 
 export type ReplayStatus = z.infer<typeof ReplayStatusSchema>;
