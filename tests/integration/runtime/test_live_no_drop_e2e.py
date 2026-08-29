@@ -63,9 +63,10 @@ def test_live_no_drop_service_restart_and_reconciliation_recovery(tmp_path: Path
     a2 = make_raw_alert(2, base_t + timedelta(minutes=5))
     poller1.poll_recent.return_value = [a1, a2]
     poller1.poll_reconciliation.return_value = [a1, a2]
+    poller1.poll_full_reconciliation.return_value = []
 
     coord1 = LiveIngestionCoordinator(service=service1, poller=poller1)
-    res1 = coord1.run_cycle(current_time=base_t + timedelta(minutes=6), force_reconciliation=True)
+    res1 = coord1.run_cycle(current_time=base_t + timedelta(minutes=6), force_recent_reconciliation=True)
 
     assert res1.processed_new_ids == 2
     assert service1.is_seen("alert_1")
@@ -81,13 +82,14 @@ def test_live_no_drop_service_restart_and_reconciliation_recovery(tmp_path: Path
     )
     poller2 = MagicMock(spec=WazuhIndexerLivePoller)
 
-    # Reconciliation scan in service2 discovers a1, a2, and a brand new a3
-    a3 = make_raw_alert(3, base_t + timedelta(minutes=10))
-    poller2.poll_recent.return_value = [a3]
-    poller2.poll_reconciliation.return_value = [a1, a2, a3]
+    # Full retention reconciliation in service2 discovers a1, a2, and a brand new a3 (from days earlier)
+    a3 = make_raw_alert(3, base_t - timedelta(days=3))
+    poller2.poll_recent.return_value = []
+    poller2.poll_reconciliation.return_value = []
+    poller2.poll_full_reconciliation.return_value = [a3, a1, a2]
 
     coord2 = LiveIngestionCoordinator(service=service2, poller=poller2)
-    res2 = coord2.run_cycle(current_time=base_t + timedelta(minutes=12), force_reconciliation=True)
+    res2 = coord2.run_cycle(current_time=base_t + timedelta(minutes=12), force_full_reconciliation=True)
 
     # a1, a2 are recognized as duplicate no-ops; a3 is processed cleanly
     assert res2.processed_new_ids == 1
@@ -147,9 +149,10 @@ def test_pending_scoring_survives_scoring_failure_and_reconciliation(tmp_path: P
     poller2 = MagicMock(spec=WazuhIndexerLivePoller)
     poller2.poll_recent.return_value = []
     poller2.poll_reconciliation.return_value = [a1]
+    poller2.poll_full_reconciliation.return_value = []
 
     coord2 = LiveIngestionCoordinator(service=service2, poller=poller2)
-    res2 = coord2.run_cycle(current_time=base_t + timedelta(minutes=25), force_reconciliation=True)
+    res2 = coord2.run_cycle(current_time=base_t + timedelta(minutes=25), force_recent_reconciliation=True)
 
     # a1 is duplicate no-op, no duplicate MetaAlert is produced
     assert res2.duplicate_noops == 1

@@ -26,3 +26,12 @@ def test_no_timestamp_drop_logic_in_runtime_src():
         content = py_file.read_text(encoding="utf-8").lower()
         for token in forbidden_tokens:
             assert token not in content, f"Forbidden token '{token}' found in {py_file.name}"
+
+
+def test_no_swallowed_canonicalization_exceptions_in_live_source():
+    """Verify that live source does not swallow canonicalization exceptions with warning+continue."""
+    live_source_path = RUNTIME_SRC / "live_source.py"
+    content = live_source_path.read_text(encoding="utf-8")
+    assert "LiveCanonicalizationError" in content
+    # Ensure canonicalize_wazuh_alert is called and exceptions are raised
+    assert "raise LiveCanonicalizationError" in content

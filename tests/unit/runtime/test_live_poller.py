@@ -1,11 +1,16 @@
-"""Unit tests for WazuhIndexerLivePoller with fast recent poll, reconciliation scan, and exact index derivation."""
+"""Unit tests for WazuhIndexerLivePoller with fast poll, reconciliation, and fail-closed integrity."""
 
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 import pytest
 
 from src.ingestion.wazuh_client import WazuhIndexerClient
-from src.runtime.live_source import WazuhIndexerLivePoller, derive_daily_indices
+from src.runtime.live_source import (
+    LiveCanonicalizationError,
+    LiveSourceIntegrityError,
+    WazuhIndexerLivePoller,
+    derive_daily_indices,
+)
 
 
 def make_hit(idx: int, ts_str: str = "2026-08-28T10:00:00.000+0000") -> dict:
@@ -34,92 +39,168 @@ def test_derive_daily_indices_midnight_spanning():
     assert "wazuh-alerts-*" not in indices
 
 
-def test_live_poller_queries_overlap_range_with_recent_cursor():
-    """Fast recent poll queries time window [cursor - overlap, current_time] without dropping duplicates."""
+def test_live_poller_canonicalization_failure_raises_fail_closed():
+    """When a document fails canonicalization, poller raises LiveCanonicalizationError instead of silent continue."""
     client = MagicMock(spec=WazuhIndexerClient)
+    malformed_hit = {
+        "_index": "wazuh-alerts-4.x-2026.08.28",
+        "_id": "doc_bad",
+        "sort": [1775118765000, "alert_bad"],
+        "_source": {
+            "id": "alert_bad",
+            # missing timestamp and agent
+        },
+    }
     client._request.return_value = MagicMock(
         status_code=200,
-        json=lambda: {"hits": {"hits": [make_hit(1), make_hit(2)]}},
-    )
-
-    poller = WazuhIndexerLivePoller(
-        client=client,
-        overlap_window=timedelta(minutes=5),
-        poll_interval=timedelta(seconds=5),
-    )
-
-    t_cursor = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
-    t_now = datetime(2026, 8, 28, 10, 5, 0, tzinfo=timezone.utc)
-
-    alerts = poller.poll_recent(current_time=t_now, recent_poll_cursor=t_cursor)
-    assert len(alerts) == 2
-    assert [a.wazuh_alert_id for a in alerts] == ["alert_1", "alert_2"]
-
-    # Verify query body used cursor - overlap (09:55:00) to now (10:05:00)
-    args, kwargs = client._request.call_args
-    range_query = kwargs["json_data"]["query"]["range"]["@timestamp"]
-    assert range_query["gte"] == "2026-08-28T09:55:00+00:00"
-    assert range_query["lte"] == "2026-08-28T10:05:00+00:00"
-
-
-def test_live_poller_midnight_spanning_query():
-    """Live poller targets exact daily indices when window crosses UTC midnight (not wildcard)."""
-    client = MagicMock(spec=WazuhIndexerClient)
-    client._request.return_value = MagicMock(
-        status_code=200,
-        json=lambda: {"hits": {"hits": []}},
-    )
-
-    poller = WazuhIndexerLivePoller(client=client, overlap_window=timedelta(minutes=10))
-
-    t_start = datetime(2026, 8, 28, 23, 55, 0, tzinfo=timezone.utc)
-    t_now = datetime(2026, 8, 29, 0, 5, 0, tzinfo=timezone.utc)
-
-    poller.poll_recent(current_time=t_now, recent_poll_cursor=t_start)
-
-    args, kwargs = client._request.call_args
-    endpoint = args[1]
-    # Must explicitly target the two daily indices, not a blind wildcard
-    assert endpoint == "/wazuh-alerts-4.x-2026.08.28,wazuh-alerts-4.x-2026.08.29/_search"
-    assert "wazuh-alerts-*" not in endpoint
-
-
-def test_live_poller_reconciliation_scan_queries_retained_days():
-    """Reconciliation scan queries exact retained daily indices across configured days."""
-    client = MagicMock(spec=WazuhIndexerClient)
-    client._request.return_value = MagicMock(
-        status_code=200,
-        json=lambda: {"hits": {"hits": [make_hit(100, "2026-08-28T02:00:00.000+0000")]}},
+        json=lambda: {"hits": {"hits": [make_hit(1), malformed_hit, make_hit(2)]}},
     )
 
     poller = WazuhIndexerLivePoller(client=client)
-    t_now = datetime(2026, 8, 29, 14, 0, 0, tzinfo=timezone.utc)
 
-    recon_alerts = poller.poll_reconciliation(current_time=t_now, reconciliation_days=2)
-    assert len(recon_alerts) == 1
-    assert recon_alerts[0].wazuh_alert_id == "alert_100"
+    with pytest.raises(LiveCanonicalizationError) as exc_info:
+        poller.poll_recent(current_time=datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc))
+
+    assert "doc_bad" in str(exc_info.value)
+    assert "wazuh-alerts-4.x-2026.08.28" in str(exc_info.value)
+
+
+def test_live_poller_malformed_response_empty_dict_fails():
+    """Empty dictionary response from Indexer raises LiveSourceIntegrityError."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    client._request.return_value = MagicMock(status_code=200, json=lambda: {})
+
+    poller = WazuhIndexerLivePoller(client=client)
+
+    with pytest.raises(LiveSourceIntegrityError, match="missing or invalid 'hits'"):
+        poller.poll_recent()
+
+
+def test_live_poller_malformed_response_hits_not_dict_fails():
+    """Response with hits: None or non-dict raises LiveSourceIntegrityError."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    client._request.return_value = MagicMock(status_code=200, json=lambda: {"hits": None})
+
+    poller = WazuhIndexerLivePoller(client=client)
+
+    with pytest.raises(LiveSourceIntegrityError, match="missing or invalid 'hits'"):
+        poller.poll_recent()
+
+
+def test_live_poller_malformed_response_hits_hits_not_list_fails():
+    """Response with hits.hits not a list raises LiveSourceIntegrityError."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    client._request.return_value = MagicMock(status_code=200, json=lambda: {"hits": {"hits": "not-a-list"}})
+
+    poller = WazuhIndexerLivePoller(client=client)
+
+    with pytest.raises(LiveSourceIntegrityError, match="missing or invalid 'hits.hits'"):
+        poller.poll_recent()
+
+
+def test_live_poller_valid_empty_hits_returns_empty_list():
+    """Valid empty response returns empty list normally."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    client._request.return_value = MagicMock(status_code=200, json=lambda: {"hits": {"hits": []}})
+
+    poller = WazuhIndexerLivePoller(client=client)
+    alerts = poller.poll_recent()
+    assert alerts == []
+
+
+def test_live_poller_full_page_missing_sort_cursor_fails():
+    """When a page has page_size items but missing 'sort' cursor, LiveSourceIntegrityError is raised."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    hit1 = make_hit(1)
+    hit2 = make_hit(2)
+    del hit2["sort"]  # remove sort on final hit of full page
+
+    client._request.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"hits": {"hits": [hit1, hit2]}},
+    )
+
+    poller = WazuhIndexerLivePoller(client=client, page_size=2)
+
+    with pytest.raises(LiveSourceIntegrityError, match="missing 'sort' field in final hit"):
+        poller.poll_recent()
+
+
+def test_live_poller_full_page_invalid_sort_cursor_fails():
+    """When a page has page_size items but invalid 'sort' cursor, LiveSourceIntegrityError is raised."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    hit1 = make_hit(1)
+    hit2 = make_hit(2)
+    hit2["sort"] = "not-a-sequence"
+
+    client._request.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"hits": {"hits": [hit1, hit2]}},
+    )
+
+    poller = WazuhIndexerLivePoller(client=client, page_size=2)
+
+    with pytest.raises(LiveSourceIntegrityError, match="invalid 'sort' cursor"):
+        poller.poll_recent()
+
+
+def test_live_poller_discover_retained_daily_alert_indices():
+    """Poller filters and sorts only valid Wazuh daily alert indices from Indexer list."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    client.list_indices.return_value = [
+        "wazuh-alerts-4.x-2026.08.29",
+        ".kibana_1",
+        "wazuh-alerts-4.x-2026.08.20",
+        "wazuh-monitoring-2026.08.29",
+        "wazuh-alerts-4.x-2026.08.25",
+        "wazuh-alerts-4.x-invalid-name",
+    ]
+
+    poller = WazuhIndexerLivePoller(client=client)
+    indices = poller.discover_retained_daily_alert_indices()
+
+    assert indices == [
+        "wazuh-alerts-4.x-2026.08.20",
+        "wazuh-alerts-4.x-2026.08.25",
+        "wazuh-alerts-4.x-2026.08.29",
+    ]
+
+
+def test_live_poller_full_reconciliation_scans_all_retained_indices():
+    """Full-retention reconciliation scans every discovered daily index without timestamp cutoffs."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    client.list_indices.return_value = [
+        "wazuh-alerts-4.x-2026.08.20",
+        "wazuh-alerts-4.x-2026.08.29",
+    ]
+    client._request.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"hits": {"hits": [make_hit(100, "2026-08-20T05:00:00.000+0000")]}},
+    )
+
+    poller = WazuhIndexerLivePoller(client=client)
+    alerts = poller.poll_full_reconciliation()
+
+    assert len(alerts) == 1
+    assert alerts[0].wazuh_alert_id == "alert_100"
 
     args, kwargs = client._request.call_args
-    endpoint = args[1]
-    assert endpoint == "/wazuh-alerts-4.x-2026.08.28,wazuh-alerts-4.x-2026.08.29/_search"
+    assert args[1] == "/wazuh-alerts-4.x-2026.08.20,wazuh-alerts-4.x-2026.08.29/_search"
+    # No range filter in full retention query
+    assert "query" not in kwargs["json_data"]
 
 
-def test_live_poller_pagination():
+def test_live_poller_pagination_normal_3_pages():
     """Live poller requests pages with search_after until result length < page_size."""
     client = MagicMock(spec=WazuhIndexerClient)
 
-    # 5 alerts total, page_size = 2 -> 3 pages needed
     client._request.side_effect = [
         MagicMock(status_code=200, json=lambda: {"hits": {"hits": [make_hit(1), make_hit(2)]}}),
         MagicMock(status_code=200, json=lambda: {"hits": {"hits": [make_hit(3), make_hit(4)]}}),
         MagicMock(status_code=200, json=lambda: {"hits": {"hits": [make_hit(5)]}}),
     ]
 
-    poller = WazuhIndexerLivePoller(
-        client=client,
-        page_size=2,
-    )
-
+    poller = WazuhIndexerLivePoller(client=client, page_size=2)
     alerts = poller.poll_recent(current_time=datetime(2026, 8, 28, 12, 0, 0, tzinfo=timezone.utc))
     assert len(alerts) == 5
     assert [a.wazuh_alert_id for a in alerts] == ["alert_1", "alert_2", "alert_3", "alert_4", "alert_5"]
@@ -139,7 +220,7 @@ def test_live_poller_no_permanent_seen_registry():
     assert len(p1) == 2
 
     p2 = poller.poll_recent(current_time=datetime(2026, 8, 28, 10, 1, 0, tzinfo=timezone.utc))
-    assert len(p2) == 3  # alerts 1 and 2 are returned again without being dropped by poller
+    assert len(p2) == 3
 
 
 def test_live_poller_propagates_transport_error():

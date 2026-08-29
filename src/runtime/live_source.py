@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 import logging
+import re
 from typing import Any, Dict, List, Optional, Sequence, Set
 
 from src.contracts.raw_alert import CanonicalRawAlert
@@ -9,6 +10,21 @@ from src.etl.wazuh_canonicalizer import canonicalize_wazuh_alert
 from src.ingestion.wazuh_client import WazuhIndexerClient
 
 logger = logging.getLogger(__name__)
+
+
+class LiveSourceError(RuntimeError):
+    """Base exception for live source errors."""
+    pass
+
+
+class LiveSourceIntegrityError(LiveSourceError):
+    """Raised when source response, pagination, or integrity contract is violated."""
+    pass
+
+
+class LiveCanonicalizationError(LiveSourceIntegrityError):
+    """Raised when a source document fails canonicalization."""
+    pass
 
 
 def derive_daily_indices(
@@ -78,7 +94,10 @@ class WazuhIndexerLivePoller:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
     ) -> List[CanonicalRawAlert]:
-        """Execute deterministic paginated search using @timestamp ASC and id ASC."""
+        """Execute deterministic paginated search using @timestamp ASC and id ASC.
+
+        Enforces strict fail-closed response validation and canonicalization integrity.
+        """
         if not indices:
             return []
 
@@ -107,24 +126,90 @@ class WazuhIndexerLivePoller:
                 current_body["search_after"] = search_after_cursor
 
             resp = self.client._request("POST", target_endpoint, json_data=current_body)
-            data = resp.json()
-            hits = data.get("hits", {}).get("hits", [])
+            try:
+                data = resp.json()
+            except Exception as exc:
+                raise LiveSourceIntegrityError(f"Indexer response is not valid JSON: {exc}") from exc
 
-            for hit in hits:
+            # Strict response validation
+            if not isinstance(data, dict):
+                raise LiveSourceIntegrityError(
+                    f"Malformed Indexer response: expected JSON object, got {type(data).__name__}"
+                )
+            if "hits" not in data or not isinstance(data["hits"], dict):
+                raise LiveSourceIntegrityError(
+                    "Malformed Indexer response: missing or invalid 'hits' dictionary"
+                )
+            if "hits" not in data["hits"] or not isinstance(data["hits"]["hits"], list):
+                raise LiveSourceIntegrityError(
+                    "Malformed Indexer response: missing or invalid 'hits.hits' list"
+                )
+
+            hits = data["hits"]["hits"]
+
+            # Fail-closed canonicalization loop
+            for pos, hit in enumerate(hits):
                 try:
                     alert = canonicalize_wazuh_alert(hit)
                     new_alerts.append(alert)
                 except Exception as exc:
-                    logger.warning("Failed to canonicalize hit in live poller: %s", exc)
+                    doc_id = hit.get("_id") if isinstance(hit, dict) else None
+                    idx_name = hit.get("_index") if isinstance(hit, dict) else None
+                    raise LiveCanonicalizationError(
+                        f"Failed to canonicalize document in live source (index={idx_name}, doc_id={doc_id}, page_pos={pos}): {exc}"
+                    ) from exc
 
+            # Termination condition
             if len(hits) < self.page_size:
                 break
 
-            search_after_cursor = hits[-1].get("sort")
-            if search_after_cursor is None:
-                break
+            # Pagination cursor validation on full pages
+            last_hit = hits[-1]
+            if not isinstance(last_hit, dict) or "sort" not in last_hit:
+                raise LiveSourceIntegrityError(
+                    f"Full page ({len(hits)} items) missing 'sort' field in final hit for search_after pagination"
+                )
+
+            search_after_cursor = last_hit["sort"]
+            if not isinstance(search_after_cursor, (list, tuple)) or len(search_after_cursor) < 2:
+                raise LiveSourceIntegrityError(
+                    f"Full page final hit has invalid 'sort' cursor: {search_after_cursor}"
+                )
 
         return new_alerts
+
+    def discover_retained_daily_alert_indices(
+        self,
+        prefix: str = "wazuh-alerts-4.x-",
+    ) -> List[str]:
+        """Discover all retained Wazuh daily alert indices currently present on the Indexer.
+
+        Parameters
+        ----------
+        prefix : str
+            Index name prefix for daily alert indices.
+
+        Returns
+        -------
+        List[str]
+            Chronologically sorted list of discovered daily alert index names.
+        """
+        raw_indices = self.client.list_indices("wazuh-alerts-*")
+        daily_indices: List[str] = []
+
+        date_regex = re.compile(r"^\d{4}\.\d{2}\.\d{2}$")
+
+        for idx_name in raw_indices:
+            if not isinstance(idx_name, str):
+                continue
+            if idx_name.startswith(prefix):
+                suffix = idx_name[len(prefix):]
+                if date_regex.match(suffix):
+                    daily_indices.append(idx_name)
+            elif re.match(r"^wazuh-alerts-(?:\d+\.x-)?\d{4}\.\d{2}\.\d{2}$", idx_name):
+                daily_indices.append(idx_name)
+
+        return sorted(list(set(daily_indices)))
 
     def poll_recent(
         self,
@@ -157,7 +242,7 @@ class WazuhIndexerLivePoller:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
     ) -> List[CanonicalRawAlert]:
-        """Lossless reconciliation scan path over retained daily indices.
+        """Recent reconciliation scan path over retained daily indices (default 2 days: today and yesterday).
 
         Parameters
         ----------
@@ -173,12 +258,36 @@ class WazuhIndexerLivePoller:
         Returns
         -------
         List[CanonicalRawAlert]
-            All canonical alerts retrievable across the scanned daily indices.
+            All canonical alerts retrievable across the scanned recent daily indices.
         """
         now = end_time or current_time or datetime.now(timezone.utc)
         scan_start = start_time or (now - timedelta(days=max(0, reconciliation_days - 1)))
         indices = derive_daily_indices(scan_start, now)
         return self._paginate_search(indices=indices, start_time=start_time, end_time=end_time)
+
+    def poll_full_reconciliation(
+        self,
+        prefix: str = "wazuh-alerts-4.x-",
+    ) -> List[CanonicalRawAlert]:
+        """Lossless full-retention reconciliation scan across all retained Wazuh daily alert indices.
+
+        Discovers every daily alert index currently present in the Indexer and paginates all of them
+        completely with zero timestamp-based cutoffs.
+
+        Parameters
+        ----------
+        prefix : str
+            Index name prefix to discover.
+
+        Returns
+        -------
+        List[CanonicalRawAlert]
+            All canonical alerts retrievable across all retained daily indices.
+        """
+        indices = self.discover_retained_daily_alert_indices(prefix=prefix)
+        if not indices:
+            return []
+        return self._paginate_search(indices=indices, start_time=None, end_time=None)
 
     def poll_once(
         self,
@@ -186,6 +295,6 @@ class WazuhIndexerLivePoller:
         recent_poll_cursor: Optional[datetime] = None,
         high_watermark: Optional[datetime] = None,
     ) -> List[CanonicalRawAlert]:
-        """Convenience method for fast recent polling (accepts legacy high_watermark alias)."""
+        """Convenience method for fast recent polling (deprecated high_watermark alias)."""
         cursor = recent_poll_cursor or high_watermark
         return self.poll_recent(current_time=current_time, recent_poll_cursor=cursor)

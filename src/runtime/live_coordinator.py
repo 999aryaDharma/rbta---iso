@@ -18,29 +18,37 @@ class LiveCycleResult:
     """Operational observability metrics for a single live ingestion cycle."""
 
     fast_candidates: int
-    reconciliation_candidates: int
+    recent_reconciliation_candidates: int
+    full_reconciliation_candidates: int
     submitted_candidates: int
     duplicate_noops: int
     processed_new_ids: int
     failures: int
     new_scored_meta_alerts: int
 
+    @property
+    def reconciliation_candidates(self) -> int:
+        """Backwards-compatible aggregate reconciliation candidate count."""
+        return self.recent_reconciliation_candidates + self.full_reconciliation_candidates
+
 
 class LiveIngestionCoordinator:
-    """Coordinates fast recent polling, scheduled reconciliation scans, and submission to LiveRBTAService.
+    """Coordinates fast recent polling, recent reconciliation scans, and full-retention sweeps.
 
     Parameters
     ----------
     service : LiveRBTAService
         Target live stateful runtime service.
-    poller : WazuhIndexerLivePoller
+    poller : WazuhIndexerLivePoller | None
         Wazuh Indexer poller source.
     fast_poll_interval : timedelta
         Frequency between fast recent polling cycles (default 5 seconds).
-    reconciliation_interval : timedelta
-        Frequency between lossless reconciliation scans (default 5 minutes).
-    reconciliation_days : int
-        Number of recent daily indices to scan during reconciliation (default 2).
+    recent_reconciliation_interval : timedelta
+        Frequency between recent reconciliation scans (default 5 minutes).
+    full_reconciliation_interval : timedelta
+        Frequency between exhaustive full-retention sweeps (default 1 hour).
+    recent_reconciliation_days : int
+        Number of recent daily indices to scan during recent reconciliation (default 2).
     """
 
     def __init__(
@@ -48,34 +56,69 @@ class LiveIngestionCoordinator:
         service: LiveRBTAService,
         poller: Optional[WazuhIndexerLivePoller] = None,
         fast_poll_interval: timedelta = timedelta(seconds=5),
-        reconciliation_interval: timedelta = timedelta(minutes=5),
-        reconciliation_days: int = 2,
+        recent_reconciliation_interval: timedelta = timedelta(minutes=5),
+        full_reconciliation_interval: timedelta = timedelta(hours=1),
+        recent_reconciliation_days: int = 2,
+        reconciliation_interval: Optional[timedelta] = None,
+        reconciliation_days: Optional[int] = None,
     ) -> None:
         self.service: LiveRBTAService = service
         self.poller: WazuhIndexerLivePoller = poller or WazuhIndexerLivePoller()
         self.fast_poll_interval: timedelta = fast_poll_interval
-        self.reconciliation_interval: timedelta = reconciliation_interval
-        self.reconciliation_days: int = reconciliation_days
+        self.recent_reconciliation_interval: timedelta = (
+            reconciliation_interval or recent_reconciliation_interval
+        )
+        self.full_reconciliation_interval: timedelta = full_reconciliation_interval
+        self.recent_reconciliation_days: int = (
+            reconciliation_days or recent_reconciliation_days
+        )
 
         # Restore transport cursor state from service
         source_state = self.service.get_live_source_state()
+
         raw_cursor = source_state.get("recent_poll_cursor")
         self.recent_poll_cursor: Optional[datetime] = (
             datetime.fromisoformat(raw_cursor) if raw_cursor else None
         )
+
         raw_fast = source_state.get("last_fast_poll_at")
         self.last_fast_poll_at: Optional[datetime] = (
             datetime.fromisoformat(raw_fast) if raw_fast else None
         )
-        raw_recon = source_state.get("last_reconciliation_at")
-        self.last_reconciliation_at: Optional[datetime] = (
-            datetime.fromisoformat(raw_recon) if raw_recon else None
+
+        raw_recent_recon = source_state.get("last_recent_reconciliation_at") or source_state.get(
+            "last_reconciliation_at"
+        )
+        self.last_recent_reconciliation_at: Optional[datetime] = (
+            datetime.fromisoformat(raw_recent_recon) if raw_recent_recon else None
+        )
+
+        raw_full_recon = source_state.get("last_full_reconciliation_at")
+        self.last_full_reconciliation_at: Optional[datetime] = (
+            datetime.fromisoformat(raw_full_recon) if raw_full_recon else None
         )
 
     def run_fast_poll(self, current_time: Optional[datetime] = None) -> List[CanonicalRawAlert]:
         """Execute fast recent polling path using current poll cursor hint."""
         now = current_time or datetime.now(timezone.utc)
         return self.poller.poll_recent(current_time=now, recent_poll_cursor=self.recent_poll_cursor)
+
+    def run_recent_reconciliation(
+        self,
+        current_time: Optional[datetime] = None,
+        days: Optional[int] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ) -> List[CanonicalRawAlert]:
+        """Execute recent reconciliation scan across recent daily indices."""
+        now = current_time or datetime.now(timezone.utc)
+        n_days = days or self.recent_reconciliation_days
+        return self.poller.poll_reconciliation(
+            current_time=now,
+            reconciliation_days=n_days,
+            start_time=start_time,
+            end_time=end_time,
+        )
 
     def run_reconciliation(
         self,
@@ -84,36 +127,45 @@ class LiveIngestionCoordinator:
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
     ) -> List[CanonicalRawAlert]:
-        """Execute lossless reconciliation scan across retained daily indices."""
-        now = current_time or datetime.now(timezone.utc)
-        n_days = days or self.reconciliation_days
-        return self.poller.poll_reconciliation(
-            current_time=now,
-            reconciliation_days=n_days,
+        """Backwards-compatible alias for run_recent_reconciliation."""
+        return self.run_recent_reconciliation(
+            current_time=current_time,
+            days=days,
             start_time=start_time,
             end_time=end_time,
         )
 
+    def run_full_reconciliation(self, prefix: str = "wazuh-alerts-4.x-") -> List[CanonicalRawAlert]:
+        """Execute lossless full-retention reconciliation across all retained daily indices."""
+        return self.poller.poll_full_reconciliation(prefix=prefix)
+
     def run_cycle(
         self,
         current_time: Optional[datetime] = None,
+        force_recent_reconciliation: bool = False,
+        force_full_reconciliation: bool = False,
         force_reconciliation: bool = False,
     ) -> LiveCycleResult:
         """Execute a coordinated live ingestion cycle.
 
-        1. Runs reconciliation if due or forced.
-        2. Runs fast recent polling.
-        3. Merges candidate streams in deterministic order.
-        4. Submits each candidate to LiveRBTAService.
-        5. Flushes idle buckets in LiveRBTAService.
-        6. Updates and persists transport cursor state.
+        1. Runs full-retention sweep if due or forced.
+        2. Runs recent reconciliation if due or forced.
+        3. Runs fast recent polling.
+        4. Merges candidate streams in deterministic order.
+        5. Submits each candidate to LiveRBTAService.
+        6. Flushes idle buckets in LiveRBTAService.
+        7. Atomically updates and persists transport cursor state on success.
 
         Parameters
         ----------
         current_time : datetime | None
             Reference time for this cycle (defaults to UTC now).
+        force_recent_reconciliation : bool
+            Whether to force a recent reconciliation scan.
+        force_full_reconciliation : bool
+            Whether to force an exhaustive full-retention sweep.
         force_reconciliation : bool
-            Whether to force a reconciliation scan in this cycle.
+            Backwards-compatible alias for force_recent_reconciliation.
 
         Returns
         -------
@@ -122,37 +174,38 @@ class LiveIngestionCoordinator:
         """
         now = current_time or datetime.now(timezone.utc)
 
-        # 1. Determine reconciliation run
-        should_reconcile = force_reconciliation
-        if not should_reconcile:
-            if self.last_reconciliation_at is None:
-                should_reconcile = True
-            elif (now - self.last_reconciliation_at) >= self.reconciliation_interval:
-                should_reconcile = True
+        # 1. Full-retention reconciliation schedule check
+        should_full_recon = force_full_reconciliation
+        if not should_full_recon:
+            if self.last_full_reconciliation_at is None:
+                should_full_recon = True
+            elif (now - self.last_full_reconciliation_at) >= self.full_reconciliation_interval:
+                should_full_recon = True
 
-        recon_alerts: List[CanonicalRawAlert] = []
-        if should_reconcile:
-            try:
-                recon_alerts = self.run_reconciliation(current_time=now)
-                self.last_reconciliation_at = now
-            except Exception as exc:
-                logger.error("Reconciliation scan failed: %s", exc)
-                raise
+        full_recon_alerts: List[CanonicalRawAlert] = []
+        if should_full_recon:
+            full_recon_alerts = self.run_full_reconciliation()
 
-        # 2. Fast recent poll
-        fast_alerts: List[CanonicalRawAlert] = []
-        try:
-            fast_alerts = self.run_fast_poll(current_time=now)
-            self.last_fast_poll_at = now
-        except Exception as exc:
-            logger.error("Fast recent poll failed: %s", exc)
-            raise
+        # 2. Recent reconciliation schedule check
+        should_recent_recon = force_recent_reconciliation or force_reconciliation
+        if not should_recent_recon:
+            if self.last_recent_reconciliation_at is None:
+                should_recent_recon = True
+            elif (now - self.last_recent_reconciliation_at) >= self.recent_reconciliation_interval:
+                should_recent_recon = True
 
-        # 3. Merge candidate streams with in-cycle deduplication
+        recent_recon_alerts: List[CanonicalRawAlert] = []
+        if should_recent_recon:
+            recent_recon_alerts = self.run_recent_reconciliation(current_time=now)
+
+        # 3. Fast recent poll
+        fast_alerts: List[CanonicalRawAlert] = self.run_fast_poll(current_time=now)
+
+        # 4. Merge candidate streams with in-cycle deduplication
         all_candidates: List[CanonicalRawAlert] = []
         seen_in_cycle: Set[str] = set()
 
-        for a in list(recon_alerts) + list(fast_alerts):
+        for a in list(full_recon_alerts) + list(recent_recon_alerts) + list(fast_alerts):
             if a.wazuh_alert_id not in seen_in_cycle:
                 seen_in_cycle.add(a.wazuh_alert_id)
                 all_candidates.append(a)
@@ -160,7 +213,7 @@ class LiveIngestionCoordinator:
         # Stable sort by timestamp ASC, wazuh_alert_id ASC
         all_candidates.sort(key=lambda a: (a.timestamp, a.wazuh_alert_id))
 
-        # 4. Ingest candidates through LiveRBTAService
+        # 5. Ingest candidates through LiveRBTAService
         new_ids_count = 0
         duplicate_noops = 0
         failures = 0
@@ -180,25 +233,45 @@ class LiveIngestionCoordinator:
                 failures += 1
                 raise
 
-        # 5. Flush idle buckets
+        # 6. Flush idle buckets
         flushed_scored = self.service.check_idle_flush(now)
         total_scored.extend(flushed_scored)
 
-        # 6. Advance fast cursor (as latency hint only)
+        # 7. Commit transport state atomically on successful cycle completion
+        self.last_fast_poll_at = now
+        if should_recent_recon:
+            self.last_recent_reconciliation_at = now
+        if should_full_recon:
+            self.last_full_reconciliation_at = now
+
         if self.recent_poll_cursor is None or now > self.recent_poll_cursor:
             self.recent_poll_cursor = now
 
-        # 7. Persist transport state
         self.service.update_live_source_state({
             "recent_poll_cursor": self.recent_poll_cursor.isoformat() if self.recent_poll_cursor else None,
             "last_fast_poll_at": self.last_fast_poll_at.isoformat() if self.last_fast_poll_at else None,
-            "last_reconciliation_at": self.last_reconciliation_at.isoformat() if self.last_reconciliation_at else None,
-            "reconciliation_days": self.reconciliation_days,
+            "last_recent_reconciliation_at": (
+                self.last_recent_reconciliation_at.isoformat()
+                if self.last_recent_reconciliation_at
+                else None
+            ),
+            "last_reconciliation_at": (
+                self.last_recent_reconciliation_at.isoformat()
+                if self.last_recent_reconciliation_at
+                else None
+            ),
+            "last_full_reconciliation_at": (
+                self.last_full_reconciliation_at.isoformat()
+                if self.last_full_reconciliation_at
+                else None
+            ),
+            "recent_reconciliation_days": self.recent_reconciliation_days,
         })
 
         return LiveCycleResult(
             fast_candidates=len(fast_alerts),
-            reconciliation_candidates=len(recon_alerts),
+            recent_reconciliation_candidates=len(recent_recon_alerts),
+            full_reconciliation_candidates=len(full_recon_alerts),
             submitted_candidates=len(all_candidates),
             duplicate_noops=duplicate_noops,
             processed_new_ids=new_ids_count,

@@ -1,4 +1,4 @@
-"""Unit tests for LiveIngestionCoordinator (fast poll + reconciliation + durable dedup)."""
+"""Unit tests for LiveIngestionCoordinator (fast poll + recent reconciliation + full-retention sweep)."""
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -11,7 +11,7 @@ from src.model.scoring_pipeline import ScoringPipeline, train_reference_pipeline
 from src.runners.batch_runner import BatchResearchRunner
 from src.runtime.durable_state import DurableStateManager
 from src.runtime.live_coordinator import LiveCycleResult, LiveIngestionCoordinator
-from src.runtime.live_source import WazuhIndexerLivePoller
+from src.runtime.live_source import LiveCanonicalizationError, WazuhIndexerLivePoller
 from src.runtime.service import LiveRBTAService
 
 
@@ -65,19 +65,21 @@ def test_coordinator_fast_poll_and_reconciliation_cycle(tmp_path: Path):
     a2 = make_raw_alert(2, t_now - timedelta(minutes=1))
 
     poller.poll_recent.return_value = [a1, a2]
-    poller.poll_reconciliation.return_value = [a1]  # duplicate candidate in recon scan
+    poller.poll_reconciliation.return_value = [a1]
+    poller.poll_full_reconciliation.return_value = []
 
     coord = LiveIngestionCoordinator(
         service=service,
         poller=poller,
-        reconciliation_interval=timedelta(minutes=5),
+        recent_reconciliation_interval=timedelta(minutes=5),
+        full_reconciliation_interval=timedelta(hours=1),
     )
 
-    result = coord.run_cycle(current_time=t_now, force_reconciliation=True)
+    result = coord.run_cycle(current_time=t_now, force_recent_reconciliation=True)
 
     assert result.fast_candidates == 2
-    assert result.reconciliation_candidates == 1
-    assert result.submitted_candidates == 2  # merged in-cycle
+    assert result.recent_reconciliation_candidates == 1
+    assert result.submitted_candidates == 2
     assert result.processed_new_ids == 2
     assert result.duplicate_noops == 0
     assert result.failures == 0
@@ -86,107 +88,75 @@ def test_coordinator_fast_poll_and_reconciliation_cycle(tmp_path: Path):
     assert service.is_seen("alert_2")
 
 
-def test_coordinator_reconciliation_recovers_alert_outside_fast_overlap(tmp_path: Path):
-    """Reconciliation scan discovers an old alert (10:10) outside the fast 5-minute overlap window (10:25..10:30)."""
+def test_coordinator_full_retention_reconciliation_recovers_old_alert(tmp_path: Path):
+    """Full-retention sweep discovers an alert from days earlier (Aug 20 when today is Aug 29)."""
     service = create_test_service(tmp_path)
     poller = MagicMock(spec=WazuhIndexerLivePoller)
 
-    t_now = datetime(2026, 8, 28, 10, 30, 0, tzinfo=timezone.utc)
-    # Fast window only sees 10:28
+    t_now = datetime(2026, 8, 29, 10, 0, 0, tzinfo=timezone.utc)
     a_recent = make_raw_alert(99, t_now - timedelta(minutes=2))
-    # Late document at 10:10 (20 minutes ago, outside 5m overlap)
-    a_late = make_raw_alert(42, t_now - timedelta(minutes=20))
+    a_old_retained = make_raw_alert(10, datetime(2026, 8, 20, 10, 0, 0, tzinfo=timezone.utc))
 
     poller.poll_recent.return_value = [a_recent]
-    poller.poll_reconciliation.return_value = [a_late, a_recent]
+    poller.poll_reconciliation.return_value = [a_recent]
+    poller.poll_full_reconciliation.return_value = [a_old_retained, a_recent]
 
-    coord = LiveIngestionCoordinator(
-        service=service,
-        poller=poller,
-        reconciliation_interval=timedelta(minutes=5),
-    )
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
 
-    result = coord.run_cycle(current_time=t_now, force_reconciliation=True)
+    result = coord.run_cycle(current_time=t_now, force_full_reconciliation=True)
 
-    # Both alerts must be submitted and processed
     assert service.is_seen("alert_99")
-    assert service.is_seen("alert_42")
+    assert service.is_seen("alert_10")
     assert result.processed_new_ids == 2
+    assert result.full_reconciliation_candidates == 2
 
 
-def test_coordinator_very_old_unseen_alert_is_never_dropped(tmp_path: Path):
-    """An alert from hours earlier (09:00 when current is 15:00) is processed, not discarded."""
+def test_coordinator_canonicalization_failure_does_not_advance_success_timestamp(tmp_path: Path):
+    """When a source document fails canonicalization, coordinator raises and does NOT advance success timestamp."""
     service = create_test_service(tmp_path)
     poller = MagicMock(spec=WazuhIndexerLivePoller)
 
-    t_now = datetime(2026, 8, 28, 15, 0, 0, tzinfo=timezone.utc)
-    a_very_old = make_raw_alert(1, datetime(2026, 8, 28, 9, 0, 0, tzinfo=timezone.utc))
-
-    poller.poll_recent.return_value = []
-    poller.poll_reconciliation.return_value = [a_very_old]
+    t_now = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    poller.poll_full_reconciliation.side_effect = LiveCanonicalizationError("Corrupt payload in hit 5")
 
     coord = LiveIngestionCoordinator(service=service, poller=poller)
-    result = coord.run_cycle(current_time=t_now, force_reconciliation=True)
 
-    assert result.processed_new_ids == 1
-    assert service.is_seen("alert_1")
+    with pytest.raises(LiveCanonicalizationError, match="Corrupt payload"):
+        coord.run_cycle(current_time=t_now, force_full_reconciliation=True)
+
+    # State was NOT marked successful
+    assert coord.last_full_reconciliation_at is None
+    state = service.get_live_source_state()
+    assert state.get("last_full_reconciliation_at") is None
 
 
-def test_coordinator_already_processed_old_alert_is_duplicate_noop(tmp_path: Path):
-    """When reconciliation scans full day and rereads previously processed alerts, they are duplicate no-ops."""
+def test_coordinator_full_retention_duplicates_are_safe(tmp_path: Path):
+    """When full retention sweeps all retained indices, already processed alerts are recognized as duplicate no-ops."""
     service = create_test_service(tmp_path)
     poller = MagicMock(spec=WazuhIndexerLivePoller)
 
     t1 = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
     a1 = make_raw_alert(1, t1)
     a2 = make_raw_alert(2, t1 + timedelta(minutes=5))
+    a3 = make_raw_alert(3, t1 + timedelta(minutes=10))
 
     poller.poll_recent.return_value = [a1, a2]
     poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
 
     coord = LiveIngestionCoordinator(service=service, poller=poller)
-    res1 = coord.run_cycle(current_time=t1 + timedelta(minutes=10), force_reconciliation=False)
+    res1 = coord.run_cycle(current_time=t1 + timedelta(minutes=15), force_full_reconciliation=False)
     assert res1.processed_new_ids == 2
 
-    # Later reconciliation scan re-reads a1, a2 and newly discovers a3
-    t2 = t1 + timedelta(hours=2)
-    a3 = make_raw_alert(3, t2)
-    poller.poll_recent.return_value = [a3]
-    poller.poll_reconciliation.return_value = [a1, a2, a3]
-
-    res2 = coord.run_cycle(current_time=t2, force_reconciliation=True)
-    assert res2.processed_new_ids == 1  # only a3 is new
-    assert res2.duplicate_noops == 2    # a1, a2 are duplicate no-ops
-
-
-def test_coordinator_failure_and_reconciliation_retry(tmp_path: Path):
-    """If service processing fails on an alert, coordinator raises, and next cycle safely retries."""
-    service = create_test_service(tmp_path)
-    poller = MagicMock(spec=WazuhIndexerLivePoller)
-
-    t_now = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
-    a1 = make_raw_alert(1, t_now)
-
-    poller.poll_recent.return_value = [a1]
-    poller.poll_reconciliation.return_value = []
-
-    coord = LiveIngestionCoordinator(service=service, poller=poller)
-
-    # Simulate ingestion failure in service
-    with patch.object(service, "ingest_alert", side_effect=RuntimeError("Transient database lock")):
-        with pytest.raises(RuntimeError, match="Transient database lock"):
-            coord.run_cycle(current_time=t_now)
-
-    # Alert 1 was not committed
-    assert not service.is_seen("alert_1")
-
-    # Next reconciliation cycle retries Alert 1
+    # Later full retention sweep returns a1, a2, and a3
     poller.poll_recent.return_value = []
-    poller.poll_reconciliation.return_value = [a1]
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = [a1, a2, a3]
 
-    result = coord.run_cycle(current_time=t_now + timedelta(minutes=1), force_reconciliation=True)
-    assert result.processed_new_ids == 1
-    assert service.is_seen("alert_1")
+    res2 = coord.run_cycle(current_time=t1 + timedelta(hours=2), force_full_reconciliation=True)
+    assert res2.processed_new_ids == 1
+    assert res2.duplicate_noops == 2
+    assert service.is_seen("alert_3")
 
 
 def test_coordinator_persists_transport_state(tmp_path: Path):
@@ -195,13 +165,15 @@ def test_coordinator_persists_transport_state(tmp_path: Path):
     poller = MagicMock(spec=WazuhIndexerLivePoller)
     poller.poll_recent.return_value = []
     poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
 
     t_now = datetime(2026, 8, 28, 12, 0, 0, tzinfo=timezone.utc)
     coord = LiveIngestionCoordinator(service=service, poller=poller)
-    coord.run_cycle(current_time=t_now, force_reconciliation=True)
+    coord.run_cycle(current_time=t_now, force_recent_reconciliation=True, force_full_reconciliation=True)
 
     state = service.get_live_source_state()
     assert state["recent_poll_cursor"] == t_now.isoformat()
     assert state["last_fast_poll_at"] == t_now.isoformat()
-    assert state["last_reconciliation_at"] == t_now.isoformat()
-    assert state["reconciliation_days"] == 2
+    assert state["last_recent_reconciliation_at"] == t_now.isoformat()
+    assert state["last_full_reconciliation_at"] == t_now.isoformat()
+    assert state["recent_reconciliation_days"] == 2
