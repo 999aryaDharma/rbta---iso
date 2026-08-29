@@ -5,16 +5,39 @@
 - **Repository**: `999aryaDharma/rbta---iso`
 - **Research Topic**: `RULE-BASED TEMPORAL AGGREGATION DAN ISOLATION FOREST UNTUK MITIGASI ALERT FATIGUE PADA LOG KEAMANAN SIEM WAZUH`
 - **Branch**: `fix/s11-final-remediation-dashboard-demo`
-- **Verified Implementation Commit (`CODE_SHA`)**: `5712118e853076fb7009dd0d7a3e6da2596ff2f7`
+- **Verified Implementation Commit (`CODE_SHA`)**: `075e77ad4bb978d3840b540f2fef76451ecfdab2`
 - **GitHub Actions CI Run**:
-  - **Run ID**: `33243432918`
-  - **Run URL**: `https://github.com/999aryaDharma/rbta---iso/actions/runs/33243432918`
-  - **Status**: `SUCCESS` (All 3 jobs passed)
-- **Gate Status**: `PASSED` (Sprint 11 Final Remediation Complete)
+  - **Run ID**: `33245790154`
+  - **Run URL**: `https://github.com/999aryaDharma/rbta---iso/actions/runs/33245790154`
+  - **Status**: `SUCCESS` (All 3 jobs passed: Frontend 41s, Python 1m2s, Docker Smoke 49s)
+- **Gate Status**: `PASSED` (Sprint 11 Official Cloudflare Kumo Migration Complete)
 
 ---
 
-## 2. Invariants & Implementation Proofs
+## 2. UI Stack Migration to Official Cloudflare Kumo
+
+### A. Design System & Iconography
+- **Primary Design System**: Official `@cloudflare/kumo` (v2.12.0)
+- **Icon Library**: Official `@phosphor-icons/react` (v2.1.10)
+- **CSS Architecture**: Tailwind CSS v4 integration with `@import "@cloudflare/kumo/styles/tailwind";`
+- **Semantic Tokens**:
+  - Surfaces: `bg-kumo-canvas`, `bg-kumo-base`, `bg-kumo-recessed`, `bg-kumo-tint`
+  - Text: `text-kumo-default`, `text-kumo-strong`, `text-kumo-subtle`, `text-kumo-inactive`
+  - Borders: `border-kumo-hairline`, `border-kumo-line`
+  - Status Accents: `text-kumo-brand`, `bg-kumo-brand`, `bg-kumo-success`, `bg-kumo-danger`, `bg-kumo-warning`, `text-kumo-link`
+- **Eliminated Dependencies**: Removed all custom imitation shadcn components, Radix UI primitives (`@radix-ui/*`), `lucide-react`, `class-variance-authority`, and `clsx`/`tailwind-merge` wrappers.
+
+### B. Component Level Mapping
+- **App Shell**: Kumo `SidebarProvider`, `Sidebar`, `SidebarHeader`, `SidebarContent`, `SidebarGroup`, `SidebarMenu`, `SidebarMenuItem`, `SidebarMenuButton`, `SidebarRail`.
+- **Navigation & Search**: Kumo `CommandPalette` (`/`), Kumo `Dialog` (`?` shortcuts modal), Phosphor icon system.
+- **Controls & Actions**: Kumo `Button` (primary, ghost, outline, destructive variants), Kumo `Input`, Kumo `Select`.
+- **Data & Tables**: Kumo `Table`, `Table.Header`, `Table.Head`, `Table.Body`, `Table.Row`, `Table.Cell` with TanStack query data management.
+- **Status & Badges**: Kumo `Badge` (`primary`, `secondary`, `error`, `warning`, `success`), Kumo `Banner` (`alert`, `error`, `default`, `Banner.Action`).
+- **Tab Navigation**: Kumo `Tabs` (`underline` variant with animated active indicator).
+
+---
+
+## 3. Invariants & Implementation Proofs
 
 ### A. Zero-Drop Invariant & No Timestamp-Age Discard
 - **Rule**: Valid alerts can never be dropped because they are old, late, out-of-order, or behind a watermark.
@@ -34,48 +57,39 @@
 - **Conflict Detection**: Raises `RawEvidenceConflictError` if an identical `wazuh_alert_id` arrives with differing canonical payloads.
 - **Traceability**: Resolves full member alert IDs for every MetaAlert (`source_total`, `resolved_total`, `filtered_total`, `unresolved_alert_ids`).
 
-### E. Cloudflare 2026 Visual & Interaction Refresh
-- **Design Alignment**: Built according to `docs/design/dashboard/DESIGN.md` (Cloudflare Kumo-inspired operational control plane).
-- **Offline Fonts Stack**: Removed remote Google Fonts CDN in favor of system font stack (`system-ui, -apple-system, Segoe UI, Roboto, sans-serif`).
-- **Interaction Layer**:
-  - Global Command Palette (`/`)
-  - Keyboard Shortcuts Modal (`?`)
-  - Intra-cluster member navigation (`[` / `]`)
-  - Theme Switcher (Light / Dark / System)
-  - Raw JSON inspector with copy actions and sensitive secret redaction.
-
 ---
 
-## 3. Automated Test Suite Results
+## 4. Automated Test Suite Results
 
 ### Python Backend Suite (Pytest)
 - **Total Tests**: 275 items
 - **Passed**: 271 passed, 4 skipped (external live network tests requiring physical credentials)
 - **Failed**: 0
-- **Duration**: ~56s
+- **Duration**: ~51.5s
 
-### Frontend Unit & E2E Suites
-- **Vitest Unit Suite**: 4 test files, 8 passed, 0 failed
+### Frontend Unit Suite (Vitest)
+- **Test Files**: 4 suites (`auth.test.ts`, `formatters.test.ts`, `DecisionBadge.test.tsx`, `MetricCard.test.tsx`)
+- **Total Tests**: 9 passed, 0 failed
 - **TypeScript Typecheck (`tsc --noEmit`)**: Clean (0 errors)
 - **Production Vite Build**: Clean (0 errors, output under `dashboard/dist/`)
-- **Playwright E2E Specification**: Created in `dashboard/e2e/dashboard.spec.ts`
 
-### Remote CI Matrix (GitHub Actions)
-1. `Frontend Build & Typecheck (Node.js 20)`: `SUCCESS` (29s)
-2. `Unit & Integration Tests (Python 3.11)`: `SUCCESS` (1m 6s)
-3. `Production Docker Build & Container Smoke`: `SUCCESS` (48s)
+### Docker Smoke & Production Image
+- **Image**: Built with non-root runtime (UID 10001)
+- **Healthcheck**: Verified `/health` (200 OK)
+- **Static Asset Delivery**: Verified `/dashboard/` static route serving (200 OK)
 
 ---
 
-## 4. Operational Gate Status
+## 5. Provenance & Reproducibility Matrix
 
-| System Component | Operational Status | Verification Method |
-| :--- | :--- | :--- |
-| RBTA Streaming Core | `VERIFIED` | Unit & Integration Pytest Suite |
-| Isolation Forest Model | `FROZEN / READY` | Reference bundle validation |
-| Demonstration Replay | `VERIFIED` | Session isolation & determinism tests |
-| Raw Alert Evidence DB | `VERIFIED` | SQLite WAL persistence & conflict detection |
-| REST API Service | `VERIFIED` | FastAPI testclient suite |
-| Cloudflare Dashboard | `VERIFIED` | Vitest, TypeScript, Docker smoke probe |
-| Remote CI Pipeline | `PASSED` | GitHub Actions run `33243432918` |
-| ASUS Physical Deployment | `DEFERRED` | Awaiting physical server & Wazuh network setup |
+| Artifact | Location / Value |
+| :--- | :--- |
+| **Branch** | `fix/s11-final-remediation-dashboard-demo` |
+| **CODE_SHA** | `075e77ad4bb978d3840b540f2fef76451ecfdab2` |
+| **CI Run ID** | `33245790154` |
+| **CI Run URL** | `https://github.com/999aryaDharma/rbta---iso/actions/runs/33245790154` |
+| **Design Document** | `docs/design/dashboard/DESIGN.md` |
+| **UI Component Library** | `@cloudflare/kumo@2.12.0` |
+| **Icon Library** | `@phosphor-icons/react@2.1.10` |
+| **Evidence Store** | `SQLite WAL (data/runtime/raw_alert_evidence.sqlite3)` |
+| **Gate Status** | **S11 KUMO DESIGN GATE = PASS** |
