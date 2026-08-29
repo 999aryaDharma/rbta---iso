@@ -136,7 +136,7 @@ jobs:
 
       - name: Validate ASUS Docker Compose Specification
         run: |
-          RBTA_API_KEY=ci-dummy-token RBTA_MODEL_VERSION=ci-smoke-v1 docker compose -f deploy/asus/compose.yml config --quiet
+          docker compose --env-file deploy/asus/.env.example -f deploy/asus/compose.yml config --quiet
           echo "Docker Compose specification parsed successfully with required variables."
 
       - name: Build Production Image with Provenance
