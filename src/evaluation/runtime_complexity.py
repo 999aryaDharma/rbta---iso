@@ -12,6 +12,9 @@ from src.contracts.raw_alert import CanonicalRawAlert
 from src.runners.batch_runner import BatchResearchRunner
 
 
+RUNTIME_EVALUATION_SUBSETS: int = 8
+
+
 @dataclass(frozen=True)
 class RuntimeComplexityResult:
     """Outcome of empirical runtime complexity evaluation."""
@@ -26,7 +29,7 @@ class RuntimeComplexityResult:
 
 def run_runtime_complexity_evaluation(
     alerts: Iterable[CanonicalRawAlert],
-    n_subsets: int = 8,
+    n_subsets: int = RUNTIME_EVALUATION_SUBSETS,
     delta_t: timedelta = timedelta(minutes=15),
 ) -> RuntimeComplexityResult:
     """Measure RBTA throughput across increasing data scale subsets and fit linear regression.

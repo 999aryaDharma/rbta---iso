@@ -122,11 +122,64 @@ def test_registry_explicit_version(tmp_path: Path):
 
 
 def test_registry_metadata_contains_reproducibility_fields(tmp_path: Path):
-    """Test that metadata includes git_commit, research_config_hash, feature_schema_version."""
+    """Test that metadata includes git_commit, research_config_hash, feature_schema_version, training_run_id."""
     metas = [make_meta(i) for i in range(1, 40)]
-    bundle = train_reference_pipeline(metas, random_state=42, model_version="v_meta")
+    bundle = train_reference_pipeline(
+        metas,
+        random_state=42,
+        model_version="v_meta",
+        training_run_id="test_run_123",
+        git_commit="a" * 40,
+        research_config_hash="b" * 64,
+    )
 
-    assert "git_commit" in bundle.metadata
-    assert "research_config_hash" in bundle.metadata
-    assert "feature_schema_version" in bundle.metadata
+    assert bundle.metadata["training_run_id"] == "test_run_123"
+    assert bundle.metadata["git_commit"] == "a" * 40
+    assert bundle.metadata["research_config_hash"] == "b" * 64
+    assert bundle.metadata["feature_schema_version"] == "1.0"
+
+
+def test_registry_missing_manifest_fails_load(tmp_path: Path):
+    """Loading a bundle without manifest.json must fail with ModelRegistryError."""
+    metas = [make_meta(i) for i in range(1, 40)]
+    bundle = train_reference_pipeline(metas, random_state=42, model_version="v_no_manifest")
+
+    registry = ModelRegistry(base_dir=tmp_path)
+    published_path = registry.publish_bundle(bundle, model_version="v_no_manifest")
+
+    # Delete manifest.json
+    (published_path / "manifest.json").unlink()
+
+    with pytest.raises(ModelRegistryError, match="Missing mandatory manifest"):
+        registry.load_bundle("v_no_manifest")
+
+
+def test_registry_incomplete_manifest_keys_fails(tmp_path: Path):
+    """Loading a bundle with incomplete manifest.json keys must fail."""
+    metas = [make_meta(i) for i in range(1, 40)]
+    bundle = train_reference_pipeline(metas, random_state=42, model_version="v_incomplete_manifest")
+
+    registry = ModelRegistry(base_dir=tmp_path)
+    published_path = registry.publish_bundle(bundle, model_version="v_incomplete_manifest")
+
+    # Write manifest missing a required file
+    manifest_file = published_path / "manifest.json"
+    manifest_file.write_text('{"isolation_forest.joblib": "dummy"}', encoding="utf-8")
+
+    with pytest.raises(ModelRegistryError, match="Manifest keys"):
+        registry.load_bundle("v_incomplete_manifest")
+
+
+def test_registry_no_active_version_without_explicit_or_env(tmp_path: Path, monkeypatch):
+    """get_active_version() must return None when no explicit version or env var is set (no mtime fallback)."""
+    monkeypatch.delenv("RBTA_MODEL_VERSION", raising=False)
+    metas = [make_meta(i) for i in range(1, 40)]
+    bundle = train_reference_pipeline(metas, random_state=42, model_version="v_mtime_test")
+
+    registry = ModelRegistry(base_dir=tmp_path)
+    registry.publish_bundle(bundle, model_version="v_mtime_test")
+
+    # Without explicit_version or env var, active version MUST be None (no mtime directory selection)
+    assert registry.get_active_version() is None
+
 

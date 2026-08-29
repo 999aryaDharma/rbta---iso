@@ -23,8 +23,9 @@ class DurableStateManager:
         outbox: Optional[List[Dict[str, Any]]] = None,
         source_checkpoint: Optional[Dict[str, Any]] = None,
         finalized_history: Optional[List[Dict[str, Any]]] = None,
+        pending_scoring: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
-        """Atomically persist engine state, active buckets, seen alert IDs, and outbox to disk."""
+        """Atomically persist engine state, active buckets, seen alert IDs, pending scoring, and outbox to disk."""
         self.filepath.parent.mkdir(parents=True, exist_ok=True)
         tmp_file = self.filepath.with_suffix(".tmp")
 
@@ -78,6 +79,7 @@ class DurableStateManager:
             "temporal_states": temporal_states_data,
             "active_buckets": active_buckets_data,
             "source_checkpoint": source_checkpoint or {},
+            "pending_scoring": pending_scoring or [],
             "outbox": outbox or [],
             "finalized_history": finalized_history or [],
         }
@@ -155,6 +157,7 @@ class DurableStateManager:
 
         return {
             "source_checkpoint": data.get("source_checkpoint", {}),
+            "pending_scoring": data.get("pending_scoring", []),
             "outbox": data.get("outbox", []),
             "finalized_history": data.get("finalized_history", []),
         }

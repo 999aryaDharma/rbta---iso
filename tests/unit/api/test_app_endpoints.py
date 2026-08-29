@@ -80,7 +80,7 @@ def test_ready_endpoint_passes_200_when_active_model_published(tmp_path: Path):
     batch_res = BatchResearchRunner(base_delta_t=timedelta(minutes=15), adaptive=False).run(sample_alerts)
     bundle = train_reference_pipeline(batch_res.meta_alerts, random_state=42, model_version="ready-v1")
 
-    registry = ModelRegistry(base_dir=tmp_path / "models")
+    registry = ModelRegistry(base_dir=tmp_path / "models", explicit_version="ready-v1")
     registry.publish_bundle(bundle, "ready-v1")
 
     state_mgr = DurableStateManager(tmp_path / "state.json")

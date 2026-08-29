@@ -1,6 +1,7 @@
 """Unit tests for LiveRBTAService coordination, idle flushing, and controlled shutdown (Sprint 7)."""
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 import pytest
 
 from src.contracts.raw_alert import CanonicalRawAlert
@@ -121,3 +122,51 @@ def test_live_service_controlled_shutdown_and_restart_recovery(tmp_path: Path):
     assert drained[0].alert_count == 1
     assert drained[0].source_alert_ids == ("alert_2",)
     assert len(service2.get_history()) == 2
+
+
+def test_live_service_scoring_failure_durable_recovery(tmp_path: Path):
+    """When scoring fails, MetaAlert is retained in durable pending_scoring queue and recovered on restart."""
+    base_t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    sample_alerts = [
+        make_alert(i, base_t + timedelta(minutes=i * 20), level=(i % 12) + 1)
+        for i in range(30)
+    ]
+    batch_res = BatchResearchRunner(base_delta_t=timedelta(minutes=15), adaptive=False).run(sample_alerts)
+    bundle = train_reference_pipeline(batch_res.meta_alerts, random_state=42, model_version="live-v1")
+    scoring_pipe = ScoringPipeline(bundle)
+
+    state_mgr = DurableStateManager(tmp_path / "failing_service_state.json")
+    service1 = LiveRBTAService(
+        scoring_pipeline=scoring_pipe,
+        state_manager=state_mgr,
+        base_delta_t=timedelta(minutes=15),
+        adaptive=False,
+    )
+
+    # Ingest alert 1
+    service1.ingest_alert(make_alert(1, base_t))
+
+    # Mock scoring to simulate downstream failure during idle flush
+    with patch.object(scoring_pipe, "score_single", side_effect=RuntimeError("Model inference service unavailable")):
+        with pytest.raises(RuntimeError, match="Model inference service unavailable"):
+            service1.check_idle_flush(base_t + timedelta(minutes=20))
+
+    # Verify that pending_scoring is non-empty and persisted to disk
+    assert len(service1.pending_scoring) == 1
+    assert service1.pending_scoring[0].meta_id == 1
+    assert len(service1.get_outbox()) == 0
+
+    # Start service2 with healthy scoring pipeline
+    service2 = LiveRBTAService(
+        scoring_pipeline=scoring_pipe,
+        state_manager=state_mgr,
+        base_delta_t=timedelta(minutes=15),
+        adaptive=False,
+    )
+
+    # Service2 must have automatically recovered and scored the pending meta-alert!
+    assert len(service2.pending_scoring) == 0
+    assert len(service2.get_outbox()) == 1
+    assert service2.get_outbox()[0].meta_id == 1
+    assert len(service2.get_history()) == 1
+

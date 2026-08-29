@@ -37,27 +37,35 @@ class WazuhIndexerLivePoller:
         self.overlap_window: timedelta = overlap_window
         self.poll_interval: timedelta = poll_interval
         self.page_size: int = page_size
-        self._seen_alert_ids: Set[str] = set()
 
-    def poll_once(self, current_time: Optional[datetime] = None) -> List[CanonicalRawAlert]:
+    def poll_once(
+        self,
+        current_time: Optional[datetime] = None,
+        high_watermark: Optional[datetime] = None,
+    ) -> List[CanonicalRawAlert]:
         """Execute a single live polling cycle.
 
         Parameters
         ----------
         current_time : datetime | None
-            Reference time for the overlap window (defaults to UTC now).
+            Reference time for poll cycle (defaults to UTC now).
+        high_watermark : datetime | None
+            Latest processed event timestamp to anchor the overlap window.
 
         Returns
         -------
         List[CanonicalRawAlert]
-            List of newly discovered, deduplicated canonical alerts.
+            List of newly discovered canonical alerts in chronological order.
         """
         now = current_time or datetime.now(timezone.utc)
-        start_time = now - self.overlap_window
+        start_time = (high_watermark or now) - self.overlap_window
 
         new_alerts: List[CanonicalRawAlert] = []
         search_after_cursor = None
         sort_spec = [{"@timestamp": "asc"}, {"id": "asc"}]
+
+        # OpenSearch index pattern covering all daily indices (supports midnight rollover)
+        target_endpoint = "/wazuh-alerts-*/_search"
 
         while True:
             query_body = {
@@ -75,16 +83,14 @@ class WazuhIndexerLivePoller:
             if search_after_cursor is not None:
                 query_body["search_after"] = search_after_cursor
 
-            resp = self.client._request("POST", "/wazuh-alerts-*/_search", json_data=query_body)
+            resp = self.client._request("POST", target_endpoint, json_data=query_body)
             data = resp.json()
             hits = data.get("hits", {}).get("hits", [])
 
             for hit in hits:
                 try:
                     alert = canonicalize_wazuh_alert(hit)
-                    if alert.wazuh_alert_id not in self._seen_alert_ids:
-                        self._seen_alert_ids.add(alert.wazuh_alert_id)
-                        new_alerts.append(alert)
+                    new_alerts.append(alert)
                 except Exception as exc:
                     logger.warning("Failed to canonicalize hit in live poller: %s", exc)
 

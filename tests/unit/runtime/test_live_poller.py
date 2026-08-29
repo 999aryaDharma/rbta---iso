@@ -23,17 +23,13 @@ def make_hit(idx: int, ts_str: str = "2026-08-28T10:00:00.000+0000") -> dict:
     }
 
 
-def test_live_poller_queries_overlap_range_and_deduplicates():
-    """Live poller queries time window [now - overlap, now] and filters out previously seen alert IDs."""
+def test_live_poller_queries_overlap_range_with_high_watermark():
+    """Live poller queries time window [watermark - overlap, current_time] without pre-commit deduplication."""
     client = MagicMock(spec=WazuhIndexerClient)
-    client.list_indices.return_value = ["wazuh-alerts-4.x-2026.08.28"]
-
-    # First poll returns alerts 1, 2
-    # Second poll (with overlap) returns alerts 2, 3
-    client._request.side_effect = [
-        MagicMock(status_code=200, json=lambda: {"hits": {"hits": [make_hit(1), make_hit(2)]}}),
-        MagicMock(status_code=200, json=lambda: {"hits": {"hits": [make_hit(2), make_hit(3)]}}),
-    ]
+    client._request.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"hits": {"hits": [make_hit(1), make_hit(2)]}},
+    )
 
     poller = WazuhIndexerLivePoller(
         client=client,
@@ -41,15 +37,39 @@ def test_live_poller_queries_overlap_range_and_deduplicates():
         poll_interval=timedelta(seconds=5),
     )
 
-    # First poll cycle
-    alerts1 = poller.poll_once()
-    assert len(alerts1) == 2
-    assert [a.wazuh_alert_id for a in alerts1] == ["alert_1", "alert_2"]
+    t_watermark = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    t_now = datetime(2026, 8, 28, 10, 5, 0, tzinfo=timezone.utc)
 
-    # Second poll cycle (alert_2 is duplicate in overlap window)
-    alerts2 = poller.poll_once()
-    assert len(alerts2) == 1
-    assert [a.wazuh_alert_id for a in alerts2] == ["alert_3"]
+    alerts = poller.poll_once(current_time=t_now, high_watermark=t_watermark)
+    assert len(alerts) == 2
+    assert [a.wazuh_alert_id for a in alerts] == ["alert_1", "alert_2"]
+
+    # Verify query body used watermark - overlap (09:55:00) to now (10:05:00)
+    args, kwargs = client._request.call_args
+    range_query = kwargs["json_data"]["query"]["range"]["@timestamp"]
+    assert range_query["gte"] == "2026-08-28T09:55:00+00:00"
+    assert range_query["lte"] == "2026-08-28T10:05:00+00:00"
+
+
+def test_live_poller_midnight_spanning_query():
+    """Live poller derive daily indices covering window spanning UTC midnight."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    client._request.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"hits": {"hits": []}},
+    )
+
+    poller = WazuhIndexerLivePoller(client=client, overlap_window=timedelta(minutes=10))
+
+    t_start = datetime(2026, 8, 28, 23, 55, 0, tzinfo=timezone.utc)
+    t_now = datetime(2026, 8, 29, 0, 5, 0, tzinfo=timezone.utc)
+
+    poller.poll_once(current_time=t_now, high_watermark=t_start)
+
+    args, kwargs = client._request.call_args
+    # Target endpoint should query both days or pattern covering both
+    endpoint = args[1]
+    assert "2026.08.28" in endpoint and "2026.08.29" in endpoint or "wazuh-alerts-*" in endpoint
 
 
 def test_live_poller_pagination():

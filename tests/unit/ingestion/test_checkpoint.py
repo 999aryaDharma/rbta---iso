@@ -79,3 +79,31 @@ def test_checkpoint_invalid_processed_count_raises_error(tmp_path: Path):
     manager = CheckpointManager(cp_file)
     with pytest.raises(CheckpointError, match="Invalid 'processed_count'"):
         manager.load()
+
+
+@pytest.mark.parametrize(
+    "invalid_payload, error_match",
+    [
+        ({"mode": []}, "Invalid 'mode'"),
+        ({"mode": "invalid_mode"}, "Invalid 'mode'"),
+        ({"current_index": 123}, "Invalid 'current_index'"),
+        ({"last_sort": "not_a_list"}, "Invalid 'last_sort'"),
+        ({"processed_count": -1}, "Invalid 'processed_count'"),
+        ({"processed_count": True}, "Invalid 'processed_count'"),
+        ({"last_wazuh_alert_id": 999}, "Invalid 'last_wazuh_alert_id'"),
+        ({"completed_indices": "not_a_list"}, "Invalid 'completed_indices'"),
+        ({"completed_indices": [1, 2, 3]}, "Invalid 'completed_indices' item"),
+        ({"updated_at": "not_iso_timestamp"}, "Invalid 'updated_at'"),
+        ({"updated_at": "2026-08-28T10:00:00"}, "timezone-aware"),
+    ],
+)
+def test_checkpoint_strict_validation_fails_on_corrupt_schema(tmp_path: Path, invalid_payload: dict, error_match: str):
+    from src.ingestion.checkpoint import CheckpointError
+    import json
+    cp_file = tmp_path / "corrupt_schema.json"
+    cp_file.write_text(json.dumps(invalid_payload), encoding="utf-8")
+
+    manager = CheckpointManager(cp_file)
+    with pytest.raises(CheckpointError, match=error_match):
+        manager.load()
+

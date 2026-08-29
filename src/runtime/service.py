@@ -6,6 +6,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from src.config.research import DEFAULT_BASE_DELTA_T
+from src.contracts.meta_alert import MetaAlert
 from src.contracts.raw_alert import CanonicalRawAlert
 from src.contracts.scored_meta_alert import ScoredMetaAlert
 from src.model.scoring_pipeline import ScoringPipeline
@@ -13,6 +14,55 @@ from src.rbta.engine import RBTAEngine
 from src.runtime.durable_state import DurableStateManager
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_meta_alert(meta: MetaAlert) -> Dict[str, Any]:
+    """Convert MetaAlert to JSON-serializable dictionary."""
+    return {
+        "meta_id": meta.meta_id,
+        "agent_id": meta.agent_id,
+        "agent_name": meta.agent_name,
+        "rule_group_primary": meta.rule_group_primary,
+        "start_time": meta.start_time.isoformat() if meta.start_time else None,
+        "end_time": meta.end_time.isoformat() if meta.end_time else None,
+        "alert_count": meta.alert_count,
+        "max_severity": meta.max_severity,
+        "rule_id_distribution": dict(meta.rule_id_distribution),
+        "severity_distribution": {str(k): v for k, v in meta.severity_distribution.items()},
+        "agent_criticality": meta.agent_criticality,
+        "wazuh_alert_ids": list(meta.wazuh_alert_ids),
+        "mitre_tactics_unique": list(meta.mitre_tactics_unique),
+        "critical_mitre_present": meta.critical_mitre_present,
+        "metadata": dict(meta.metadata),
+    }
+
+
+def _parse_meta_alert(item: Any) -> Optional[MetaAlert]:
+    """Parse dictionary or MetaAlert object safely."""
+    if isinstance(item, MetaAlert):
+        return item
+    if isinstance(item, dict) and "meta_id" in item:
+        try:
+            return MetaAlert(
+                meta_id=item["meta_id"],
+                agent_id=item.get("agent_id", "001"),
+                agent_name=item.get("agent_name", "unknown"),
+                rule_group_primary=item.get("rule_group_primary", "unknown"),
+                start_time=datetime.fromisoformat(item["start_time"]) if item.get("start_time") else None,
+                end_time=datetime.fromisoformat(item["end_time"]) if item.get("end_time") else None,
+                alert_count=item.get("alert_count", 1),
+                max_severity=item.get("max_severity", 3),
+                rule_id_distribution=item.get("rule_id_distribution", {}),
+                severity_distribution={int(k): v for k, v in item.get("severity_distribution", {}).items()},
+                agent_criticality=item.get("agent_criticality", 1),
+                wazuh_alert_ids=tuple(item.get("wazuh_alert_ids", ())),
+                mitre_tactics_unique=tuple(item.get("mitre_tactics_unique", ())),
+                critical_mitre_present=item.get("critical_mitre_present", False),
+                metadata=item.get("metadata", {}),
+            )
+        except Exception as exc:
+            logger.warning("Error parsing MetaAlert: %s", exc)
+    return None
 
 
 def _serialize_scored_alert(scored: ScoredMetaAlert) -> Dict[str, Any]:
@@ -70,6 +120,7 @@ class LiveRBTAService:
         self.adaptive: bool = adaptive
 
         self.engine: RBTAEngine = RBTAEngine(base_delta_t=self.base_delta_t, adaptive=self.adaptive)
+        self.pending_scoring: List[MetaAlert] = []
         self.outbox: List[ScoredMetaAlert] = []
         self.finalized_history: List[ScoredMetaAlert] = []
         self.source_checkpoint: Dict[str, Any] = {}
@@ -110,11 +161,17 @@ class LiveRBTAService:
         return None
 
     def _restore_from_disk(self) -> None:
-        """Attempt to restore engine state and outbox from disk."""
+        """Attempt to restore engine state, pending scoring, and outbox from disk."""
         restored = self.state_manager.restore_state(self.engine)
         self.source_checkpoint = restored.get("source_checkpoint", {})
+        raw_pending = restored.get("pending_scoring", [])
         raw_outbox = restored.get("outbox", [])
         raw_history = restored.get("finalized_history", [])
+
+        for item in raw_pending:
+            meta = _parse_meta_alert(item)
+            if meta:
+                self.pending_scoring.append(meta)
 
         for item in raw_outbox:
             meta = self._parse_scored_alert(item)
@@ -126,8 +183,12 @@ class LiveRBTAService:
             if meta:
                 self.finalized_history.append(meta)
 
+        if self.scoring_pipeline and self.pending_scoring:
+            self._drain_pending_scoring()
+
     def _persist_to_disk(self) -> None:
-        """Persist current state and outbox to disk."""
+        """Persist current state, pending scoring, and outbox to disk."""
+        pending_payload = [_serialize_meta_alert(item) for item in self.pending_scoring]
         outbox_payload = [_serialize_scored_alert(item) for item in self.outbox]
         history_payload = [_serialize_scored_alert(item) for item in self.finalized_history]
         self.state_manager.save_state(
@@ -135,7 +196,21 @@ class LiveRBTAService:
             outbox=outbox_payload,
             source_checkpoint=self.source_checkpoint,
             finalized_history=history_payload,
+            pending_scoring=pending_payload,
         )
+
+    def _drain_pending_scoring(self) -> List[ScoredMetaAlert]:
+        """Score pending meta-alerts and safely commit them to outbox and history."""
+        new_scored: List[ScoredMetaAlert] = []
+        while self.pending_scoring:
+            meta = self.pending_scoring[0]
+            scored = self.scoring_pipeline.score_single(meta)
+            self.outbox.append(scored)
+            self.finalized_history.append(scored)
+            new_scored.append(scored)
+            self.pending_scoring.pop(0)
+            self._persist_to_disk()
+        return new_scored
 
     def ingest_alert(self, alert: CanonicalRawAlert) -> List[ScoredMetaAlert]:
         """Process an incoming canonical raw alert through RBTA and scoring.
@@ -151,16 +226,11 @@ class LiveRBTAService:
             Any newly finalized and scored meta-alerts produced during this step.
         """
         finalized_metas = self.engine.process(alert)
-        new_scored: List[ScoredMetaAlert] = []
+        if finalized_metas:
+            self.pending_scoring.extend(finalized_metas)
+            self._persist_to_disk()
 
-        for meta in finalized_metas:
-            scored = self.scoring_pipeline.score_single(meta)
-            self.outbox.append(scored)
-            self.finalized_history.append(scored)
-            new_scored.append(scored)
-
-        self._persist_to_disk()
-        return new_scored
+        return self._drain_pending_scoring()
 
     def check_idle_flush(self, current_event_time: datetime) -> List[ScoredMetaAlert]:
         """Flush and score active buckets whose idle duration strictly exceeds delta_t.
@@ -176,18 +246,11 @@ class LiveRBTAService:
             Any newly finalized and scored meta-alerts.
         """
         finalized_metas = self.engine.flush_idle(current_event_time)
-        new_scored: List[ScoredMetaAlert] = []
-
-        for meta in finalized_metas:
-            scored = self.scoring_pipeline.score_single(meta)
-            self.outbox.append(scored)
-            self.finalized_history.append(scored)
-            new_scored.append(scored)
-
-        if new_scored:
+        if finalized_metas:
+            self.pending_scoring.extend(finalized_metas)
             self._persist_to_disk()
 
-        return new_scored
+        return self._drain_pending_scoring()
 
     def get_outbox(self) -> List[ScoredMetaAlert]:
         """Retrieve unacknowledged scored meta-alerts in the outbox."""
@@ -220,14 +283,10 @@ class LiveRBTAService:
         List[ScoredMetaAlert]
             Any finalized meta-alerts flushed during drain.
         """
-        drained_scored: List[ScoredMetaAlert] = []
         if drain:
             drained_metas = self.engine.drain()
-            for meta in drained_metas:
-                scored = self.scoring_pipeline.score_single(meta)
-                self.outbox.append(scored)
-                self.finalized_history.append(scored)
-                drained_scored.append(scored)
+            if drained_metas:
+                self.pending_scoring.extend(drained_metas)
+                self._persist_to_disk()
 
-        self._persist_to_disk()
-        return drained_scored
+        return self._drain_pending_scoring()

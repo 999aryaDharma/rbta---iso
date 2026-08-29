@@ -39,20 +39,13 @@ class ModelRegistry:
         self._explicit_version = explicit_version or os.getenv("RBTA_MODEL_VERSION")
 
     def get_active_version(self) -> Optional[str]:
-        """Discover the most recently published model version in base_dir."""
-        if self._explicit_version:
-            version_dir = self.base_dir / self._explicit_version
+        """Discover configured active model version (explicit constructor or RBTA_MODEL_VERSION env var)."""
+        candidate_version = self._explicit_version or os.getenv("RBTA_MODEL_VERSION")
+        if candidate_version:
+            version_dir = self.base_dir / candidate_version
             if version_dir.exists() and version_dir.is_dir():
-                return self._explicit_version
-            return None
-
-        if not self.base_dir.exists():
-            return None
-        versions = [p.name for p in self.base_dir.iterdir() if p.is_dir() and not p.name.startswith(".")]
-        if not versions:
-            return None
-        versions.sort(key=lambda v: (self.base_dir / v).stat().st_mtime, reverse=True)
-        return versions[0]
+                return candidate_version
+        return None
 
     def publish_bundle(self, bundle: ModelArtifactBundle, model_version: str) -> Path:
         """Publish a model bundle atomically via staging.
@@ -197,13 +190,27 @@ class ModelRegistry:
             )
 
         manifest_file = dir_path / "manifest.json"
-        if manifest_file.exists():
+        if not manifest_file.exists():
+            raise ModelRegistryError(f"Missing mandatory manifest.json in '{dir_path}'")
+
+        try:
             with manifest_file.open("r", encoding="utf-8") as f:
                 manifest = json.load(f)
-            for fname, expected_hash in manifest.items():
-                fpath = dir_path / fname
-                if not fpath.exists():
-                    raise ModelRegistryError(f"Manifest references missing file '{fname}'")
-                actual_hash = hashlib.sha256(fpath.read_bytes()).hexdigest()
-                if actual_hash != expected_hash:
-                    raise ModelRegistryError(f"Checksum mismatch for '{fname}': expected {expected_hash}, got {actual_hash}")
+        except Exception as exc:
+            raise ModelRegistryError(f"Malformed manifest.json in '{dir_path}': {exc}") from exc
+
+        if not isinstance(manifest, dict):
+            raise ModelRegistryError(f"Manifest is not a JSON object in '{dir_path}'")
+
+        if set(manifest.keys()) != set(REQUIRED_ARTIFACT_FILES):
+            raise ModelRegistryError(
+                f"Manifest keys {set(manifest.keys())} != expected {set(REQUIRED_ARTIFACT_FILES)}"
+            )
+
+        for fname, expected_hash in manifest.items():
+            fpath = dir_path / fname
+            if not fpath.exists():
+                raise ModelRegistryError(f"Manifest references missing file '{fname}'")
+            actual_hash = hashlib.sha256(fpath.read_bytes()).hexdigest()
+            if actual_hash != expected_hash:
+                raise ModelRegistryError(f"Checksum mismatch for '{fname}': expected {expected_hash}, got {actual_hash}")

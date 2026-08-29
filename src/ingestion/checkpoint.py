@@ -84,13 +84,53 @@ class CheckpointManager:
         # Validate field types
         if not isinstance(data, dict):
             raise CheckpointError(f"Checkpoint is not a JSON object: {type(data).__name__}")
-        if "completed_indices" in data and not isinstance(data["completed_indices"], list):
-            raise CheckpointError(f"Invalid 'completed_indices' type: {type(data['completed_indices']).__name__}")
+
+        # mode
+        if "mode" in data:
+            if not isinstance(data["mode"], str) or data["mode"] != "historical":
+                raise CheckpointError(f"Invalid 'mode': expected 'historical', got {data['mode']!r}")
+
+        # current_index
+        if "current_index" in data and data["current_index"] is not None:
+            if not isinstance(data["current_index"], str):
+                raise CheckpointError(f"Invalid 'current_index' type: expected str or None, got {type(data['current_index']).__name__}")
+
+        # last_sort
+        if "last_sort" in data and data["last_sort"] is not None:
+            if not isinstance(data["last_sort"], list) or isinstance(data["last_sort"], (str, bytes)):
+                raise CheckpointError(f"Invalid 'last_sort' type: expected list or None, got {type(data['last_sort']).__name__}")
+
+        # processed_count
         if "processed_count" in data:
+            val = data["processed_count"]
+            if isinstance(val, bool) or not isinstance(val, int) or val < 0:
+                raise CheckpointError(f"Invalid 'processed_count': expected non-negative int, got {val!r}")
+
+        # last_wazuh_alert_id
+        if "last_wazuh_alert_id" in data and data["last_wazuh_alert_id"] is not None:
+            if not isinstance(data["last_wazuh_alert_id"], str):
+                raise CheckpointError(f"Invalid 'last_wazuh_alert_id' type: expected str or None, got {type(data['last_wazuh_alert_id']).__name__}")
+
+        # completed_indices
+        if "completed_indices" in data:
+            if not isinstance(data["completed_indices"], list):
+                raise CheckpointError(f"Invalid 'completed_indices' type: {type(data['completed_indices']).__name__}")
+            for idx in data["completed_indices"]:
+                if not isinstance(idx, str):
+                    raise CheckpointError(f"Invalid 'completed_indices' item: expected str, got {type(idx).__name__}")
+
+        # updated_at
+        if "updated_at" in data:
+            if not isinstance(data["updated_at"], str):
+                raise CheckpointError(f"Invalid 'updated_at' type: expected str, got {type(data['updated_at']).__name__}")
             try:
-                int(data["processed_count"])
-            except (ValueError, TypeError) as exc:
-                raise CheckpointError(f"Invalid 'processed_count': {data['processed_count']}") from exc
+                dt = datetime.fromisoformat(data["updated_at"])
+                if dt.tzinfo is None:
+                    raise CheckpointError("Invalid 'updated_at': must be timezone-aware ISO-8601 string")
+            except Exception as exc:
+                if isinstance(exc, CheckpointError):
+                    raise
+                raise CheckpointError(f"Invalid 'updated_at' ISO timestamp '{data['updated_at']}': {exc}") from exc
 
         return HistoricalCheckpoint(
             mode=str(data.get("mode", "historical")),

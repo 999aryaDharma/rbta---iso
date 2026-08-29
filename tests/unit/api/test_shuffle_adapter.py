@@ -53,3 +53,60 @@ def test_shuffle_forwarder_sends_idempotent_event_header():
         assert kwargs["headers"]["Authorization"] == "Bearer shuffle-token-123"
         assert kwargs["json"]["meta_id"] == 42
         assert kwargs["json"]["decision"] == "CRITICAL"
+
+
+def test_shuffle_forwarder_idempotent_retry_on_lost_response():
+    """Receiver simulates lost response on attempt 1; retry is safely deduplicated by X-Event-ID."""
+    forwarder = ShuffleWebhookForwarder(
+        webhook_url="https://shuffle.campus.local/api/v1/hooks/rbta_hook",
+        api_key="token-abc",
+        sleep_fn=lambda _: None,  # no-op sleep
+    )
+    meta = make_scored_meta(42)
+
+    processed_events = set()
+    business_executions = 0
+
+    def fake_receiver_post(url, headers=None, json=None, timeout=None, verify=None):
+        nonlocal business_executions
+        event_id = headers.get("X-Event-ID")
+        
+        # Check if already processed
+        if event_id in processed_events:
+            # Duplicate detection: no business side effects, return 200 OK
+            mock_200 = MagicMock(status_code=200, text="Duplicate ignored")
+            return mock_200
+
+        # First attempt: process business action
+        processed_events.add(event_id)
+        business_executions += 1
+
+        # Simulate connection drop / timeout right after business action
+        raise requests.exceptions.ReadTimeout("Connection dropped before response")
+
+    with patch("requests.Session.post", side_effect=fake_receiver_post):
+        result = forwarder.forward(meta)
+        assert result.success is True
+        assert result.attempts == 2
+        assert result.status_code == 200
+        # Business action was executed exactly once despite the timeout retry!
+        assert business_executions == 1
+
+
+def test_shuffle_forwarder_retries_on_429_rate_limit():
+    """Forwarder retries on HTTP 429 with exponential backoff."""
+    forwarder = ShuffleWebhookForwarder(
+        webhook_url="https://shuffle.campus.local/api/v1/hooks/rbta_hook",
+        sleep_fn=lambda _: None,
+    )
+    meta = make_scored_meta(99)
+
+    resp_429 = MagicMock(status_code=429, text="Rate Limited")
+    resp_200 = MagicMock(status_code=200, text="OK")
+
+    with patch("requests.Session.post", side_effect=[resp_429, resp_200]) as mock_post:
+        result = forwarder.forward(meta)
+        assert result.success is True
+        assert result.attempts == 2
+        assert mock_post.call_count == 2
+
