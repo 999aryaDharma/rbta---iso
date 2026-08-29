@@ -130,9 +130,10 @@ echo "Stats: ${STATS_RESP}"
 python3 -c "
 import json, sys
 data = json.loads(sys.argv[1])
-seen = data.get('seen_alert_count', data.get('seen_count', 0))
+seen = data.get('seen_alerts_count', data.get('seen_alert_count', 0))
 assert seen == 1, f'Expected exactly 1 unique alert seen after duplicate ingest, got {seen}'
-print('✓ Duplicate idempotency proven (seen_alert_count == 1).')
+assert data.get('raw_evidence_count', 0) == 1, f'Expected 1 raw evidence stored, got {data.get(\"raw_evidence_count\")}'
+print('✓ Duplicate idempotency and raw evidence proven (seen_alerts_count == 1).')
 " "${STATS_RESP}"
 
 echo "=============================================================================="
