@@ -72,6 +72,9 @@ def dashboard_system(
 
 @router.get("/integrations")
 def dashboard_integrations(
+    run_id: Optional[str] = Query(None, description="Optional replay run context ID"),
+    resolver: DashboardRuntimeResolver = Depends(_get_resolver),
     api_key: str = Depends(get_api_key),
 ) -> Dict[str, Any]:
-    return get_dashboard_integrations()
+    service, _, _ = resolver.resolve(run_id)
+    return get_dashboard_integrations(service)

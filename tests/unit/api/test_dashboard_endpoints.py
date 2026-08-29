@@ -54,7 +54,7 @@ def test_setup(tmp_path: Path):
         scoring_pipeline=scoring_pipe,
         state_manager=state_mgr,
         raw_evidence_store=evidence_store,
-        source_mode="LIVE",
+        source_mode="DEFERRED",
     )
 
     replay_ctrl = ReplayController(
@@ -122,8 +122,8 @@ def test_dashboard_integrations_backend_truth(test_setup):
     assert data["wazuh"]["status"] == "DEFERRED"
     assert data["rbta"]["status"] == "READY"
     assert data["model"]["status"] == "READY"
-    assert data["shuffle"]["status"] == "UNKNOWN"
-    assert data["telegram"]["status"] == "UNKNOWN"
+    assert data["shuffle"]["status"] == "DEFERRED_EXTERNAL"
+    assert data["telegram"]["status"] == "DEFERRED_EXTERNAL"
 
 
 def test_meta_alerts_raw_alerts_resolution_and_unresolved(test_setup):

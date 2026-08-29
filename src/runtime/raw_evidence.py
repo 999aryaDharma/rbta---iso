@@ -378,3 +378,37 @@ class RawAlertEvidenceStore:
         with self._get_conn() as conn:
             row = conn.execute("SELECT COUNT(*) AS total FROM raw_alert_evidence").fetchone()
             return row["total"] if row else 0
+
+    def count_by_hour(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> Dict[str, int]:
+        """Aggregate raw alert counts into UTC hourly buckets within [start_time, end_time].
+
+        Returns
+        -------
+        Dict[str, int]
+            Map of 'YYYY-MM-DD HH:00' -> count of raw alerts with timestamps in that hour.
+        """
+        st_utc = start_time.astimezone(timezone.utc) if start_time.tzinfo else start_time.replace(tzinfo=timezone.utc)
+        et_utc = end_time.astimezone(timezone.utc) if end_time.tzinfo else end_time.replace(tzinfo=timezone.utc)
+        start_iso = st_utc.isoformat()
+        end_iso = et_utc.isoformat()
+
+        sql = "SELECT timestamp FROM raw_alert_evidence WHERE timestamp >= ? AND timestamp <= ?"
+        hourly_counts: Dict[str, int] = {}
+        with self._get_conn() as conn:
+            rows = conn.execute(sql, (start_iso, end_iso)).fetchall()
+            for r in rows:
+                ts_raw = r["timestamp"]
+                try:
+                    if isinstance(ts_raw, str):
+                        dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")).astimezone(timezone.utc)
+                    else:
+                        dt = ts_raw.astimezone(timezone.utc)
+                    hour_key = dt.strftime("%Y-%m-%d %H:00")
+                    hourly_counts[hour_key] = hourly_counts.get(hour_key, 0) + 1
+                except Exception:
+                    pass
+        return hourly_counts

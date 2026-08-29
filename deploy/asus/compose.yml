@@ -4,27 +4,34 @@ services:
     build:
       context: ../..
       dockerfile: Dockerfile
-    image: rbta-service:s10
+      args:
+        GIT_SHA: ${RBTA_CODE_SHA:?RBTA_CODE_SHA is required}
+        BUILD_DATE: ${RBTA_BUILD_DATE:?RBTA_BUILD_DATE is required}
+    image: rbta-service:${RBTA_IMAGE_TAG:?RBTA_IMAGE_TAG is required}
     restart: unless-stopped
     init: true
     user: "10001:10001"
     read_only: false
     ports:
-      - "127.0.0.1:${RBTA_HOST_PORT:-8000}:8000"
+      - "127.0.0.1:${RBTA_HOST_PORT:?RBTA_HOST_PORT is required}:8000"
     environment:
       # Mandatory Fail-Closed Production Configuration
       - RBTA_API_KEY=${RBTA_API_KEY:?RBTA_API_KEY is required for production deployment}
       - RBTA_MODEL_VERSION=${RBTA_MODEL_VERSION:?RBTA_MODEL_VERSION is required for production deployment}
+      - RBTA_SOURCE_MODE=${RBTA_SOURCE_MODE:-DEFERRED}
       - RBTA_MODEL_REGISTRY_DIR=/app/artifacts/models
       - RBTA_STATE_FILE=/app/data/runtime/state.json
+      - RBTA_RAW_EVIDENCE_DB=/app/data/runtime/raw_alert_evidence.sqlite3
+      - RBTA_REPLAY_DATA_DIR=/app/data/replay
+      - RBTA_REPLAY_RUNS_DIR=/app/data/runtime/replay-runs
       - RBTA_HOST=0.0.0.0
       - RBTA_PORT=8000
       - RBTA_LOG_LEVEL=${RBTA_LOG_LEVEL:-INFO}
     volumes:
-      # Host-mounted durable runtime state (RW at repository root state/)
-      - ../../state:/app/data/runtime:rw
-      # Host-mounted immutable model registry (RO at repository root models/)
-      - ../../models:/app/artifacts/models:ro
+      # Configurable host directory mounts
+      - ${RBTA_STATE_HOST_DIR:?RBTA_STATE_HOST_DIR is required}:/app/data/runtime:rw
+      - ${RBTA_MODEL_HOST_DIR:?RBTA_MODEL_HOST_DIR is required}:/app/artifacts/models:ro
+      - ${RBTA_REPLAY_HOST_DIR:?RBTA_REPLAY_HOST_DIR is required}:/app/data/replay:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:

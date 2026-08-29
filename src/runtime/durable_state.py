@@ -17,6 +17,11 @@ class DurableStateManager:
     def __init__(self, filepath: Union[str, Path] = "state/runtime_state.json") -> None:
         self.filepath: Path = Path(filepath).resolve()
 
+    @property
+    def state_path(self) -> Path:
+        """Return resolved path to the state file."""
+        return self.filepath
+
     def save_state(
         self,
         engine: RBTAEngine,

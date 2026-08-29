@@ -92,6 +92,10 @@ def create_production_app(
     raw_evidence_store = RawAlertEvidenceStore(raw_evidence_db)
 
     # 4. Construct live stateful service
+    source_mode = env_map.get("RBTA_SOURCE_MODE", "DEFERRED").strip().upper()
+    if source_mode not in ("DEFERRED", "LIVE"):
+        raise ValueError(f"RBTA_SOURCE_MODE must be either 'DEFERRED' or 'LIVE', got '{source_mode}'")
+
     service: Optional[LiveRBTAService] = None
     if scoring_pipe is not None:
         service = LiveRBTAService(
@@ -99,6 +103,7 @@ def create_production_app(
             state_manager=state_mgr,
             adaptive=True,
             raw_evidence_store=raw_evidence_store,
+            source_mode=source_mode,
         )
 
     # 5. Construct demonstration replay controller

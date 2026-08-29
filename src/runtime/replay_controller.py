@@ -135,6 +135,15 @@ class ReplayController:
         self._persist_run_meta()
         return new_run_id
 
+    def _model_version(self) -> str:
+        """Extract exact model version from loaded scoring pipeline metadata fail-closed."""
+        if self.scoring_pipeline is None or not self.scoring_pipeline.metadata:
+            raise RuntimeError("Loaded scoring pipeline is missing mandatory model_version metadata")
+        value = self.scoring_pipeline.metadata.get("model_version")
+        if not value:
+            raise RuntimeError("Loaded scoring pipeline is missing mandatory model_version metadata")
+        return str(value)
+
     def _persist_run_meta(self) -> None:
         if not self.run_id:
             return
@@ -149,7 +158,7 @@ class ReplayController:
             "current_event_time": self.current_event_time,
             "wall_clock_elapsed_seconds": self.wall_clock_elapsed,
             "last_error": self.last_error,
-            "model_version": getattr(self.scoring_pipeline.bundle, "model_version", "v1") if self.scoring_pipeline and hasattr(self.scoring_pipeline, "bundle") else "v1",
+            "model_version": self._model_version(),
         }
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)

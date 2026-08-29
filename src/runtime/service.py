@@ -287,7 +287,16 @@ class LiveRBTAService:
 
     def is_seen(self, wazuh_alert_id: str) -> bool:
         """Check if an alert ID has already been committed in RBTAEngine."""
-        return wazuh_alert_id in self.engine._seen_alert_ids
+        return self.engine.has_seen_alert(wazuh_alert_id) if hasattr(self.engine, "has_seen_alert") else (wazuh_alert_id in self.engine._seen_alert_ids)
+
+    def drain_and_score(self) -> List[ScoredMetaAlert]:
+        """Drain all currently active engine buckets, score them, and persist."""
+        drained_metas = self.engine.drain()
+        if drained_metas:
+            self.pending_scoring.extend(drained_metas)
+            self._persist_to_disk()
+            return self._drain_pending_scoring()
+        return []
 
     def get_live_source_state(self) -> Dict[str, Any]:
         """Retrieve copy of durable live source transport state."""
