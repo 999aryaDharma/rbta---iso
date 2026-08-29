@@ -27,3 +27,10 @@ export function formatDuration(seconds: number): string {
   const s = Math.floor(seconds % 60);
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
+
+export function formatSeconds(sec: number | null | undefined): string {
+  if (sec === null || sec === undefined) return '—';
+  if (sec < 60) return `${sec.toFixed(1)}s`;
+  if (sec < 3600) return `${(sec / 60).toFixed(1)}m`;
+  return `${(sec / 3600).toFixed(1)}h`;
+}
