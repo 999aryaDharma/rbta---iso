@@ -33,6 +33,7 @@ IMAGE_NAME="rbta-service:${IMAGE_TAG}"
 API_KEY="isolated-engineering-smoke-token-42"
 TEST_CONTAINER="rbta-isolated-smoke-$(date +%s)"
 TEMP_STATE_DIR=$(mktemp -d -t rbta_isolated_state_XXXXXX)
+chmod 0777 "${TEMP_STATE_DIR}"
 TEMP_PORT=18088
 
 cleanup() {
@@ -57,12 +58,9 @@ docker run -d --name "${TEST_CONTAINER}" \
   "${IMAGE_NAME}"
 
 echo "=== [2/5] Verifying Mount Destinations and Production State Isolation ==="
-INSPECT_JSON=$(docker inspect "${TEST_CONTAINER}")
-
-# Assert mount destinations
-python3 -c "
+docker inspect "${TEST_CONTAINER}" | python3 -c "
 import json, sys
-data = json.loads('''${INSPECT_JSON}''')[0]
+data = json.load(sys.stdin)[0]
 mounts = data.get('Mounts', [])
 dest_map = {m['Destination']: m for m in mounts}
 
@@ -76,13 +74,14 @@ assert '/app/data/runtime' in dest_map, 'runtime mount missing'
 assert dest_map['/app/data/runtime']['RW'] == True, 'runtime mount must be RW'
 
 # Ensure production state directory is NOT mounted
-prod_state = '${PROD_STATE_DIR}'.replace('\\\\', '/')
+prod_state = sys.argv[1].replace('\\\\', '/')
+temp_state = sys.argv[2].replace('\\\\', '/')
 for m in mounts:
     src = m.get('Source', '').replace('\\\\', '/')
-    if prod_state and prod_state in src and src != '${TEMP_STATE_DIR}'.replace('\\\\', '/'):
+    if prod_state and prod_state in src and src != temp_state:
         raise AssertionError(f'Production state directory {prod_state} was mounted into isolated test container!')
 print('✓ Mount destinations and isolation verified behaviorally.')
-"
+" "${PROD_STATE_DIR}" "${TEMP_STATE_DIR}"
 
 BASE_URL="http://127.0.0.1:${TEMP_PORT}"
 AUTH_HEADER=(-H "Authorization: Bearer ${API_KEY}")
@@ -129,12 +128,12 @@ echo "Stats: ${STATS_RESP}"
 
 # Validate stats behavior
 python3 -c "
-import json
-data = json.loads('''${STATS_RESP}''')
+import json, sys
+data = json.loads(sys.argv[1])
 seen = data.get('seen_alert_count', data.get('seen_count', 0))
 assert seen == 1, f'Expected exactly 1 unique alert seen after duplicate ingest, got {seen}'
 print('✓ Duplicate idempotency proven (seen_alert_count == 1).')
-"
+" "${STATS_RESP}"
 
 echo "=============================================================================="
 echo "Isolated Engineering Smoke Test Complete — ALL INGESTION PROBES PASSED"

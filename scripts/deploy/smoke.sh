@@ -100,14 +100,14 @@ echo "✓ Datasets response: ${DATASETS_RESP}"
 
 # Validate at least one non-empty *.jsonl dataset
 python3 -c "
-import json
-data = json.loads('''${DATASETS_RESP}''')
+import json, sys
+data = json.loads(sys.argv[1])
 datasets = data.get('datasets', [])
 assert len(datasets) >= 1, f'Replay dataset count must be >= 1, got {len(datasets)}'
 jsonl_datasets = [d for d in datasets if d.get('filename', '').endswith('.jsonl')]
 assert len(jsonl_datasets) >= 1, f'Expected at least one *.jsonl dataset, got {datasets}'
 print(f'✓ Verified {len(datasets)} replay dataset(s) discovered, {len(jsonl_datasets)} ready *.jsonl.')
-"
+" "${DATASETS_RESP}"
 
 echo "=== [10/11] Checking System Metadata Truth (/api/v1/dashboard/system) ==="
 SYS_RESP=$(curl -s -S -f "${AUTH_HEADER[@]}" "${BASE_URL}/api/v1/dashboard/system")
