@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 SpeedFactor = Literal["1", "10", "100", "MAX"]
 ReplayStatus = Literal["IDLE", "RUNNING", "PAUSED", "STOPPED", "COMPLETED", "ERROR"]
 
+ALL_DATASETS_SENTINEL = "__ALL__"
 
 class ReplayController:
     """Manages background replay runs deterministically with session isolation, strict canonicalization, and pacing."""
@@ -54,6 +55,10 @@ class ReplayController:
         self.run_id: Optional[str] = None
         self.status: ReplayStatus = "IDLE"
         self.dataset_name: Optional[str] = None
+        self.dataset_mode: Literal["single", "all"] = "single"
+        self.dataset_count: int = 1
+        self.current_dataset: Optional[str] = None
+        self.current_dataset_index: int = 0
         self.speed_factor: SpeedFactor = "MAX"
         self.processed_count: int = 0
         self.total_count: int = 0
@@ -65,6 +70,7 @@ class ReplayController:
         self.current_service: Optional[LiveRBTAService] = None
         self.current_evidence_store: Optional[RawAlertEvidenceStore] = None
 
+
     def list_datasets(self) -> List[Dict[str, Any]]:
         """List valid .jsonl replay datasets available in the data directory."""
         items: List[Dict[str, Any]] = []
@@ -73,9 +79,20 @@ class ReplayController:
 
         for p in sorted(self.data_dir.glob("*.jsonl")):
             if p.is_file():
+                # Count lines efficiently
+                line_count = 0
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        for line in f:
+                            if line.strip():
+                                line_count += 1
+                except Exception:
+                    pass
+                    
                 items.append({
                     "name": p.name,
                     "size_bytes": p.stat().st_size,
+                    "total_events": line_count,
                 })
         return items
 
@@ -121,6 +138,10 @@ class ReplayController:
 
         self.run_id = new_run_id
         self.dataset_name = dataset_name
+        self.dataset_mode = "single"
+        self.dataset_count = 1
+        self.current_dataset = dataset_name
+        self.current_dataset_index = 0
         self.speed_factor = speed_factor
         self.current_service = service
         self.current_evidence_store = evidence_store
@@ -164,24 +185,53 @@ class ReplayController:
             json.dump(data, f, indent=2)
 
     def start(self, dataset_name: str, speed_factor: SpeedFactor = "MAX") -> Dict[str, Any]:
-        """Start a new deterministic replay stream on the specified dataset."""
+        """Start a new deterministic replay stream on the specified dataset(s)."""
         with self._lock:
             if self.status in ("RUNNING", "PAUSED"):
                 raise RuntimeError(f"Cannot start replay while status is '{self.status}'")
 
-            dataset_path = self.validate_dataset_path(dataset_name)
+            if dataset_name in (ALL_DATASETS_SENTINEL, "ALL", "__ALL__"):
+                datasets = [p for p in sorted(self.data_dir.glob("*.jsonl")) if p.is_file()]
+                if not datasets:
+                    raise ValueError("No replay datasets found in data directory")
+                
+                total = 0
+                valid_datasets = []
+                for p in datasets:
+                    with open(p, "r", encoding="utf-8") as f:
+                        file_has_lines = False
+                        for line in f:
+                            if line.strip():
+                                total += 1
+                                file_has_lines = True
+                        if file_has_lines:
+                            valid_datasets.append(p)
+                
+                if total == 0:
+                    raise ValueError("No valid events found across any datasets")
+                
+                self._init_run_workspace(ALL_DATASETS_SENTINEL, speed_factor)
+                self.dataset_mode = "all"
+                self.dataset_count = len(valid_datasets)
+                self.current_dataset = valid_datasets[0].name if valid_datasets else None
+                self.current_dataset_index = 0
+                dataset_paths = valid_datasets
+            else:
+                dataset_path = self.validate_dataset_path(dataset_name)
 
-            # Count total non-empty lines in dataset
-            total = 0
-            with open(dataset_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        total += 1
+                # Count total non-empty lines in dataset
+                total = 0
+                with open(dataset_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            total += 1
 
-            if total == 0:
-                raise ValueError(f"Replay dataset '{dataset_name}' contains no events")
+                if total == 0:
+                    raise ValueError(f"Replay dataset '{dataset_name}' contains no events")
 
-            self._init_run_workspace(dataset_name, speed_factor)
+                self._init_run_workspace(dataset_name, speed_factor)
+                dataset_paths = [dataset_path]
+
             self.total_count = total
             self.status = "RUNNING"
             self.wall_clock_start = time.time()
@@ -190,7 +240,7 @@ class ReplayController:
 
             self._thread = threading.Thread(
                 target=self._run_loop,
-                args=(dataset_path,),
+                args=(dataset_paths,),
                 daemon=True,
                 name=f"replay-{self.run_id[:8]}",
             )
@@ -243,6 +293,10 @@ class ReplayController:
             self.run_id = None
             self.status = "IDLE"
             self.dataset_name = None
+            self.dataset_mode = "single"
+            self.dataset_count = 1
+            self.current_dataset = None
+            self.current_dataset_index = 0
             self.processed_count = 0
             self.total_count = 0
             self.current_event_time = None
@@ -265,75 +319,83 @@ class ReplayController:
             self._thread.join(timeout=1.0)
         return self.get_status()
 
-    def _run_loop(self, dataset_path: Path) -> None:
+    def _run_loop(self, dataset_paths: List[Path]) -> None:
         """Internal replay worker thread processing canonical alerts strictly."""
         last_event_ts: Optional[float] = None
         speed_multiplier = float(self.speed_factor) if self.speed_factor != "MAX" else None
 
-        line_no = 0
         try:
-            with open(dataset_path, "r", encoding="utf-8") as f:
-                for raw_line in f:
-                    line_no += 1
-                    line_str = raw_line.strip()
-                    if not line_str:
-                        continue
+            for idx, dataset_path in enumerate(dataset_paths):
+                with self._lock:
+                    self.current_dataset = dataset_path.name
+                    self.current_dataset_index = idx
 
-                    # Check stop signal
-                    if self._stop_event.is_set():
-                        break
+                line_no = 0
+                with open(dataset_path, "r", encoding="utf-8") as f:
+                    for raw_line in f:
+                        line_no += 1
+                        line_str = raw_line.strip()
+                        if not line_str:
+                            continue
 
-                    # Check pause signal (blocks until resumed or stopped)
-                    while not self._pause_event.is_set():
+                        # Check stop signal
                         if self._stop_event.is_set():
                             break
-                        time.sleep(0.02)
 
-                    if self._stop_event.is_set():
-                        break
+                        # Check pause signal (blocks until resumed or stopped)
+                        while not self._pause_event.is_set():
+                            if self._stop_event.is_set():
+                                break
+                            time.sleep(0.02)
 
-                    # Parse JSON
-                    try:
-                        raw_data = json.loads(line_str)
-                    except Exception as e:
-                        raise ValueError(f"Malformed JSON on line {line_no}: {e}") from e
-
-                    # Canonicalize strictly through single canonical path
-                    canonical_alert = canonicalize_wazuh_alert(raw_data)
-
-                    # Pacing if not MAX speed
-                    event_ts_sec = canonical_alert.timestamp.timestamp()
-                    if speed_multiplier is not None and last_event_ts is not None:
-                        dt = (event_ts_sec - last_event_ts) / speed_multiplier
-                        if dt > 0:
-                            sleep_end = time.monotonic() + min(dt, 5.0)
-                            while time.monotonic() < sleep_end:
-                                if self._stop_event.is_set():
-                                    break
-                                if not self._pause_event.is_set():
-                                    break
-                                time.sleep(0.01)
-
-                    if self._stop_event.is_set():
-                        break
-                    while not self._pause_event.is_set():
                         if self._stop_event.is_set():
                             break
-                        time.sleep(0.02)
-                    if self._stop_event.is_set():
-                        break
 
-                    last_event_ts = event_ts_sec
+                        # Parse JSON
+                        try:
+                            raw_data = json.loads(line_str)
+                        except Exception as e:
+                            raise ValueError(f"Malformed JSON on line {line_no}: {e}") from e
 
-                    # Ingest alert into isolated run service
-                    assert self.current_service is not None
-                    self.current_service.ingest_alert(canonical_alert)
+                        # Canonicalize strictly through single canonical path
+                        canonical_alert = canonicalize_wazuh_alert(raw_data)
 
-                    with self._lock:
-                        self.processed_count += 1
-                        self.current_event_time = canonical_alert.timestamp.isoformat()
-                        if self.wall_clock_start is not None:
-                            self.wall_clock_elapsed = max(0.0, time.time() - self.wall_clock_start)
+                        # Pacing if not MAX speed
+                        event_ts_sec = canonical_alert.timestamp.timestamp()
+                        if speed_multiplier is not None and last_event_ts is not None:
+                            dt = (event_ts_sec - last_event_ts) / speed_multiplier
+                            if dt > 0:
+                                sleep_end = time.monotonic() + min(dt, 5.0)
+                                while time.monotonic() < sleep_end:
+                                    if self._stop_event.is_set():
+                                        break
+                                    if not self._pause_event.is_set():
+                                        break
+                                    time.sleep(0.01)
+
+                        if self._stop_event.is_set():
+                            break
+                        while not self._pause_event.is_set():
+                            if self._stop_event.is_set():
+                                break
+                            time.sleep(0.02)
+                        if self._stop_event.is_set():
+                            break
+
+                        last_event_ts = event_ts_sec
+
+                        # Ingest alert into isolated run service
+                        assert self.current_service is not None
+                        self.current_service.ingest_alert(canonical_alert)
+
+                        with self._lock:
+                            self.processed_count += 1
+                            self.current_event_time = canonical_alert.timestamp.isoformat()
+                            if self.wall_clock_start is not None:
+                                self.wall_clock_elapsed = max(0.0, time.time() - self.wall_clock_start)
+                
+                if self._stop_event.is_set():
+                    break
 
             # Check if finished naturally (EOF reached without manual stop)
             if not self._stop_event.is_set():
@@ -348,11 +410,11 @@ class ReplayController:
                     self._persist_run_meta()
 
         except Exception as e:
-            logger.exception("Replay failed on dataset '%s', line %d", dataset_path.name, line_no)
+            logger.exception("Replay failed on dataset '%s', line %d", self.current_dataset, line_no)
             with self._lock:
                 self.status = "ERROR"
                 self.last_error = {
-                    "dataset": dataset_path.name,
+                    "dataset": self.current_dataset,
                     "line_number": line_no,
                     "error_type": type(e).__name__,
                     "error_message": str(e),
@@ -376,6 +438,10 @@ class ReplayController:
                 "run_id": self.run_id,
                 "status": self.status,
                 "dataset": self.dataset_name,
+                "dataset_mode": self.dataset_mode,
+                "dataset_count": self.dataset_count,
+                "current_dataset": self.current_dataset,
+                "current_dataset_index": self.current_dataset_index,
                 "speed": self.speed_factor,
                 "processed_count": self.processed_count,
                 "total_count": self.total_count,

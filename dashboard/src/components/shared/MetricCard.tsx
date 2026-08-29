@@ -9,21 +9,13 @@ interface MetricCardProps {
 
 export function MetricCard({ label, value, sub, icon }: MetricCardProps) {
   return (
-    <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs font-medium text-kumo-subtle">
-          {label}
-        </span>
-        {icon}
+    <div className="p-3 rounded-lg border border-kumo-hairline bg-kumo-base">
+      <div className="text-xs text-kumo-subtle mb-1">
+        {label}
+        {icon && <span className="ml-2 inline-block">{icon}</span>}
       </div>
-      <div className="text-2xl font-semibold text-kumo-default tracking-tight">
-        {value}
-      </div>
-      {sub && (
-        <div className="text-xs mt-1 text-kumo-subtle">
-          {sub}
-        </div>
-      )}
+      <div className="text-lg font-semibold font-mono text-kumo-default">{value}</div>
+      {sub && <div className="text-xs text-kumo-subtle mt-0.5">{sub}</div>}
     </div>
   );
 }

@@ -72,188 +72,213 @@ export function ReplayPage() {
 
   const withRunId = (path: string) => (status?.run_id ? `${path}${path.includes('?') ? '&' : '?'}run_id=${encodeURIComponent(status.run_id)}` : path);
 
+  const isAllDatasets = status?.dataset === '__ALL__' || status?.dataset === 'ALL' || status?.dataset_mode === 'all';
+
   return (
-    <div className="space-y-6">
+    <>
       <PageHeader
         title="Demonstration Replay Controller"
         description="Deterministic historical workload replay streaming with calibrated pacing, session isolation, and strict evidence logging"
       />
 
-      {/* Control Panel Card */}
-      <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div>
-              <label className="block text-[11px] font-semibold mb-1 text-kumo-subtle">
-                Replay Dataset (.jsonl)
-              </label>
-              <select
-                value={selectedDataset}
-                onChange={(e) => setSelectedDataset(e.target.value)}
-                disabled={!isIdle || isLoading || !datasetsData?.items?.length}
-                className="px-3 py-1.5 border border-kumo-hairline rounded-md text-xs font-mono bg-kumo-base text-kumo-default"
-              >
-                {datasetsData?.items && datasetsData.items.length > 0 ? (
-                  datasetsData.items.map((ds) => (
-                    <option key={ds.name} value={ds.name}>
-                      {ds.name} ({Math.round(ds.size_bytes / 1024)} KB)
-                    </option>
-                  ))
-                ) : (
-                  <option value="">No replay datasets available</option>
-                )}
-              </select>
+      <div className="px-6 py-4 space-y-4">
+        {/* Control Panel Card */}
+        <div className="p-4 rounded-lg border border-kumo-hairline bg-kumo-base">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold mb-1 text-kumo-subtle">
+                  Replay Dataset (.jsonl)
+                </label>
+                <div className="w-[260px]">
+                  <select
+                    value={selectedDataset}
+                    onChange={(e) => setSelectedDataset(e.target.value)}
+                    disabled={!isIdle || isLoading || !datasetsData?.items?.length}
+                    className="w-full px-3 py-1.5 border border-kumo-hairline rounded-md text-xs font-mono bg-kumo-base text-kumo-default focus:ring-1 focus:ring-kumo-brand outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <option value="__ALL__">All datasets (Sequential)</option>
+                    {datasetsData?.items?.map((ds) => (
+                      <option key={ds.name} value={ds.name}>
+                        {ds.name} ({Math.round(ds.size_bytes / 1024)} KB)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold mb-1 text-kumo-subtle">
+                  Playback Speed
+                </label>
+                <div className="w-[200px]">
+                  <select
+                    value={speed}
+                    onChange={(e) => setSpeed(e.target.value as any)}
+                    disabled={!isIdle || isLoading}
+                    className="w-full px-3 py-1.5 border border-kumo-hairline rounded-md text-xs font-mono bg-kumo-base text-kumo-default focus:ring-1 focus:ring-kumo-brand outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <option value="1">1x (Realtime Clock)</option>
+                    <option value="10">10x Throttled</option>
+                    <option value="100">100x Fast Pacing</option>
+                    <option value="MAX">MAX (Unthrottled Throughput)</option>
+                  </select>
+                </div>
+              </div>
             </div>
 
-            <div>
-              <label className="block text-[11px] font-semibold mb-1 text-kumo-subtle">
-                Playback Speed
-              </label>
-              <select
-                value={speed}
-                onChange={(e) => setSpeed(e.target.value as any)}
-                disabled={!isIdle || isLoading}
-                className="px-3 py-1.5 border border-kumo-hairline rounded-md text-xs font-mono bg-kumo-base text-kumo-default"
+            {/* Action Buttons */}
+            <div className="flex items-center gap-2 mt-4 md:mt-0">
+              {isIdle && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleAction(() => startReplay(selectedDataset, speed))}
+                  disabled={isLoading || !selectedDataset}
+                >
+                  <Play size={14} weight="fill" /> Start Replay
+                </Button>
+              )}
+
+              {isRunning && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleAction(pauseReplay)}
+                  disabled={isLoading}
+                >
+                  <Pause size={14} weight="fill" /> Pause
+                </Button>
+              )}
+
+              {isPaused && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleAction(resumeReplay)}
+                  disabled={isLoading}
+                >
+                  <FastForward size={14} weight="fill" /> Resume
+                </Button>
+              )}
+
+              {(isRunning || isPaused) && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => handleAction(stopReplay)}
+                  disabled={isLoading}
+                >
+                  <Stop size={14} weight="fill" /> Stop
+                </Button>
+              )}
+
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowResetConfirm(true)}
+                disabled={isLoading || status?.status === 'IDLE'}
               >
-                <option value="1">1x (Realtime Clock)</option>
-                <option value="10">10x Throttled</option>
-                <option value="100">100x Fast Pacing</option>
-                <option value="MAX">MAX (Unthrottled Throughput)</option>
-              </select>
+                <ArrowClockwise size={14} /> Reset New Run
+              </Button>
             </div>
           </div>
 
-          {/* Action Buttons */}
-          <div className="flex items-center gap-2">
-            {isIdle && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => handleAction(() => startReplay(selectedDataset, speed))}
-                disabled={isLoading || !selectedDataset}
-              >
-                <Play size={14} weight="fill" /> Start Replay
-              </Button>
-            )}
-
-            {isRunning && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => handleAction(pauseReplay)}
-                disabled={isLoading}
-              >
-                <Pause size={14} weight="fill" /> Pause
-              </Button>
-            )}
-
-            {isPaused && (
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => handleAction(resumeReplay)}
-                disabled={isLoading}
-              >
-                <FastForward size={14} weight="fill" /> Resume
-              </Button>
-            )}
-
-            {(isRunning || isPaused) && (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => handleAction(stopReplay)}
-                disabled={isLoading}
-              >
-                <Stop size={14} weight="fill" /> Stop
-              </Button>
-            )}
-
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowResetConfirm(true)}
-              disabled={isLoading || status?.status === 'IDLE'}
-            >
-              <ArrowClockwise size={14} /> Reset New Run
-            </Button>
-          </div>
+          {/* Progress Bar */}
+          {status && status.total_count > 0 && (
+            <div className="mt-4 pt-4 border-t border-kumo-hairline">
+              <div className="flex justify-between text-xs mb-1 font-mono">
+                <span className="text-kumo-subtle">Replay Progress</span>
+                <span className="font-semibold text-kumo-default">{progressPercent.toFixed(1)}%</span>
+              </div>
+              <div className="w-full h-2 rounded-full overflow-hidden bg-kumo-recessed">
+                <div
+                  className="h-full bg-kumo-brand transition-all duration-300 rounded-full"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Progress Bar */}
-        {status && status.total_count > 0 && (
-          <div className="mt-4 pt-4 border-t border-kumo-hairline">
-            <div className="flex justify-between text-xs mb-1 font-mono">
-              <span className="text-kumo-subtle">Replay Progress</span>
-              <span className="font-semibold text-kumo-default">{progressPercent.toFixed(1)}%</span>
+        {/* Error Alert if replay encountered a malformed line */}
+        {status?.status === 'ERROR' && status.last_error && (
+          <Banner
+            variant="error"
+            size="sm"
+            title="Replay Execution Failed"
+            description={`Dataset: ${String(status.last_error.dataset)} · Line: ${String(status.last_error.line_number)} · Error: ${String(status.last_error.error_message)}`}
+          />
+        )}
+
+        {/* Replay Completed Banner */}
+        {status?.status === 'COMPLETED' && (
+          <Banner
+            variant="default"
+            size="base"
+            title="Replay Finished Successfully"
+            description={`Processed all ${status.total_count} alerts in ${formatDuration(status.wall_clock_elapsed_seconds)} (${status.events_per_second.toFixed(1)} ev/s).`}
+          >
+            <Banner.Action onClick={() => navigate(withRunId('/meta-alerts'))}>
+              Investigate MetaAlerts <ArrowRight size={14} />
+            </Banner.Action>
+          </Banner>
+        )}
+
+        {/* Telemetry Metrics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <MetricCard label="Playback Status" value={status?.status || 'IDLE'} />
+          <MetricCard label="Processed Events" value={status ? formatNumber(status.processed_count) : '0'} />
+          <MetricCard label="Total Dataset Events" value={status ? formatNumber(status.total_count) : '0'} />
+          <MetricCard label="Throughput" value={status ? `${formatNumber(status.events_per_second)} ev/s` : '0 ev/s'} />
+        </div>
+
+        {/* Replay Details Card */}
+        {status && status.run_id && (
+          <div className="p-4 rounded-lg border border-kumo-hairline bg-kumo-base text-xs font-mono space-y-2">
+            <div className="flex justify-between">
+              <span className="text-kumo-subtle">Active Run Workspace ID:</span>
+              <span className="font-semibold text-kumo-default">{status.run_id}</span>
             </div>
-            <div className="w-full h-2 rounded-full overflow-hidden bg-kumo-recessed">
-              <div
-                className="h-full bg-kumo-brand transition-all duration-300 rounded-full"
-                style={{ width: `${progressPercent}%` }}
-              />
+            <div className="flex justify-between">
+              <span className="text-kumo-subtle">Dataset:</span>
+              <span className="text-kumo-default">{status.dataset}</span>
+            </div>
+            {isAllDatasets && (
+              <>
+                <div className="flex justify-between">
+                  <span className="text-kumo-subtle">Current File Name:</span>
+                  <span className="text-kumo-default">{(status as any).current_file_name || '—'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-kumo-subtle">File Index / Total:</span>
+                  <span className="text-kumo-default">
+                    {(status as any).file_index !== undefined ? `${(status as any).file_index} / ${(status as any).file_total}` : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-kumo-subtle">Global Progress:</span>
+                  <span className="text-kumo-default">
+                    {(status as any).global_progress !== undefined ? `${((status as any).global_progress * 100).toFixed(1)}%` : '—'}
+                  </span>
+                </div>
+              </>
+            )}
+            <div className="flex justify-between">
+              <span className="text-kumo-subtle">Current Event Timestamp:</span>
+              <span className="text-kumo-default">{status.current_event_time || '—'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-kumo-subtle">Wall-Clock Elapsed Time:</span>
+              <span className="text-kumo-default">{formatDuration(status.wall_clock_elapsed_seconds)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-kumo-subtle">Model Version:</span>
+              <span className="text-kumo-default">{status.model_version}</span>
             </div>
           </div>
         )}
       </div>
-
-      {/* Error Alert if replay encountered a malformed line */}
-      {status?.status === 'ERROR' && status.last_error && (
-        <Banner
-          variant="error"
-          size="sm"
-          title="Replay Execution Failed"
-          description={`Dataset: ${String(status.last_error.dataset)} · Line: ${String(status.last_error.line_number)} · Error: ${String(status.last_error.error_message)}`}
-        />
-      )}
-
-      {/* Replay Completed Banner */}
-      {status?.status === 'COMPLETED' && (
-        <Banner
-          variant="default"
-          size="base"
-          title="Replay Finished Successfully"
-          description={`Processed all ${status.total_count} alerts in ${formatDuration(status.wall_clock_elapsed_seconds)} (${status.events_per_second.toFixed(1)} ev/s).`}
-        >
-          <Banner.Action onClick={() => navigate(withRunId('/meta-alerts'))}>
-            Investigate MetaAlerts <ArrowRight size={14} />
-          </Banner.Action>
-        </Banner>
-      )}
-
-      {/* Telemetry Metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard label="Playback Status" value={status?.status || 'IDLE'} />
-        <MetricCard label="Processed Events" value={status ? formatNumber(status.processed_count) : 0} />
-        <MetricCard label="Total Dataset Events" value={status ? formatNumber(status.total_count) : 0} />
-        <MetricCard label="Throughput" value={status ? `${formatNumber(status.events_per_second)} ev/s` : '0 ev/s'} />
-      </div>
-
-      {/* Replay Details Card */}
-      {status && status.run_id && (
-        <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs text-xs font-mono space-y-2">
-          <div className="flex justify-between">
-            <span className="text-kumo-subtle">Active Run Workspace ID:</span>
-            <span className="font-semibold text-kumo-default">{status.run_id}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-kumo-subtle">Dataset:</span>
-            <span className="text-kumo-default">{status.dataset}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-kumo-subtle">Current Event Timestamp:</span>
-            <span className="text-kumo-default">{status.current_event_time || '—'}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-kumo-subtle">Wall-Clock Elapsed Time:</span>
-            <span className="text-kumo-default">{formatDuration(status.wall_clock_elapsed_seconds)}</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-kumo-subtle">Model Version:</span>
-            <span className="text-kumo-default">{status.model_version}</span>
-          </div>
-        </div>
-      )}
 
       {/* Reset Confirmation Dialog */}
       <DialogRoot open={showResetConfirm} onOpenChange={(o) => { if (!o) setShowResetConfirm(false); }}>
@@ -278,6 +303,6 @@ export function ReplayPage() {
           </div>
         </Dialog>
       </DialogRoot>
-    </div>
+    </>
   );
 }

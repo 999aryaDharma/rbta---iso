@@ -34,64 +34,66 @@ export function IntegrationsPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <>
       <PageHeader
         title="Pipeline Integrations"
         description="End-to-end telemetry from raw event canonicalization through RBTA, Isolation Forest scoring, and downstream dispatch"
       />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard label="Raw Events Ingested" value={summary ? formatNumber(summary.raw_alert_count) : '—'} />
-        <MetricCard label="MetaAlerts Generated" value={summary ? formatNumber(summary.meta_alert_count) : '—'} />
-        <MetricCard
-          label="Reduction Achieved"
-          value={
-            summary && summary.alert_reduction_rate_percent !== null && summary.alert_reduction_rate_percent !== undefined
-              ? `${summary.alert_reduction_rate_percent}%`
-              : '—'
-          }
-        />
-        <MetricCard label="Active Buckets" value={summary ? formatNumber(summary.active_buckets_count) : '—'} />
-      </div>
+      <div className="px-6 py-4 space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <MetricCard label="Raw Events Ingested" value={summary ? formatNumber(summary.raw_alert_count) : '—'} />
+          <MetricCard label="MetaAlerts Generated" value={summary ? formatNumber(summary.meta_alert_count) : '—'} />
+          <MetricCard
+            label="Reduction Achieved"
+            value={
+              summary && summary.alert_reduction_rate_percent !== null && summary.alert_reduction_rate_percent !== undefined
+                ? `${summary.alert_reduction_rate_percent}%`
+                : '—'
+            }
+          />
+          <MetricCard label="Active Buckets" value={summary ? formatNumber(summary.active_buckets_count) : '—'} />
+        </div>
 
-      <div className="space-y-4">
-        {integrations &&
-          Object.entries(integrations).map(([key, item], idx, arr) => {
-            const Icon = getIcon(key);
-            const variant = getBadgeVariant(item.status);
-            return (
-              <div
-                key={key}
-                className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs flex items-start justify-between transition-colors hover:border-kumo-line"
-              >
-                <div className="flex items-start gap-4">
-                  <div className="p-2.5 rounded-md border border-kumo-hairline bg-kumo-recessed text-kumo-brand shrink-0 mt-0.5">
-                    <Icon size={20} />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-3 mb-1">
-                      <h3 className="font-semibold text-sm text-kumo-default">
-                        {item.name || key.toUpperCase()}
-                      </h3>
-                      <Badge variant={variant as any}>
-                        {item.status}
-                      </Badge>
+        <div className="space-y-3">
+          {integrations &&
+            Object.entries(integrations).map(([key, item], idx, arr) => {
+              const Icon = getIcon(key);
+              const variant = getBadgeVariant(item.status);
+              return (
+                <div
+                  key={key}
+                  className="p-4 rounded-lg border border-kumo-hairline bg-kumo-base flex items-start justify-between transition-colors hover:border-kumo-line"
+                >
+                  <div className="flex items-start gap-3.5">
+                    <div className="p-2 rounded-md border border-kumo-hairline bg-kumo-recessed text-kumo-brand shrink-0 mt-0.5">
+                      <Icon size={18} />
                     </div>
-                    <p className="text-xs text-kumo-subtle">
-                      {item.detail || 'Operational service integration component'}
-                    </p>
+                    <div>
+                      <div className="flex items-center gap-2.5 mb-0.5">
+                        <h3 className="font-semibold text-xs text-kumo-default">
+                          {item.name || key.toUpperCase()}
+                        </h3>
+                        <Badge variant={variant as any}>
+                          {item.status}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-kumo-subtle">
+                        {item.detail || 'Operational service integration component'}
+                      </p>
+                    </div>
                   </div>
+                  {idx < arr.length - 1 && (
+                    <div className="hidden lg:flex items-center text-xs font-mono shrink-0 pl-4 self-center text-kumo-inactive">
+                      <span>CASCADE</span>
+                      <ArrowRight size={14} className="ml-1" />
+                    </div>
+                  )}
                 </div>
-                {idx < arr.length - 1 && (
-                  <div className="hidden lg:flex items-center text-xs font-mono shrink-0 pl-4 self-center text-kumo-inactive">
-                    <span>CASCADE</span>
-                    <ArrowRight size={14} className="ml-1" />
-                  </div>
-                )}
-              </div>
-            );
-          })}
+              );
+            })}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

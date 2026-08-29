@@ -406,6 +406,20 @@ async function setupRouteMocks(page: Page) {
 
 test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
   test.beforeEach(async ({ page }) => {
+    replayState = {
+      run_id: null,
+      status: 'IDLE',
+      dataset: null,
+      processed_count: 0,
+      total_count: 1000,
+      progress: 0,
+      current_event_time: null,
+      wall_clock_elapsed_seconds: 0,
+      speed: 1,
+      events_per_second: 0,
+      model_version: 'iso-forest-v1.0',
+      error: null,
+    };
     await setupRouteMocks(page);
   });
 
@@ -644,5 +658,31 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     // Close modal
     await page.keyboard.press('Escape');
     await expect(page.getByRole('heading', { name: 'Keyboard Shortcuts' })).not.toBeVisible();
+  });
+
+  test('20. All-datasets option is selectable and starts sequential replay run', async ({ page }) => {
+    await page.addInitScript((key) => {
+      window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
+    }, VALID_API_KEY);
+    await page.goto('/dashboard/replay');
+
+    const select = page.locator('select').first();
+    await select.selectOption('__ALL__');
+
+    const startBtn = page.locator('button:has-text("Start Replay")');
+    await startBtn.click();
+    await expect(page.locator('text=RUNNING')).toBeVisible();
+  });
+
+  test('21. MetaAlerts search input updates table query and preserves run_id', async ({ page }) => {
+    await page.addInitScript((key) => {
+      window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
+    }, VALID_API_KEY);
+    await page.goto('/dashboard/meta-alerts?run_id=test-run-123');
+
+    const searchInput = page.locator('input[placeholder*="Search Meta ID"]');
+    await searchInput.fill('authentication_failed');
+    await expect(page.locator('text=authentication_failed').first()).toBeVisible();
+    expect(page.url()).toContain('run_id=test-run-123');
   });
 });

@@ -86,7 +86,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar className="border-r border-kumo-hairline">
-      <SidebarHeader className="h-14 flex items-center px-4 border-b border-kumo-hairline">
+      <SidebarHeader className="h-12 flex items-center px-4 border-b border-kumo-hairline">
         <span className="text-sm font-semibold text-kumo-default tracking-tight">
           RBTA <span className="text-kumo-subtle font-normal text-xs">Security Analytics</span>
         </span>

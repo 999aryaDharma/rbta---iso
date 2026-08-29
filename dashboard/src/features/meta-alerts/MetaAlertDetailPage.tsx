@@ -7,7 +7,7 @@ import { DecisionBadge } from '@/components/shared/DecisionBadge';
 import { formatDateTime, formatScore } from '@/lib/formatters';
 import { Tabs } from '@cloudflare/kumo/components/tabs';
 import { Button } from '@cloudflare/kumo/components/button';
-import { Shield, ArrowRight, Stack, Fingerprint } from '@phosphor-icons/react';
+import { ArrowRight } from '@phosphor-icons/react';
 
 const SEVEN_FEATURE_KEYS = [
   'max_severity',
@@ -50,8 +50,8 @@ export function MetaAlertDetailPage() {
   ];
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2 text-xs font-mono text-kumo-subtle">
+    <>
+      <div className="px-6 pt-4 text-xs font-mono text-kumo-subtle flex items-center gap-2">
         <Link to={withRunId('/meta-alerts')} className="hover:underline text-kumo-default">MetaAlerts</Link>
         <span>/</span>
         <span className="text-kumo-strong font-semibold">#{id}</span>
@@ -74,101 +74,100 @@ export function MetaAlertDetailPage() {
         }
       />
 
-      <Tabs
-        tabs={tabsConfig}
-        value={activeTab}
-        onValueChange={setActiveTab}
-        variant="underline"
-      />
+      <div className="px-6">
+        <Tabs
+          tabs={tabsConfig}
+          value={activeTab}
+          onValueChange={setActiveTab}
+          variant="underline"
+        />
+      </div>
 
-      {/* Tab 1: Overview & Detection */}
-      {activeTab === 'overview' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Aggregation Profile */}
-          <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs">
-            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-kumo-hairline">
-              <Stack size={16} className="text-kumo-brand" />
-              <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-default">Temporal Aggregation Profile</h3>
+      <div className="px-6 py-4 space-y-4">
+        {/* Tab 1: Overview & Detection */}
+        {activeTab === 'overview' && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Aggregation Profile */}
+            <div>
+              <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-default mb-3 pb-2 border-b border-kumo-hairline">
+                Temporal Aggregation Profile
+              </h3>
+              <dl className="space-y-2 text-xs">
+                <div className="flex justify-between"><dt className="text-kumo-subtle">Cluster Window:</dt> <dd className="font-mono text-kumo-default">{formatDateTime(data.start_time)} → {formatDateTime(data.end_time)}</dd></div>
+                <div className="flex justify-between"><dt className="text-kumo-subtle">Raw Alert Count:</dt> <dd className="font-mono font-semibold text-kumo-default">{data.alert_count} events</dd></div>
+                <div className="flex justify-between"><dt className="text-kumo-subtle">Max Rule Severity:</dt> <dd className="font-mono font-semibold text-kumo-default">{data.max_severity}/15</dd></div>
+                <div className="flex justify-between"><dt className="text-kumo-subtle">Agent Criticality:</dt> <dd className="font-mono text-kumo-default">{data.seven_features.agent_criticality ?? 1.0}</dd></div>
+                <div className="flex justify-between"><dt className="text-kumo-subtle">MITRE Tactics:</dt> <dd className="font-mono text-kumo-default">{data.mitre_tactics.length ? data.mitre_tactics.join(', ') : 'None'}</dd></div>
+              </dl>
             </div>
-            <dl className="space-y-2 text-xs">
-              <div className="flex justify-between"><dt className="text-kumo-subtle">Cluster Window:</dt> <dd className="font-mono text-kumo-default">{formatDateTime(data.start_time)} → {formatDateTime(data.end_time)}</dd></div>
-              <div className="flex justify-between"><dt className="text-kumo-subtle">Raw Alert Count:</dt> <dd className="font-mono font-semibold text-kumo-default">{data.alert_count} events</dd></div>
-              <div className="flex justify-between"><dt className="text-kumo-subtle">Max Rule Severity:</dt> <dd className="font-mono font-semibold text-kumo-default">{data.max_severity}/15</dd></div>
-              <div className="flex justify-between"><dt className="text-kumo-subtle">Agent Criticality:</dt> <dd className="font-mono text-kumo-default">{data.seven_features.agent_criticality ?? 1.0}</dd></div>
-              <div className="flex justify-between"><dt className="text-kumo-subtle">MITRE Tactics:</dt> <dd className="font-mono text-kumo-default">{data.mitre_tactics.length ? data.mitre_tactics.join(', ') : 'None'}</dd></div>
-            </dl>
-          </div>
 
-          {/* Isolation Forest Decision */}
-          <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs">
-            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-kumo-hairline">
-              <Shield size={16} className="text-kumo-info" />
-              <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-default">Isolation Forest Evaluation</h3>
+            {/* Isolation Forest Decision */}
+            <div>
+              <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-default mb-3 pb-2 border-b border-kumo-hairline">
+                Isolation Forest Evaluation
+              </h3>
+              <dl className="space-y-2 text-xs">
+                <div className="flex justify-between"><dt className="text-kumo-subtle">Anomaly Score:</dt> <dd className="font-mono font-semibold text-kumo-default">{formatScore(data.anomaly_score)}</dd></div>
+                <div className="flex justify-between"><dt className="text-kumo-subtle">Tukey IQR Threshold:</dt> <dd className="font-mono text-kumo-default">{formatScore(data.threshold_used)}</dd></div>
+                <div className="flex justify-between"><dt className="text-kumo-subtle">Classification Decision:</dt> <dd className="font-semibold text-kumo-default">{data.decision}</dd></div>
+                <div className="flex justify-between"><dt className="text-kumo-subtle">Operational Action:</dt> <dd className="font-semibold text-kumo-default">{data.action}</dd></div>
+                <div className="flex justify-between"><dt className="text-kumo-subtle">Model Version:</dt> <dd className="font-mono text-kumo-default">{data.model_version}</dd></div>
+              </dl>
             </div>
-            <dl className="space-y-2 text-xs">
-              <div className="flex justify-between"><dt className="text-kumo-subtle">Anomaly Score:</dt> <dd className="font-mono font-semibold text-kumo-default">{formatScore(data.anomaly_score)}</dd></div>
-              <div className="flex justify-between"><dt className="text-kumo-subtle">Tukey IQR Threshold:</dt> <dd className="font-mono text-kumo-default">{formatScore(data.threshold_used)}</dd></div>
-              <div className="flex justify-between"><dt className="text-kumo-subtle">Classification Decision:</dt> <dd className="font-semibold text-kumo-default">{data.decision}</dd></div>
-              <div className="flex justify-between"><dt className="text-kumo-subtle">Operational Action:</dt> <dd className="font-semibold text-kumo-default">{data.action}</dd></div>
-              <div className="flex justify-between"><dt className="text-kumo-subtle">Model Version:</dt> <dd className="font-mono text-kumo-default">{data.model_version}</dd></div>
-            </dl>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Tab 2: Seven Features */}
-      {activeTab === 'features' && (
-        <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs">
-          <h3 className="font-semibold text-xs uppercase tracking-wider mb-4 text-kumo-default">
-            Canonical 7-Feature Vector (Locked Research Order)
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {SEVEN_FEATURE_KEYS.map((key, idx) => {
-              const val = data.seven_features[key];
-              return (
-                <div
-                  key={key}
-                  className="p-3 rounded-lg border border-kumo-hairline bg-kumo-recessed"
-                >
-                  <div className="text-[11px] font-mono mb-1 text-kumo-subtle">
-                    #{idx + 1} {key}
+        {/* Tab 2: Seven Features */}
+        {activeTab === 'features' && (
+          <div>
+            <h3 className="font-semibold text-xs uppercase tracking-wider mb-4 text-kumo-default pb-2 border-b border-kumo-hairline">
+              Canonical 7-Feature Vector (Locked Research Order)
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {SEVEN_FEATURE_KEYS.map((key, idx) => {
+                const val = data.seven_features[key];
+                return (
+                  <div
+                    key={key}
+                    className="p-3 rounded-lg border border-kumo-hairline bg-kumo-recessed"
+                  >
+                    <div className="text-[11px] font-mono mb-1 text-kumo-subtle">
+                      #{idx + 1} {key}
+                    </div>
+                    <div className="text-sm font-mono font-semibold text-kumo-default">
+                      {val !== undefined ? Number(val).toFixed(4) : '—'}
+                    </div>
                   </div>
-                  <div className="text-sm font-mono font-semibold text-kumo-default">
-                    {val !== undefined ? Number(val).toFixed(4) : '—'}
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Tab 3: Provenance Trace */}
-      {activeTab === 'provenance' && trace && (
-        <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs">
-          <div className="flex items-center gap-2 mb-3 pb-2 border-b border-kumo-hairline">
-            <Fingerprint size={16} className="text-kumo-success" />
-            <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-default">
+        {/* Tab 3: Provenance Trace */}
+        {activeTab === 'provenance' && trace && (
+          <div>
+            <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-default mb-3 pb-2 border-b border-kumo-hairline">
               Audit Provenance Trace ({trace.source_alert_ids.length} member alert IDs)
             </h3>
+            <p className="text-xs mb-3 text-kumo-subtle">
+              Click any raw alert ID below to inspect its individual cryptographic evidence and canonical payload.
+            </p>
+            <div className="flex flex-wrap gap-2 max-h-60 overflow-auto">
+              {trace.source_alert_ids.map((aid, i) => (
+                <button
+                  key={aid}
+                  onClick={() => navigate(withRunId(`/meta-alerts/${id}/raw-alerts/${encodeURIComponent(aid)}`))}
+                  className="px-2.5 py-1 text-xs font-mono rounded-md border border-kumo-hairline bg-kumo-recessed text-kumo-default hover:border-kumo-brand transition-colors cursor-pointer"
+                >
+                  <span className="text-[10px] mr-1 text-kumo-subtle">#{i + 1}</span>
+                  {aid}
+                </button>
+              ))}
+            </div>
           </div>
-          <p className="text-xs mb-3 text-kumo-subtle">
-            Click any raw alert ID below to inspect its individual cryptographic evidence and canonical payload.
-          </p>
-          <div className="flex flex-wrap gap-2 max-h-60 overflow-auto">
-            {trace.source_alert_ids.map((aid, i) => (
-              <button
-                key={aid}
-                onClick={() => navigate(withRunId(`/meta-alerts/${id}/raw-alerts/${encodeURIComponent(aid)}`))}
-                className="px-2.5 py-1 text-xs font-mono rounded-md border border-kumo-hairline bg-kumo-recessed text-kumo-default hover:border-kumo-brand transition-colors cursor-pointer"
-              >
-                <span className="text-[10px] mr-1 text-kumo-subtle">#{i + 1}</span>
-                {aid}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   );
 }

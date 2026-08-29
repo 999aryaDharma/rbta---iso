@@ -2,7 +2,7 @@ import { useState, useEffect, type ReactNode } from 'react';
 import { isAuthenticated, setApiKey, clearApiKey } from '@/lib/auth';
 import { checkAuth } from '@/api/auth';
 import { Button } from '@cloudflare/kumo/components/button';
-import { Input } from '@cloudflare/kumo/components/input';
+import { InputGroup } from '@cloudflare/kumo/components/input-group';
 import { Banner } from '@cloudflare/kumo/components/banner';
 import { Shield, Key } from '@phosphor-icons/react';
 
@@ -52,7 +52,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-kumo-canvas">
-      <div className="p-8 rounded-lg border border-kumo-hairline bg-kumo-base w-full max-w-sm shadow-sm">
+      <div className="p-8 rounded-lg border border-kumo-hairline bg-kumo-base w-full max-w-sm">
         <div className="flex items-center gap-2 mb-2">
           <Shield size={20} className="text-kumo-brand" />
           <h1 className="text-sm font-semibold tracking-tight text-kumo-default">
@@ -70,9 +70,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
         )}
 
         <div className="space-y-3">
-          <div className="relative">
-            <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-kumo-subtle z-10" />
-            <Input
+          <InputGroup>
+            <InputGroup.Addon align="start"><Key size={14} /></InputGroup.Addon>
+            <InputGroup.Input
               type="password"
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -82,15 +82,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 }
               }}
               placeholder="Enter RBTA API Key..."
-              className="w-full pl-8 font-mono text-xs"
+              className="font-mono text-xs"
               autoFocus
             />
-          </div>
+          </InputGroup>
 
           <Button
             onClick={handleSignIn}
             disabled={isVerifying || !input.trim()}
-            className="w-full"
+            className="w-full justify-center"
             variant="primary"
           >
             {isVerifying ? 'Verifying Credential...' : 'Sign In to Control Plane'}

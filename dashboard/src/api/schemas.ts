@@ -133,6 +133,10 @@ export const ReplayStatusSchema = z.object({
   speed: z.union([z.number(), z.string()]),
   events_per_second: z.number(),
   model_version: z.string(),
+  dataset_mode: z.string().nullable().optional(),
+  dataset_count: z.number().nullable().optional(),
+  current_dataset: z.string().nullable().optional(),
+  current_dataset_index: z.number().nullable().optional(),
   error: z.string().nullable().optional(),
   last_error: z.record(z.string(), z.unknown()).nullable().optional(),
 });
