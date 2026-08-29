@@ -3,8 +3,8 @@
 FROM node:20-alpine AS dashboard-build
 
 WORKDIR /build
-COPY dashboard/package*.json /build/
-RUN npm ci || npm install
+COPY dashboard/package*.json dashboard/.npmrc* /build/
+RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 COPY dashboard/ /build/
 RUN npm run build
 
