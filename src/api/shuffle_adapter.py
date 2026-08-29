@@ -1,6 +1,8 @@
 """Shuffle SOAR webhook forwarder with retry and event idempotency header."""
 
 import logging
+import time
+from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 import requests
 
@@ -8,6 +10,15 @@ from src.contracts.scored_meta_alert import ScoredMetaAlert
 
 logger = logging.getLogger(__name__)
 
+@dataclass(frozen=True)
+class ShuffleDeliveryResult:
+    success: bool
+    status_code: int = 0
+    error: str = ""
+    attempts: int = 0
+
+    def __bool__(self) -> bool:
+        return self.success
 
 class ShuffleForwarderError(RuntimeError):
     """Raised when webhook dispatch to Shuffle fails."""
@@ -35,14 +46,16 @@ class ShuffleWebhookForwarder:
         api_key: Optional[str] = None,
         timeout: Tuple[float, float] = (5.0, 15.0),
         max_retries: int = 3,
+        sleep_fn=time.sleep,
     ) -> None:
         self.webhook_url: str = webhook_url
         self.api_key: Optional[str] = api_key
         self.timeout: Tuple[float, float] = timeout
         self.max_retries: int = max_retries
         self._session = requests.Session()
+        self._sleep_fn = sleep_fn
 
-    def forward(self, scored_meta: ScoredMetaAlert) -> bool:
+    def forward(self, scored_meta: ScoredMetaAlert) -> ShuffleDeliveryResult:
         """Post scored meta-alert payload to Shuffle webhook with idempotent X-Event-ID header.
 
         Parameters
@@ -93,9 +106,18 @@ class ShuffleWebhookForwarder:
                     verify=True,
                 )
                 if resp.status_code in (200, 201, 202, 204):
-                    return True
-                logger.warning("Shuffle webhook returned status %s: %s", resp.status_code, resp.text)
+                    return ShuffleDeliveryResult(success=True, status_code=resp.status_code, attempts=attempt)
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    if attempt < self.max_retries:
+                        delay = min(30.0, (2 ** (attempt - 1)) * 0.5)
+                        self._sleep_fn(delay)
+                        continue
+                # Non-retryable 4xx
+                if 400 <= resp.status_code < 500:
+                    return ShuffleDeliveryResult(success=False, status_code=resp.status_code, error=resp.text, attempts=attempt)
             except Exception as exc:
-                logger.warning("Error dispatching to Shuffle webhook (attempt %s/%s): %s", attempt, self.max_retries, exc)
-
-        return False
+                if attempt >= self.max_retries:
+                    return ShuffleDeliveryResult(success=False, error=str(exc), attempts=attempt)
+                delay = min(30.0, (2 ** (attempt - 1)) * 0.5)
+                self._sleep_fn(delay)
+        return ShuffleDeliveryResult(success=False, error="Max retries exhausted", attempts=self.max_retries)

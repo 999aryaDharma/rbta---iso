@@ -44,6 +44,12 @@ def create_app(
     @app.get("/ready", tags=["Monitoring"])
     def ready() -> JSONResponse:
         """Readiness probe validating model artifacts and runtime state."""
+        if model_registry is not None and service is None:
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={"ready": False, "reason": "Service not initialized"},
+            )
+
         if model_registry is None:
             if service is None or service.scoring_pipeline is None:
                 return JSONResponse(
@@ -52,7 +58,7 @@ def create_app(
                 )
             return JSONResponse(
                 status_code=status.HTTP_200_OK,
-                content={"ready": True, "active_model_version": service.scoring_pipeline.bundle.model_version},
+                content={"ready": True, "active_model_version": service.scoring_pipeline.metadata.get("model_version", "unknown")},
             )
 
         active_version = model_registry.get_active_version()
@@ -82,6 +88,7 @@ def create_app(
     @app.get("/runtime/stats", tags=["Monitoring"])
     def runtime_stats(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
         """Retrieve live runtime aggregation statistics."""
+        verify_auth(authorization)
         if service is None:
             return {"status": "uninitialized"}
 
@@ -114,8 +121,14 @@ def create_app(
                 "is_duplicate": True,
             }
 
-        if service is not None:
-            service.ingest_alert(res.canonical_alert)
+        if service is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Service not initialized — cannot process alerts",
+            )
+        if res.canonical_alert.wazuh_alert_id in service.engine._seen_alert_ids:
+            return {"status": "accepted", "alert_id": res.alert_id, "is_duplicate": True}
+        service.ingest_alert(res.canonical_alert)
 
         return {
             "status": "accepted",
@@ -154,11 +167,45 @@ def create_app(
         if service is None:
             raise HTTPException(status_code=404, detail="Service not initialized")
 
-        outbox_items = service.get_outbox()
-        for item in outbox_items:
+        # Search finalized history first (survives ACK)
+        detail = service.get_meta_detail(meta_id) if hasattr(service, 'get_meta_detail') else None
+        if detail is not None:
+            return _serialize_scored_alert(detail)
+
+        # Fallback to active outbox
+        for item in service.get_outbox():
             if item.meta_id == meta_id:
                 return _serialize_scored_alert(item)
 
-        raise HTTPException(status_code=404, detail=f"MetaAlert {meta_id} not found in active outbox")
+        raise HTTPException(status_code=404, detail=f"MetaAlert {meta_id} not found")
+
+    @app.get("/api/v1/meta-alerts/{meta_id}/trace", tags=["Outbox"])
+    def get_meta_alert_trace(
+        meta_id: int,
+        authorization: Optional[str] = Header(None),
+    ) -> Dict[str, Any]:
+        verify_auth(authorization)
+        if service is None:
+            raise HTTPException(status_code=404, detail="Service not initialized")
+
+        detail = service.get_meta_detail(meta_id) if hasattr(service, 'get_meta_detail') else None
+        if detail is None:
+            for item in service.get_outbox():
+                if item.meta_id == meta_id:
+                    detail = item
+                    break
+
+        if detail is None:
+            raise HTTPException(status_code=404, detail=f"MetaAlert {meta_id} not found")
+
+        return {
+            "meta_id": detail.meta_id,
+            "source_alert_ids": list(detail.source_alert_ids),
+            "agent_id": detail.agent_id,
+            "rule_group_primary": detail.rule_group_primary,
+            "decision": detail.decision,
+            "action": detail.action,
+            "model_version": detail.model_version,
+        }
 
     return app

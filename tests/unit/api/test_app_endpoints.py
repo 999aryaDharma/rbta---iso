@@ -50,7 +50,24 @@ def test_ready_endpoint_fails_503_when_no_active_model(tmp_path: Path):
     assert resp.status_code == 503
     data = resp.json()
     assert data["ready"] is False
-    assert "No active model" in data["reason"]
+    assert "Service not initialized" in data["reason"]
+
+def test_ready_endpoint_with_service_but_no_registry():
+    """GET /ready returns 200 using metadata when service exists but registry does not."""
+    # Create dummy pipeline with metadata
+    class DummyPipeline:
+        metadata = {"model_version": "meta-v1"}
+        bundle = None
+    
+    service = MagicMock()
+    service.scoring_pipeline = DummyPipeline()
+    app = create_app(service=service, model_registry=None)
+    client = TestClient(app)
+    
+    resp = client.get("/ready")
+    assert resp.status_code == 200
+    assert resp.json()["ready"] is True
+    assert resp.json()["active_model_version"] == "meta-v1"
 
 
 def test_ready_endpoint_passes_200_when_active_model_published(tmp_path: Path):
@@ -123,7 +140,7 @@ def test_ingest_alert_endpoint_and_outbox_ack(tmp_path: Path):
     assert resp.json()["is_duplicate"] is False
 
     # Stats check
-    stats_resp = client.get("/runtime/stats")
+    stats_resp = client.get("/runtime/stats", headers=headers)
     assert stats_resp.status_code == 200
     assert stats_resp.json()["seen_alerts_count"] == 1
     assert stats_resp.json()["active_buckets_count"] == 1

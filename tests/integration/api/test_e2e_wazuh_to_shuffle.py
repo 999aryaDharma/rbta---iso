@@ -110,7 +110,7 @@ def test_e2e_wazuh_alert_to_shuffle_exactly_once(tmp_path: Path):
         # Forward the meta alert to Shuffle
         scored_obj = service.get_outbox()[0]
         success = shuffle_forwarder.forward(scored_obj)
-        assert success is True
+        assert success.success is True
 
         # Acknowledge and dequeue outbox item
         ack_res = api_client.post(f"/api/v1/outbox/{scored_obj.meta_id}/ack", headers=headers)

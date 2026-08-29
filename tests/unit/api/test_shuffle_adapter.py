@@ -45,7 +45,7 @@ def test_shuffle_forwarder_sends_idempotent_event_header():
 
     with patch("requests.Session.post", return_value=mock_resp) as mock_post:
         success = forwarder.forward(meta)
-        assert success is True
+        assert success.success is True
 
         mock_post.assert_called_once()
         args, kwargs = mock_post.call_args
