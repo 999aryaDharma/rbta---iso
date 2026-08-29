@@ -2,9 +2,12 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchMetaAlerts } from '@/api/metaAlerts';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { DecisionBadge } from '@/components/shared/DecisionBadge';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateTime, formatScore } from '@/lib/formatters';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Input } from '@cloudflare/kumo/components/input';
+import { Button } from '@cloudflare/kumo/components/button';
+import { Table } from '@cloudflare/kumo/components/table';
+import { MagnifyingGlass, CaretLeft, CaretRight } from '@phosphor-icons/react';
 
 export function MetaAlertsPage() {
   const navigate = useNavigate();
@@ -59,35 +62,30 @@ export function MetaAlertsPage() {
   const totalPages = data ? Math.ceil(data.total / 20) || 1 : 1;
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader
         title="MetaAlerts Investigation Table"
         description="Aggregated security alert clusters scored by Isolation Forest with deterministic Tukey IQR thresholding"
       />
 
       {/* Toolbar / Filters */}
-      <div
-        className="p-4 rounded-[7px] border mb-6 flex flex-wrap items-center justify-between gap-3"
-        style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)' }}
-      >
+      <div className="p-4 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
           <div className="relative flex-1 max-w-sm">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-disabled)' }} />
-            <input
+            <MagnifyingGlass size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-kumo-subtle z-10" />
+            <Input
               type="text"
               placeholder="Search Meta ID, Agent, Rule Group..."
               value={search}
               onChange={(e) => handleSearchChange(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 border rounded-[5px] text-xs bg-[var(--bg-surface)]"
-              style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)' }}
+              className="w-full pl-8 text-xs"
             />
           </div>
 
           <select
             value={action}
             onChange={(e) => handleActionChange(e.target.value)}
-            className="px-3 py-1.5 border rounded-[5px] text-xs font-mono bg-[var(--bg-surface)]"
-            style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)' }}
+            className="px-3 py-1.5 border border-kumo-hairline rounded-md text-xs font-mono bg-kumo-base text-kumo-default"
           >
             <option value="">All Actions</option>
             <option value="ESCALATE">ESCALATE</option>
@@ -98,8 +96,7 @@ export function MetaAlertsPage() {
           <select
             value={decision}
             onChange={(e) => handleDecisionChange(e.target.value)}
-            className="px-3 py-1.5 border rounded-[5px] text-xs font-mono bg-[var(--bg-surface)]"
-            style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)' }}
+            className="px-3 py-1.5 border border-kumo-hairline rounded-md text-xs font-mono bg-kumo-base text-kumo-default"
           >
             <option value="">All Decisions</option>
             <option value="CRITICAL">CRITICAL</option>
@@ -110,91 +107,84 @@ export function MetaAlertsPage() {
           </select>
         </div>
 
-        <div className="text-xs font-mono" style={{ color: 'var(--text-tertiary)' }}>
+        <div className="text-xs font-mono text-kumo-subtle">
           {data ? `Showing page ${page} of ${totalPages} (${data.total} total)` : 'Loading...'}
         </div>
       </div>
 
       {/* MetaAlerts Table */}
-      <div
-        className="rounded-[7px] border overflow-hidden"
-        style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)' }}
-      >
-        <table className="w-full text-sm">
-          <thead className="border-b" style={{ background: 'var(--bg-subtle)', borderColor: 'var(--border-default)' }}>
-            <tr>
-              <th className="text-left px-4 py-2.5 font-medium text-xs" style={{ color: 'var(--text-tertiary)' }}>Meta ID</th>
-              <th className="text-left px-4 py-2.5 font-medium text-xs" style={{ color: 'var(--text-tertiary)' }}>End Time</th>
-              <th className="text-left px-4 py-2.5 font-medium text-xs" style={{ color: 'var(--text-tertiary)' }}>Agent</th>
-              <th className="text-left px-4 py-2.5 font-medium text-xs" style={{ color: 'var(--text-tertiary)' }}>Primary Group</th>
-              <th className="text-right px-4 py-2.5 font-medium text-xs" style={{ color: 'var(--text-tertiary)' }}>Raw Count</th>
-              <th className="text-right px-4 py-2.5 font-medium text-xs" style={{ color: 'var(--text-tertiary)' }}>Max Sev</th>
-              <th className="text-right px-4 py-2.5 font-medium text-xs" style={{ color: 'var(--text-tertiary)' }}>Score</th>
-              <th className="text-left px-4 py-2.5 font-medium text-xs" style={{ color: 'var(--text-tertiary)' }}>Decision</th>
-            </tr>
-          </thead>
-          <tbody>
+      <div className="rounded-lg border border-kumo-hairline bg-kumo-base overflow-hidden shadow-xs">
+        <Table>
+          <Table.Header>
+            <Table.Row>
+              <Table.Head>Meta ID</Table.Head>
+              <Table.Head>End Time</Table.Head>
+              <Table.Head>Agent</Table.Head>
+              <Table.Head>Primary Group</Table.Head>
+              <Table.Head className="text-right">Raw Count</Table.Head>
+              <Table.Head className="text-right">Max Sev</Table.Head>
+              <Table.Head className="text-right">Score</Table.Head>
+              <Table.Head>Decision</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
             {data?.items.map((m) => (
-              <tr
+              <Table.Row
                 key={m.meta_id}
-                className="border-b cursor-pointer hover:bg-[var(--bg-hover)]"
-                style={{ borderColor: 'var(--border-subtle)' }}
+                className="cursor-pointer hover:bg-kumo-tint"
                 onClick={() => navigate(withRunId(`/meta-alerts/${m.meta_id}`))}
               >
-                <td className="px-4 py-2.5 font-mono text-xs font-semibold">#{m.meta_id}</td>
-                <td className="px-4 py-2.5 text-xs">{formatDateTime(m.end_time)}</td>
-                <td className="px-4 py-2.5 text-xs">{m.agent_name} ({m.agent_id})</td>
-                <td className="px-4 py-2.5 text-xs font-mono">{m.rule_group_primary}</td>
-                <td className="px-4 py-2.5 text-xs text-right font-mono font-semibold">{m.alert_count}</td>
-                <td className="px-4 py-2.5 text-xs text-right font-mono">{m.max_severity}/15</td>
-                <td className="px-4 py-2.5 text-xs text-right font-mono">{m.anomaly_score.toFixed(4)}</td>
-                <td className="px-4 py-2.5"><DecisionBadge decision={m.decision} action={m.action} /></td>
-              </tr>
+                <Table.Cell className="font-mono text-xs font-semibold">#{m.meta_id}</Table.Cell>
+                <Table.Cell className="text-xs">{formatDateTime(m.end_time)}</Table.Cell>
+                <Table.Cell className="text-xs">{m.agent_name} ({m.agent_id})</Table.Cell>
+                <Table.Cell className="text-xs font-mono">{m.rule_group_primary}</Table.Cell>
+                <Table.Cell className="text-xs text-right font-mono font-semibold">{m.alert_count}</Table.Cell>
+                <Table.Cell className="text-xs text-right font-mono">{m.max_severity}/15</Table.Cell>
+                <Table.Cell className="text-xs text-right font-mono">{formatScore(m.anomaly_score)}</Table.Cell>
+                <Table.Cell><DecisionBadge decision={m.decision} action={m.action} /></Table.Cell>
+              </Table.Row>
             ))}
             {data && data.items.length === 0 && (
-              <tr>
-                <td colSpan={8} className="p-8 text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>
+              <Table.Row>
+                <Table.Cell colSpan={8} className="p-8 text-center text-xs text-kumo-subtle">
                   No MetaAlerts match the specified filters.
-                </td>
-              </tr>
+                </Table.Cell>
+              </Table.Row>
             )}
-          </tbody>
-        </table>
+          </Table.Body>
+        </Table>
 
         {/* Pagination Bar */}
-        <div
-          className="p-4 flex items-center justify-between border-t"
-          style={{ borderColor: 'var(--border-default)' }}
-        >
-          <button
+        <div className="p-4 flex items-center justify-between border-t border-kumo-hairline bg-kumo-base">
+          <Button
+            variant="ghost"
+            size="sm"
             disabled={page <= 1}
             onClick={() => {
               const params = new URLSearchParams(searchParams);
               params.set('page', String(page - 1));
               setSearchParams(params);
             }}
-            className="flex items-center gap-1 px-3 py-1.5 border rounded-[5px] text-xs font-medium disabled:opacity-50 cursor-pointer"
-            style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
           >
-            <ChevronLeft size={14} /> Previous
-          </button>
+            <CaretLeft size={14} /> Previous
+          </Button>
 
-          <span className="text-xs font-mono" style={{ color: 'var(--text-tertiary)' }}>
+          <span className="text-xs font-mono text-kumo-subtle">
             Page {page} of {totalPages}
           </span>
 
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             disabled={!data || page >= totalPages}
             onClick={() => {
               const params = new URLSearchParams(searchParams);
               params.set('page', String(page + 1));
               setSearchParams(params);
             }}
-            className="flex items-center gap-1 px-3 py-1.5 border rounded-[5px] text-xs font-medium disabled:opacity-50 cursor-pointer"
-            style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
           >
-            Next <ChevronRight size={14} />
-          </button>
+            Next <CaretRight size={14} />
+          </Button>
         </div>
       </div>
     </div>

@@ -13,10 +13,11 @@ import {
 } from '@/api/replay';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { MetricCard } from '@/components/shared/MetricCard';
-import { Dialog } from '@/components/ui/dialog';
-import { Alert } from '@/components/ui/alert';
-import { formatNumber, formatDuration } from '@/lib/utils';
-import { Play, Pause, Square, RotateCcw, FastForward, AlertTriangle, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { DialogRoot, Dialog, DialogTitle, DialogDescription, DialogClose } from '@cloudflare/kumo/components/dialog';
+import { Banner } from '@cloudflare/kumo/components/banner';
+import { Button } from '@cloudflare/kumo/components/button';
+import { formatNumber, formatDuration } from '@/lib/formatters';
+import { Play, Pause, Stop, ArrowClockwise, FastForward, ArrowRight } from '@phosphor-icons/react';
 
 export function ReplayPage() {
   const queryClient = useQueryClient();
@@ -72,29 +73,25 @@ export function ReplayPage() {
   const withRunId = (path: string) => (status?.run_id ? `${path}${path.includes('?') ? '&' : '?'}run_id=${encodeURIComponent(status.run_id)}` : path);
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader
         title="Demonstration Replay Controller"
         description="Deterministic historical workload replay streaming with calibrated pacing, session isolation, and strict evidence logging"
       />
 
       {/* Control Panel Card */}
-      <div
-        className="p-5 rounded-[7px] border mb-6"
-        style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)' }}
-      >
+      <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div>
-              <label className="block text-[11px] font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>
+              <label className="block text-[11px] font-semibold mb-1 text-kumo-subtle">
                 Replay Dataset (.jsonl)
               </label>
               <select
                 value={selectedDataset}
                 onChange={(e) => setSelectedDataset(e.target.value)}
                 disabled={!isIdle || isLoading || !datasetsData?.items?.length}
-                className="px-3 py-1.5 border rounded-[5px] text-xs font-mono bg-[var(--bg-surface)]"
-                style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)' }}
+                className="px-3 py-1.5 border border-kumo-hairline rounded-md text-xs font-mono bg-kumo-base text-kumo-default"
               >
                 {datasetsData?.items && datasetsData.items.length > 0 ? (
                   datasetsData.items.map((ds) => (
@@ -109,15 +106,14 @@ export function ReplayPage() {
             </div>
 
             <div>
-              <label className="block text-[11px] font-semibold mb-1" style={{ color: 'var(--text-tertiary)' }}>
+              <label className="block text-[11px] font-semibold mb-1 text-kumo-subtle">
                 Playback Speed
               </label>
               <select
                 value={speed}
                 onChange={(e) => setSpeed(e.target.value as any)}
                 disabled={!isIdle || isLoading}
-                className="px-3 py-1.5 border rounded-[5px] text-xs font-mono bg-[var(--bg-surface)]"
-                style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)' }}
+                className="px-3 py-1.5 border border-kumo-hairline rounded-md text-xs font-mono bg-kumo-base text-kumo-default"
               >
                 <option value="1">1x (Realtime Clock)</option>
                 <option value="10">10x Throttled</option>
@@ -130,71 +126,71 @@ export function ReplayPage() {
           {/* Action Buttons */}
           <div className="flex items-center gap-2">
             {isIdle && (
-              <button
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={() => handleAction(() => startReplay(selectedDataset, speed))}
                 disabled={isLoading || !selectedDataset}
-                className="flex items-center gap-1.5 px-4 py-2 text-white rounded-[5px] text-xs font-medium cursor-pointer disabled:opacity-50"
-                style={{ background: 'var(--action-blue)' }}
               >
-                <Play size={14} /> Start Replay
-              </button>
+                <Play size={14} weight="fill" /> Start Replay
+              </Button>
             )}
 
             {isRunning && (
-              <button
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => handleAction(pauseReplay)}
                 disabled={isLoading}
-                className="flex items-center gap-1.5 px-4 py-2 border rounded-[5px] text-xs font-medium cursor-pointer"
-                style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
               >
-                <Pause size={14} /> Pause
-              </button>
+                <Pause size={14} weight="fill" /> Pause
+              </Button>
             )}
 
             {isPaused && (
-              <button
+              <Button
+                variant="primary"
+                size="sm"
                 onClick={() => handleAction(resumeReplay)}
                 disabled={isLoading}
-                className="flex items-center gap-1.5 px-4 py-2 text-white rounded-[5px] text-xs font-medium cursor-pointer"
-                style={{ background: 'var(--brand-orange)' }}
               >
-                <FastForward size={14} /> Resume
-              </button>
+                <FastForward size={14} weight="fill" /> Resume
+              </Button>
             )}
 
             {(isRunning || isPaused) && (
-              <button
+              <Button
+                variant="destructive"
+                size="sm"
                 onClick={() => handleAction(stopReplay)}
                 disabled={isLoading}
-                className="flex items-center gap-1.5 px-4 py-2 text-white rounded-[5px] text-xs font-medium cursor-pointer"
-                style={{ background: 'var(--danger)' }}
               >
-                <Square size={14} /> Stop
-              </button>
+                <Stop size={14} weight="fill" /> Stop
+              </Button>
             )}
 
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setShowResetConfirm(true)}
               disabled={isLoading || status?.status === 'IDLE'}
-              className="flex items-center gap-1.5 px-3 py-2 border rounded-[5px] text-xs font-medium cursor-pointer disabled:opacity-40"
-              style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)', color: 'var(--text-secondary)' }}
             >
-              <RotateCcw size={14} /> Reset New Run
-            </button>
+              <ArrowClockwise size={14} /> Reset New Run
+            </Button>
           </div>
         </div>
 
         {/* Progress Bar */}
         {status && status.total_count > 0 && (
-          <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+          <div className="mt-4 pt-4 border-t border-kumo-hairline">
             <div className="flex justify-between text-xs mb-1 font-mono">
-              <span style={{ color: 'var(--text-tertiary)' }}>Replay Progress</span>
-              <span className="font-semibold">{progressPercent.toFixed(1)}%</span>
+              <span className="text-kumo-subtle">Replay Progress</span>
+              <span className="font-semibold text-kumo-default">{progressPercent.toFixed(1)}%</span>
             </div>
-            <div className="w-full h-2 rounded-[3px] overflow-hidden" style={{ background: 'var(--bg-subtle)' }}>
+            <div className="w-full h-2 rounded-full overflow-hidden bg-kumo-recessed">
               <div
-                className="h-full transition-all duration-300"
-                style={{ width: `${progressPercent}%`, background: 'var(--brand-orange)' }}
+                className="h-full bg-kumo-brand transition-all duration-300 rounded-full"
+                style={{ width: `${progressPercent}%` }}
               />
             </div>
           </div>
@@ -203,44 +199,30 @@ export function ReplayPage() {
 
       {/* Error Alert if replay encountered a malformed line */}
       {status?.status === 'ERROR' && status.last_error && (
-        <Alert variant="danger" className="mb-6">
-          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-          <div>
-            <div className="font-semibold text-xs">Replay Execution Failed</div>
-            <div className="mt-1 text-xs font-mono">
-              Dataset: {String(status.last_error.dataset)} · Line: {String(status.last_error.line_number)}
-            </div>
-            <div className="mt-0.5 text-xs">
-              Error: {String(status.last_error.error_message)}
-            </div>
-          </div>
-        </Alert>
+        <Banner
+          variant="error"
+          size="sm"
+          title="Replay Execution Failed"
+          description={`Dataset: ${String(status.last_error.dataset)} · Line: ${String(status.last_error.line_number)} · Error: ${String(status.last_error.error_message)}`}
+        />
       )}
 
       {/* Replay Completed Banner */}
       {status?.status === 'COMPLETED' && (
-        <Alert variant="default" className="mb-6" style={{ background: 'var(--success-soft)', borderColor: 'var(--success)', color: 'var(--success)' }}>
-          <CheckCircle2 size={18} className="shrink-0 mt-0.5" />
-          <div className="flex items-center justify-between w-full">
-            <div>
-              <div className="font-semibold text-xs">Replay Finished Successfully</div>
-              <div className="text-xs mt-0.5 font-mono">
-                Processed all {status.total_count} alerts in {formatDuration(status.wall_clock_elapsed_seconds)} ({status.events_per_second.toFixed(1)} ev/s).
-              </div>
-            </div>
-            <button
-              onClick={() => navigate(withRunId('/meta-alerts'))}
-              className="flex items-center gap-1 px-3 py-1 text-xs font-medium text-white rounded-[4px] cursor-pointer"
-              style={{ background: 'var(--success)' }}
-            >
-              Investigate MetaAlerts <ArrowRight size={12} />
-            </button>
-          </div>
-        </Alert>
+        <Banner
+          variant="default"
+          size="base"
+          title="Replay Finished Successfully"
+          description={`Processed all ${status.total_count} alerts in ${formatDuration(status.wall_clock_elapsed_seconds)} (${status.events_per_second.toFixed(1)} ev/s).`}
+        >
+          <Banner.Action onClick={() => navigate(withRunId('/meta-alerts'))}>
+            Investigate MetaAlerts <ArrowRight size={14} />
+          </Banner.Action>
+        </Banner>
       )}
 
       {/* Telemetry Metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <MetricCard label="Playback Status" value={status?.status || 'IDLE'} />
         <MetricCard label="Processed Events" value={status ? formatNumber(status.processed_count) : 0} />
         <MetricCard label="Total Dataset Events" value={status ? formatNumber(status.total_count) : 0} />
@@ -249,61 +231,53 @@ export function ReplayPage() {
 
       {/* Replay Details Card */}
       {status && status.run_id && (
-        <div
-          className="p-5 rounded-[7px] border text-xs font-mono space-y-2"
-          style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)' }}
-        >
+        <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs text-xs font-mono space-y-2">
           <div className="flex justify-between">
-            <span style={{ color: 'var(--text-tertiary)' }}>Active Run Workspace ID:</span>
-            <span className="font-semibold">{status.run_id}</span>
+            <span className="text-kumo-subtle">Active Run Workspace ID:</span>
+            <span className="font-semibold text-kumo-default">{status.run_id}</span>
           </div>
           <div className="flex justify-between">
-            <span style={{ color: 'var(--text-tertiary)' }}>Dataset:</span>
-            <span>{status.dataset}</span>
+            <span className="text-kumo-subtle">Dataset:</span>
+            <span className="text-kumo-default">{status.dataset}</span>
           </div>
           <div className="flex justify-between">
-            <span style={{ color: 'var(--text-tertiary)' }}>Current Event Timestamp:</span>
-            <span>{status.current_event_time || '—'}</span>
+            <span className="text-kumo-subtle">Current Event Timestamp:</span>
+            <span className="text-kumo-default">{status.current_event_time || '—'}</span>
           </div>
           <div className="flex justify-between">
-            <span style={{ color: 'var(--text-tertiary)' }}>Wall-Clock Elapsed Time:</span>
-            <span>{formatDuration(status.wall_clock_elapsed_seconds)}</span>
+            <span className="text-kumo-subtle">Wall-Clock Elapsed Time:</span>
+            <span className="text-kumo-default">{formatDuration(status.wall_clock_elapsed_seconds)}</span>
           </div>
           <div className="flex justify-between">
-            <span style={{ color: 'var(--text-tertiary)' }}>Model Version:</span>
-            <span>{status.model_version}</span>
+            <span className="text-kumo-subtle">Model Version:</span>
+            <span className="text-kumo-default">{status.model_version}</span>
           </div>
         </div>
       )}
 
       {/* Reset Confirmation Dialog */}
-      <Dialog
-        open={showResetConfirm}
-        onClose={() => setShowResetConfirm(false)}
-        title="Start New Replay Run?"
-      >
-        <div className="space-y-4 text-xs">
-          <p style={{ color: 'var(--text-secondary)' }}>
+      <DialogRoot open={showResetConfirm} onOpenChange={(o) => { if (!o) setShowResetConfirm(false); }}>
+        <Dialog>
+          <DialogTitle>Start New Replay Run?</DialogTitle>
+          <DialogDescription>
             Resetting will prepare a clean, isolated workspace for your next replay run. All data and SQLite evidence from the current run ({status?.run_id?.slice(0, 8)}) will remain preserved on disk for audit investigation.
-          </p>
-          <div className="flex justify-end gap-2 pt-2 border-t" style={{ borderColor: 'var(--border-subtle)' }}>
-            <button
-              onClick={() => setShowResetConfirm(false)}
-              className="px-3 py-1.5 border rounded-[5px] font-medium cursor-pointer"
-              style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
-            >
-              Cancel
-            </button>
-            <button
+          </DialogDescription>
+          <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-kumo-hairline">
+            <DialogClose>
+              <Button variant="ghost" size="sm" onClick={() => setShowResetConfirm(false)}>
+                Cancel
+              </Button>
+            </DialogClose>
+            <Button
+              variant="primary"
+              size="sm"
               onClick={handleConfirmReset}
-              className="px-3 py-1.5 text-white rounded-[5px] font-medium cursor-pointer"
-              style={{ background: 'var(--brand-orange)' }}
             >
               Confirm & Prepare New Run
-            </button>
+            </Button>
           </div>
-        </div>
-      </Dialog>
+        </Dialog>
+      </DialogRoot>
     </div>
   );
 }

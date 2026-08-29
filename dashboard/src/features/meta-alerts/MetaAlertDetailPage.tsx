@@ -1,11 +1,13 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { fetchMetaAlert, fetchMetaAlertTrace } from '@/api/metaAlerts';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { DecisionBadge } from '@/components/shared/DecisionBadge';
-import { formatDateTime } from '@/lib/utils';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { Shield, ArrowRight, Layers, Fingerprint } from 'lucide-react';
+import { formatDateTime, formatScore } from '@/lib/formatters';
+import { Tabs } from '@cloudflare/kumo/components/tabs';
+import { Button } from '@cloudflare/kumo/components/button';
+import { Shield, ArrowRight, Stack, Fingerprint } from '@phosphor-icons/react';
 
 const SEVEN_FEATURE_KEYS = [
   'max_severity',
@@ -21,6 +23,7 @@ export function MetaAlertDetailPage() {
   const { metaId } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState('overview');
   const runId = searchParams.get('run_id');
   const id = Number(metaId);
 
@@ -37,15 +40,21 @@ export function MetaAlertDetailPage() {
   });
 
   if (!data) {
-    return <div className="p-6 text-xs" style={{ color: 'var(--text-tertiary)' }}>Loading MetaAlert #{id}...</div>;
+    return <div className="p-6 text-xs text-kumo-subtle">Loading MetaAlert #{id}...</div>;
   }
 
+  const tabsConfig = [
+    { value: 'overview', label: 'Overview & Detection' },
+    { value: 'features', label: 'Seven Features' },
+    { value: 'provenance', label: `Provenance Trace (${data.alert_count})` },
+  ];
+
   return (
-    <div>
-      <div className="mb-2 flex items-center gap-2 text-xs font-mono" style={{ color: 'var(--text-tertiary)' }}>
-        <Link to={withRunId('/meta-alerts')} className="hover:underline">MetaAlerts</Link>
+    <div className="space-y-6">
+      <div className="flex items-center gap-2 text-xs font-mono text-kumo-subtle">
+        <Link to={withRunId('/meta-alerts')} className="hover:underline text-kumo-default">MetaAlerts</Link>
         <span>/</span>
-        <span style={{ color: 'var(--text-primary)' }}>#{id}</span>
+        <span className="text-kumo-strong font-semibold">#{id}</span>
       </div>
 
       <PageHeader
@@ -54,117 +63,112 @@ export function MetaAlertDetailPage() {
         actions={
           <div className="flex items-center gap-3">
             <DecisionBadge decision={data.decision} action={data.action} />
-            <button
+            <Button
+              variant="primary"
+              size="sm"
               onClick={() => navigate(withRunId(`/meta-alerts/${id}/raw-alerts`))}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-white rounded-[5px] text-xs font-medium cursor-pointer"
-              style={{ background: 'var(--action-blue)' }}
             >
               Investigate {data.alert_count} Raw Alerts <ArrowRight size={14} />
-            </button>
+            </Button>
           </div>
         }
       />
 
-      <Tabs defaultValue="overview" className="mt-4">
-        <TabsList>
-          <TabsTrigger value="overview">Overview & Detection</TabsTrigger>
-          <TabsTrigger value="features">Seven Features</TabsTrigger>
-          <TabsTrigger value="provenance">Provenance Trace ({data.alert_count})</TabsTrigger>
-        </TabsList>
+      <Tabs
+        tabs={tabsConfig}
+        value={activeTab}
+        onValueChange={setActiveTab}
+        variant="underline"
+      />
 
-        {/* Tab 1: Overview & Detection */}
-        <TabsContent value="overview">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Aggregation Profile */}
-            <div className="p-5 rounded-[7px] border" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)' }}>
-              <div className="flex items-center gap-2 mb-3 pb-2 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-                <Layers size={16} style={{ color: 'var(--brand-orange)' }} />
-                <h3 className="font-semibold text-xs uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Temporal Aggregation Profile</h3>
-              </div>
-              <dl className="space-y-2 text-xs">
-                <div className="flex justify-between"><dt style={{ color: 'var(--text-tertiary)' }}>Cluster Window:</dt> <dd className="font-mono">{formatDateTime(data.start_time)} → {formatDateTime(data.end_time)}</dd></div>
-                <div className="flex justify-between"><dt style={{ color: 'var(--text-tertiary)' }}>Raw Alert Count:</dt> <dd className="font-mono font-semibold">{data.alert_count} events</dd></div>
-                <div className="flex justify-between"><dt style={{ color: 'var(--text-tertiary)' }}>Max Rule Severity:</dt> <dd className="font-mono font-semibold">{data.max_severity}/15</dd></div>
-                <div className="flex justify-between"><dt style={{ color: 'var(--text-tertiary)' }}>Agent Criticality:</dt> <dd className="font-mono">{data.seven_features.agent_criticality ?? 1.0}</dd></div>
-                <div className="flex justify-between"><dt style={{ color: 'var(--text-tertiary)' }}>MITRE Tactics:</dt> <dd className="font-mono">{data.mitre_tactics.length ? data.mitre_tactics.join(', ') : 'None'}</dd></div>
-              </dl>
+      {/* Tab 1: Overview & Detection */}
+      {activeTab === 'overview' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {/* Aggregation Profile */}
+          <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs">
+            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-kumo-hairline">
+              <Stack size={16} className="text-kumo-brand" />
+              <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-default">Temporal Aggregation Profile</h3>
             </div>
-
-            {/* Isolation Forest Decision */}
-            <div className="p-5 rounded-[7px] border" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)' }}>
-              <div className="flex items-center gap-2 mb-3 pb-2 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-                <Shield size={16} style={{ color: 'var(--action-blue)' }} />
-                <h3 className="font-semibold text-xs uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Isolation Forest Evaluation</h3>
-              </div>
-              <dl className="space-y-2 text-xs">
-                <div className="flex justify-between"><dt style={{ color: 'var(--text-tertiary)' }}>Anomaly Score:</dt> <dd className="font-mono font-semibold">{data.anomaly_score.toFixed(4)}</dd></div>
-                <div className="flex justify-between"><dt style={{ color: 'var(--text-tertiary)' }}>Tukey IQR Threshold:</dt> <dd className="font-mono">{data.threshold_used.toFixed(4)}</dd></div>
-                <div className="flex justify-between"><dt style={{ color: 'var(--text-tertiary)' }}>Classification Decision:</dt> <dd className="font-semibold">{data.decision}</dd></div>
-                <div className="flex justify-between"><dt style={{ color: 'var(--text-tertiary)' }}>Operational Action:</dt> <dd className="font-semibold">{data.action}</dd></div>
-                <div className="flex justify-between"><dt style={{ color: 'var(--text-tertiary)' }}>Model Version:</dt> <dd className="font-mono">{data.model_version}</dd></div>
-              </dl>
-            </div>
+            <dl className="space-y-2 text-xs">
+              <div className="flex justify-between"><dt className="text-kumo-subtle">Cluster Window:</dt> <dd className="font-mono text-kumo-default">{formatDateTime(data.start_time)} → {formatDateTime(data.end_time)}</dd></div>
+              <div className="flex justify-between"><dt className="text-kumo-subtle">Raw Alert Count:</dt> <dd className="font-mono font-semibold text-kumo-default">{data.alert_count} events</dd></div>
+              <div className="flex justify-between"><dt className="text-kumo-subtle">Max Rule Severity:</dt> <dd className="font-mono font-semibold text-kumo-default">{data.max_severity}/15</dd></div>
+              <div className="flex justify-between"><dt className="text-kumo-subtle">Agent Criticality:</dt> <dd className="font-mono text-kumo-default">{data.seven_features.agent_criticality ?? 1.0}</dd></div>
+              <div className="flex justify-between"><dt className="text-kumo-subtle">MITRE Tactics:</dt> <dd className="font-mono text-kumo-default">{data.mitre_tactics.length ? data.mitre_tactics.join(', ') : 'None'}</dd></div>
+            </dl>
           </div>
-        </TabsContent>
 
-        {/* Tab 2: Seven Features */}
-        <TabsContent value="features">
-          <div className="p-5 rounded-[7px] border" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)' }}>
-            <h3 className="font-semibold text-xs uppercase tracking-wider mb-4" style={{ color: 'var(--text-secondary)' }}>
-              Canonical 7-Feature Vector (Locked Research Order)
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-              {SEVEN_FEATURE_KEYS.map((key, idx) => {
-                const val = data.seven_features[key];
-                return (
-                  <div
-                    key={key}
-                    className="p-3 rounded-[5px] border"
-                    style={{ background: 'var(--bg-subtle)', borderColor: 'var(--border-subtle)' }}
-                  >
-                    <div className="text-[11px] font-mono mb-1" style={{ color: 'var(--text-tertiary)' }}>
-                      #{idx + 1} {key}
-                    </div>
-                    <div className="text-sm font-mono font-semibold" style={{ color: 'var(--text-primary)' }}>
-                      {val !== undefined ? Number(val).toFixed(4) : '—'}
-                    </div>
+          {/* Isolation Forest Decision */}
+          <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs">
+            <div className="flex items-center gap-2 mb-3 pb-2 border-b border-kumo-hairline">
+              <Shield size={16} className="text-kumo-info" />
+              <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-default">Isolation Forest Evaluation</h3>
+            </div>
+            <dl className="space-y-2 text-xs">
+              <div className="flex justify-between"><dt className="text-kumo-subtle">Anomaly Score:</dt> <dd className="font-mono font-semibold text-kumo-default">{formatScore(data.anomaly_score)}</dd></div>
+              <div className="flex justify-between"><dt className="text-kumo-subtle">Tukey IQR Threshold:</dt> <dd className="font-mono text-kumo-default">{formatScore(data.threshold_used)}</dd></div>
+              <div className="flex justify-between"><dt className="text-kumo-subtle">Classification Decision:</dt> <dd className="font-semibold text-kumo-default">{data.decision}</dd></div>
+              <div className="flex justify-between"><dt className="text-kumo-subtle">Operational Action:</dt> <dd className="font-semibold text-kumo-default">{data.action}</dd></div>
+              <div className="flex justify-between"><dt className="text-kumo-subtle">Model Version:</dt> <dd className="font-mono text-kumo-default">{data.model_version}</dd></div>
+            </dl>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 2: Seven Features */}
+      {activeTab === 'features' && (
+        <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs">
+          <h3 className="font-semibold text-xs uppercase tracking-wider mb-4 text-kumo-default">
+            Canonical 7-Feature Vector (Locked Research Order)
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {SEVEN_FEATURE_KEYS.map((key, idx) => {
+              const val = data.seven_features[key];
+              return (
+                <div
+                  key={key}
+                  className="p-3 rounded-lg border border-kumo-hairline bg-kumo-recessed"
+                >
+                  <div className="text-[11px] font-mono mb-1 text-kumo-subtle">
+                    #{idx + 1} {key}
                   </div>
-                );
-              })}
-            </div>
+                  <div className="text-sm font-mono font-semibold text-kumo-default">
+                    {val !== undefined ? Number(val).toFixed(4) : '—'}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </TabsContent>
+        </div>
+      )}
 
-        {/* Tab 3: Provenance Trace */}
-        <TabsContent value="provenance">
-          {trace && (
-            <div className="p-5 rounded-[7px] border" style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)' }}>
-              <div className="flex items-center gap-2 mb-3 pb-2 border-b" style={{ borderColor: 'var(--border-subtle)' }}>
-                <Fingerprint size={16} style={{ color: 'var(--success)' }} />
-                <h3 className="font-semibold text-xs uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-                  Audit Provenance Trace ({trace.source_alert_ids.length} member alert IDs)
-                </h3>
-              </div>
-              <p className="text-xs mb-3" style={{ color: 'var(--text-secondary)' }}>
-                Click any raw alert ID below to inspect its individual cryptographic evidence and canonical payload.
-              </p>
-              <div className="flex flex-wrap gap-2 max-h-60 overflow-auto">
-                {trace.source_alert_ids.map((aid, i) => (
-                  <button
-                    key={aid}
-                    onClick={() => navigate(withRunId(`/meta-alerts/${id}/raw-alerts/${encodeURIComponent(aid)}`))}
-                    className="px-2 py-1 text-xs font-mono rounded-[4px] border hover:border-[var(--brand-orange)] transition-colors cursor-pointer"
-                    style={{ background: 'var(--bg-subtle)', borderColor: 'var(--border-default)', color: 'var(--text-primary)' }}
-                  >
-                    <span className="text-[10px] mr-1" style={{ color: 'var(--text-tertiary)' }}>#{i + 1}</span>
-                    {aid}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
+      {/* Tab 3: Provenance Trace */}
+      {activeTab === 'provenance' && trace && (
+        <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-base shadow-xs">
+          <div className="flex items-center gap-2 mb-3 pb-2 border-b border-kumo-hairline">
+            <Fingerprint size={16} className="text-kumo-success" />
+            <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-default">
+              Audit Provenance Trace ({trace.source_alert_ids.length} member alert IDs)
+            </h3>
+          </div>
+          <p className="text-xs mb-3 text-kumo-subtle">
+            Click any raw alert ID below to inspect its individual cryptographic evidence and canonical payload.
+          </p>
+          <div className="flex flex-wrap gap-2 max-h-60 overflow-auto">
+            {trace.source_alert_ids.map((aid, i) => (
+              <button
+                key={aid}
+                onClick={() => navigate(withRunId(`/meta-alerts/${id}/raw-alerts/${encodeURIComponent(aid)}`))}
+                className="px-2.5 py-1 text-xs font-mono rounded-md border border-kumo-hairline bg-kumo-recessed text-kumo-default hover:border-kumo-brand transition-colors cursor-pointer"
+              >
+                <span className="text-[10px] mr-1 text-kumo-subtle">#{i + 1}</span>
+                {aid}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

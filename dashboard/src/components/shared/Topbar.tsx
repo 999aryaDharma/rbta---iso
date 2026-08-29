@@ -1,6 +1,8 @@
 import React from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Activity, Search, HelpCircle, Sun, Moon, Laptop } from 'lucide-react';
+import { Button } from '@cloudflare/kumo/components/button';
+import { Badge } from '@cloudflare/kumo/components/badge';
+import { MagnifyingGlass, Question, Sun, Moon, Desktop } from '@phosphor-icons/react';
 import { usePollingQuery } from '@/hooks/usePolling';
 import { fetchSummary } from '@/api/dashboard';
 import { useTheme } from '@/context/ThemeContext';
@@ -42,80 +44,42 @@ export function Topbar() {
 
   return (
     <>
-      <header
-        className="h-14 flex items-center justify-between px-4 border-b shrink-0"
-        style={{ background: 'var(--bg-surface)', borderColor: 'var(--border-default)' }}
-      >
+      <header className="h-14 flex items-center justify-between px-4 border-b border-kumo-hairline bg-kumo-base shrink-0">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Activity size={18} style={{ color: 'var(--brand-orange)' }} />
-            <span className="font-semibold text-sm tracking-tight" style={{ color: 'var(--text-primary)' }}>
-              RBTA <span className="font-normal text-xs" style={{ color: 'var(--text-tertiary)' }}>Security Analytics</span>
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2 ml-4 text-xs">
+          <div className="flex items-center gap-2 text-xs">
             {runId ? (
-              <span
-                className="px-2 py-0.5 rounded-[4px] font-mono text-[11px] border font-medium"
-                style={{ background: 'var(--brand-orange-soft)', borderColor: 'var(--brand-orange)', color: 'var(--brand-orange)' }}
-              >
-                REPLAY: {runId.slice(0, 8)}
-              </span>
+              <Badge variant="warning">REPLAY: {runId.slice(0, 8)}</Badge>
             ) : (
-              <span
-                className="px-2 py-0.5 rounded-[4px] font-mono text-[11px] border font-medium"
-                style={{ background: 'var(--bg-subtle)', borderColor: 'var(--border-default)', color: 'var(--text-secondary)' }}
-              >
-                LIVE RUNTIME
-              </span>
+              <Badge variant="secondary">LIVE RUNTIME</Badge>
             )}
 
-            <span className="flex items-center gap-1 font-mono text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+            <span className="flex items-center gap-1 font-mono text-[11px] text-kumo-subtle">
               <span
-                className="inline-block w-2 h-2 rounded-full"
-                style={{ background: data?.system_status === 'READY' ? 'var(--success)' : 'var(--danger)' }}
+                className={`inline-block w-2 h-2 rounded-full ${
+                  data?.system_status === 'READY' ? 'bg-kumo-success' : 'bg-kumo-danger'
+                }`}
               />
               {data?.system_status === 'READY' ? 'READY' : 'NOT READY'}
             </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Quick Search Button */}
-          <button
-            onClick={() => setShowPalette(true)}
-            className="flex items-center gap-2 px-2.5 py-1 rounded-[5px] border text-xs cursor-pointer hover:bg-[var(--bg-subtle)]"
-            style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)', background: 'var(--bg-surface)' }}
-          >
-            <Search size={13} />
-            <span className="text-[11px]">Quick Search</span>
-            <kbd className="px-1.5 py-0.5 rounded border text-[10px] font-mono" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-subtle)' }}>
-              /
-            </kbd>
-          </button>
+        <div className="flex items-center gap-1.5">
+          <Button variant="ghost" size="sm" onClick={() => setShowPalette(true)}>
+            <MagnifyingGlass size={14} />
+            <span className="text-xs">Search</span>
+            <kbd className="ml-1 rounded border border-kumo-line bg-kumo-recessed px-1.5 py-0.5 text-[10px] font-mono">/</kbd>
+          </Button>
 
-          {/* Theme Switcher */}
-          <button
-            onClick={cycleTheme}
-            title={`Theme: ${theme} (click to toggle)`}
-            className="p-1.5 rounded-[5px] border text-xs cursor-pointer hover:bg-[var(--bg-subtle)]"
-            style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)', background: 'var(--bg-surface)' }}
-          >
-            {theme === 'light' && <Sun size={14} />}
-            {theme === 'dark' && <Moon size={14} />}
-            {theme === 'system' && <Laptop size={14} />}
-          </button>
+          <Button variant="ghost" size="sm" onClick={cycleTheme} aria-label={`Theme: ${theme}`}>
+            {theme === 'light' && <Sun size={16} />}
+            {theme === 'dark' && <Moon size={16} />}
+            {theme === 'system' && <Desktop size={16} />}
+          </Button>
 
-          {/* Keyboard Shortcuts Help */}
-          <button
-            onClick={() => setShowShortcuts(true)}
-            title="Keyboard Shortcuts (?)"
-            className="p-1.5 rounded-[5px] border text-xs cursor-pointer hover:bg-[var(--bg-subtle)]"
-            style={{ borderColor: 'var(--border-default)', color: 'var(--text-secondary)', background: 'var(--bg-surface)' }}
-          >
-            <HelpCircle size={14} />
-          </button>
+          <Button variant="ghost" size="sm" onClick={() => setShowShortcuts(true)} aria-label="Keyboard shortcuts">
+            <Question size={16} />
+          </Button>
         </div>
       </header>
 

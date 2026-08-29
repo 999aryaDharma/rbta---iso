@@ -3,8 +3,7 @@
 **Project:** RBTA + Isolation Forest untuk Mitigasi Alert Fatigue pada Log Keamanan SIEM Wazuh
 **Sprint:** S11 — Dashboard & Demonstration Layer
 **Status:** Design System / UI Source of Truth
-**Visual Direction:** Cloudflare-inspired operational control plane (Kumo visual language alignment, task-oriented navigation, high-density technical console)
-**Frontend Stack:** React + TypeScript + Vite + Tailwind CSS v4 + TanStack Table + shadcn/ui
+**Frontend Stack:** React + TypeScript + Vite + Tailwind CSS v4 + @cloudflare/kumo + @phosphor-icons/react + TanStack Table + TanStack Query
 
 ---
 
@@ -1247,8 +1246,8 @@ React
 TypeScript
 Vite
 Tailwind CSS v4
-shadcn/ui
-Lucide React
+@cloudflare/kumo
+@phosphor-icons/react
 React Router
 TanStack Query
 TanStack Table
@@ -1661,7 +1660,7 @@ Investigate Raw Alerts
 [ ] React + TypeScript + Vite structure
 [ ] Tailwind v4 tokens implemented
 [ ] Cloudflare-inspired light operational shell
-[ ] shadcn adapted to design tokens
+[ ] official @cloudflare/kumo components implemented
 [ ] Overview
 [ ] RBTA Engine
 [ ] MetaAlerts list

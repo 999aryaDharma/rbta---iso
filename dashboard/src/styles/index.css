@@ -1,77 +1,13 @@
-@import 'tailwindcss';
-
-:root {
-  --bg-app: #f7f7f8;
-  --bg-surface: #ffffff;
-  --bg-subtle: #f3f4f6;
-  --bg-muted: #eceef1;
-  --bg-hover: #f7f8fa;
-  --text-primary: #111827;
-  --text-secondary: #4b5563;
-  --text-tertiary: #6b7280;
-  --text-disabled: #9ca3af;
-  --text-inverse: #ffffff;
-  --border-default: #e2e5e9;
-  --border-strong: #cfd4da;
-  --border-subtle: #edf0f2;
-  --brand-orange: #f6821f;
-  --brand-orange-hover: #e76f0d;
-  --brand-orange-soft: #fff3e8;
-  --action-blue: #0055dc;
-  --action-blue-hover: #0047b8;
-  --action-blue-soft: #edf5ff;
-  --success: #16803c;
-  --success-soft: #eaf8ef;
-  --warning: #b86500;
-  --warning-soft: #fff7e6;
-  --danger: #c93434;
-  --danger-soft: #fff0f0;
-  --info: #2563eb;
-  --info-soft: #eff6ff;
-  --radius-xs: 3px;
-  --radius-sm: 5px;
-  --radius-md: 7px;
-  --radius-lg: 10px;
-}
-
-.dark {
-  --bg-app: #121316;
-  --bg-surface: #1a1c22;
-  --bg-subtle: #242730;
-  --bg-muted: #2d313c;
-  --bg-hover: #21242d;
-  --text-primary: #f3f4f6;
-  --text-secondary: #d1d5db;
-  --text-tertiary: #9ca3af;
-  --text-disabled: #6b7280;
-  --text-inverse: #111827;
-  --border-default: #2d3139;
-  --border-strong: #3b404b;
-  --border-subtle: #1f2229;
-  --brand-orange: #f6821f;
-  --brand-orange-hover: #ff9438;
-  --brand-orange-soft: #3d2310;
-  --action-blue: #3b82f6;
-  --action-blue-hover: #60a5fa;
-  --action-blue-soft: #14284d;
-  --success: #22c55e;
-  --success-soft: #13331f;
-  --warning: #f59e0b;
-  --warning-soft: #38280f;
-  --danger: #ef4444;
-  --danger-soft: #3b1717;
-  --info: #3b82f6;
-  --info-soft: #14284d;
-}
+@source "../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+@import "@cloudflare/kumo/styles/tailwind";
+@import "tailwindcss";
 
 body {
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: var(--bg-app);
-  color: var(--text-primary);
   margin: 0;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .font-mono {
-  font-family: 'JetBrains Mono', SFMono-Regular, Consolas, monospace;
+  font-family: 'JetBrains Mono', SFMono-Regular, Consolas, 'Liberation Mono', monospace;
 }

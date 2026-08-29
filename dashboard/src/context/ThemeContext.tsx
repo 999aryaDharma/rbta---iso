@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 
 type Theme = 'light' | 'dark' | 'system';
 
@@ -12,28 +12,41 @@ const ThemeContext = createContext<ThemeContextValue>({
   setTheme: () => {},
 });
 
+function resolveMode(theme: Theme): 'light' | 'dark' {
+  if (theme === 'system') {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return theme;
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>(() => {
-    return (localStorage.getItem('rbta.theme') as Theme) || 'system';
+    const stored = localStorage.getItem('theme') as Theme | null;
+    return stored && ['light', 'dark', 'system'].includes(stored) ? stored : 'system';
   });
 
-  const setTheme = (t: Theme) => {
-    localStorage.setItem('rbta.theme', t);
+  const applyMode = useCallback((t: Theme) => {
+    document.documentElement.setAttribute('data-mode', resolveMode(t));
+  }, []);
+
+  const setTheme = useCallback((t: Theme) => {
+    localStorage.setItem('theme', t);
     setThemeState(t);
-  };
+    applyMode(t);
+  }, [applyMode]);
 
   useEffect(() => {
-    const root = document.documentElement;
-    const isDark =
-      theme === 'dark' ||
-      (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    applyMode(theme);
 
-    if (isDark) {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-  }, [theme]);
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = () => {
+      if (theme === 'system') {
+        applyMode('system');
+      }
+    };
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, [theme, applyMode]);
 
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
