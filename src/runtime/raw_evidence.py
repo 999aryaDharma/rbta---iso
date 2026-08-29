@@ -137,6 +137,10 @@ class RawAlertEvidenceStore:
         mitre_techs = meta.get("mitre_techniques", ())
         loc = meta.get("location", "")
         dec = meta.get("decoder", "")
+        if dec is None:
+            dec = ""
+        elif not isinstance(dec, str):
+            dec = deterministic_json_dumps(dec)
         flog = meta.get("full_log", "")
 
         # Unify source index / doc id

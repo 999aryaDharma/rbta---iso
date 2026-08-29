@@ -199,3 +199,29 @@ def test_count_by_hour_valid_and_corrupt_timestamp(store: RawAlertEvidenceStore)
             start_time=base_t - timedelta(hours=1),
             end_time=base_t + timedelta(hours=1),
         )
+
+
+def test_store_decoder_object_from_canonical_metadata(store: RawAlertEvidenceStore):
+    """Wazuh decoder objects must be safely persisted through immutable metadata."""
+    alert = make_alert(
+        "wazuh-decoder-object",
+        metadata={
+            "decoder": {
+                "parent": "kernel",
+                "name": "kernel",
+            }
+        },
+    )
+
+    inserted = store.store(alert, source_mode="REPLAY")
+
+    assert inserted is True
+
+    record = store.get("wazuh-decoder-object", redact=False)
+    assert record is not None
+
+    import json
+    assert json.loads(record["decoder"]) == {
+        "parent": "kernel",
+        "name": "kernel",
+    }
