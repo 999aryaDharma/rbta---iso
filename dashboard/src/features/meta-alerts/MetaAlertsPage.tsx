@@ -94,89 +94,97 @@ export function MetaAlertsPage() {
   return (
     <>
       <PageHeader
-        title="MetaAlerts Investigation Table"
+        breadcrumbs={['Security Analytics', 'MetaAlerts']}
+        title="MetaAlerts Investigation Explorer"
         description="Aggregated security alert clusters scored by Isolation Forest with deterministic Tukey IQR thresholding"
       />
 
-      <div className="px-6 py-4 space-y-0">
-        {/* Filter toolbar */}
-        <div className="flex flex-wrap items-center gap-3 pb-3 border-b border-kumo-hairline">
-          <div className="flex-1 min-w-[200px] max-w-sm">
-            <InputGroup>
-              <InputGroup.Addon align="start"><MagnifyingGlass size={14} /></InputGroup.Addon>
-              <InputGroup.Input
-                placeholder="Search Meta ID, Agent, Rule Group..."
-                value={localSearch}
-                onChange={(e) => setLocalSearch(e.target.value)}
-              />
-            </InputGroup>
+      <div className="px-6 py-6 lg:px-8 space-y-4">
+        {/* Filter toolbar card */}
+        <div className="p-4 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
+            <div className="w-full sm:w-72">
+              <InputGroup>
+                <InputGroup.Addon align="start"><MagnifyingGlass size={14} className="text-kumo-subtle" /></InputGroup.Addon>
+                <InputGroup.Input
+                  placeholder="Filter Meta ID, Agent, Rule Group..."
+                  value={localSearch}
+                  onChange={(e) => setLocalSearch(e.target.value)}
+                />
+              </InputGroup>
+            </div>
+
+            <Select
+              size="sm"
+              value={action || ''}
+              onValueChange={(val) => setFilterParam('action', val as string)}
+              placeholder="All Actions"
+            >
+              <Select.Option value="">All Actions</Select.Option>
+              <Select.Option value="ESCALATE">ESCALATE</Select.Option>
+              <Select.Option value="DAILY_DIGEST">DAILY_DIGEST</Select.Option>
+              <Select.Option value="SUPPRESS">SUPPRESS</Select.Option>
+            </Select>
+
+            <Select
+              size="sm"
+              value={decision || ''}
+              onValueChange={(val) => setFilterParam('decision', val as string)}
+              placeholder="All Decisions"
+            >
+              <Select.Option value="">All Decisions</Select.Option>
+              <Select.Option value="CRITICAL">CRITICAL</Select.Option>
+              <Select.Option value="SUSPICIOUS">SUSPICIOUS</Select.Option>
+              <Select.Option value="CONTEXTUAL_ANOMALY">CONTEXTUAL_ANOMALY</Select.Option>
+              <Select.Option value="NOISE_HIGH">NOISE_HIGH</Select.Option>
+              <Select.Option value="NOISE">NOISE</Select.Option>
+            </Select>
           </div>
 
-          <Select
-            size="sm"
-            value={action || ''}
-            onValueChange={(val) => setFilterParam('action', val as string)}
-            placeholder="All Actions"
-          >
-            <Select.Option value="">All Actions</Select.Option>
-            <Select.Option value="ESCALATE">ESCALATE</Select.Option>
-            <Select.Option value="DAILY_DIGEST">DAILY_DIGEST</Select.Option>
-            <Select.Option value="SUPPRESS">SUPPRESS</Select.Option>
-          </Select>
-
-          <Select
-            size="sm"
-            value={decision || ''}
-            onValueChange={(val) => setFilterParam('decision', val as string)}
-            placeholder="All Decisions"
-          >
-            <Select.Option value="">All Decisions</Select.Option>
-            <Select.Option value="CRITICAL">CRITICAL</Select.Option>
-            <Select.Option value="SUSPICIOUS">SUSPICIOUS</Select.Option>
-            <Select.Option value="CONTEXTUAL_ANOMALY">CONTEXTUAL_ANOMALY</Select.Option>
-            <Select.Option value="NOISE_HIGH">NOISE_HIGH</Select.Option>
-            <Select.Option value="NOISE">NOISE</Select.Option>
-          </Select>
-
-          {isFetching && <span className="text-xs text-kumo-subtle">Refreshing...</span>}
+          <div className="flex items-center gap-2 text-xs text-kumo-subtle">
+            {isFetching && <span className="animate-pulse">Refreshing...</span>}
+            <span className="font-mono bg-kumo-recessed px-2 py-0.5 rounded border border-kumo-hairline">
+              Total: {data?.total ?? 0}
+            </span>
+          </div>
         </div>
 
-        {/* Table */}
-        <div className={`rounded-lg border border-kumo-hairline bg-kumo-base overflow-hidden transition-opacity ${isPlaceholderData ? 'opacity-70' : ''}`}>
+        {/* Table container */}
+        <div className={`rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden transition-opacity ${isPlaceholderData ? 'opacity-70' : ''}`}>
           <Table>
             <Table.Header>
-              <Table.Row>
+              <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
                 <Table.Head>Meta ID</Table.Head>
                 <Table.Head>End Time</Table.Head>
-                <Table.Head>Agent</Table.Head>
-                <Table.Head>Primary Group</Table.Head>
-                <Table.Head className="text-right">Raw Count</Table.Head>
+                <Table.Head>Agent / Host</Table.Head>
+                <Table.Head>Primary Rule Group</Table.Head>
+                <Table.Head className="text-right">Alert Count</Table.Head>
                 <Table.Head className="text-right">Max Sev</Table.Head>
-                <Table.Head className="text-right">Score</Table.Head>
-                <Table.Head>Decision</Table.Head>
+                <Table.Head className="text-right">Anomaly Score</Table.Head>
+                <Table.Head>SOC Decision</Table.Head>
               </Table.Row>
             </Table.Header>
             <Table.Body>
               {data?.items.map((m) => (
                 <Table.Row
                   key={m.meta_id}
-                  className="cursor-pointer hover:bg-kumo-tint"
+                  className="cursor-pointer hover:bg-kumo-recessed/50 transition-colors text-xs"
                   onClick={() => navigate(withRunId(`/meta-alerts/${m.meta_id}`))}
                 >
-                  <Table.Cell className="font-mono text-xs font-semibold">#{m.meta_id}</Table.Cell>
-                  <Table.Cell className="text-xs">{formatDateTime(m.end_time)}</Table.Cell>
-                  <Table.Cell className="text-xs">{m.agent_name} ({m.agent_id})</Table.Cell>
-                  <Table.Cell className="text-xs font-mono">{m.rule_group_primary}</Table.Cell>
-                  <Table.Cell className="text-xs text-right font-mono font-semibold">{m.alert_count}</Table.Cell>
-                  <Table.Cell className="text-xs text-right font-mono">{m.max_severity}/15</Table.Cell>
-                  <Table.Cell className="text-xs text-right font-mono">{formatScore(m.anomaly_score)}</Table.Cell>
+                  <Table.Cell className="font-mono font-semibold text-kumo-strong">#{m.meta_id}</Table.Cell>
+                  <Table.Cell className="text-kumo-subtle">{formatDateTime(m.end_time)}</Table.Cell>
+                  <Table.Cell className="font-medium text-kumo-default">{m.agent_name} <span className="text-kumo-subtle text-[11px]">({m.agent_id})</span></Table.Cell>
+                  <Table.Cell className="font-mono text-kumo-default">{m.rule_group_primary}</Table.Cell>
+                  <Table.Cell className="text-right font-mono font-bold text-kumo-strong">{m.alert_count}</Table.Cell>
+                  <Table.Cell className="text-right font-mono text-kumo-default">{m.max_severity}/15</Table.Cell>
+                  <Table.Cell className="text-right font-mono text-kumo-default">{formatScore(m.anomaly_score)}</Table.Cell>
                   <Table.Cell><DecisionBadge decision={m.decision} action={m.action} /></Table.Cell>
                 </Table.Row>
               ))}
               {data && data.items.length === 0 && (
                 <Table.Row>
-                  <Table.Cell colSpan={8} className="p-8 text-center text-xs text-kumo-subtle">
-                    No MetaAlerts match the specified filters.
+                  <Table.Cell colSpan={8} className="py-12 text-center text-xs text-kumo-subtle">
+                    No MetaAlerts match the specified filter criteria.
                   </Table.Cell>
                 </Table.Row>
               )}
@@ -184,7 +192,7 @@ export function MetaAlertsPage() {
           </Table>
 
           {/* Pagination */}
-          <div className="px-4 py-2 border-t border-kumo-hairline">
+          <div className="px-5 py-3 border-t border-kumo-hairline bg-kumo-recessed/20">
             <Pagination
               page={page}
               setPage={(p) => {

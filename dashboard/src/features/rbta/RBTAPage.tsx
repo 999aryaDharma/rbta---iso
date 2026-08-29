@@ -22,110 +22,121 @@ export function RBTAPage() {
   return (
     <>
       <PageHeader
-        title="RBTA Engine Telemetry"
-        description="Real-time agent temporal state, dynamic aggregation windows, and active open buckets"
+        breadcrumbs={['Security Analytics', 'RBTA Engine']}
+        title="RBTA Aggregation Engine Telemetry"
+        description="Real-time agent temporal state tracking, dynamic window adaptation (Δt), and active in-memory buckets"
       />
 
-      <div className="px-6 py-4 space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <MetricCard label="Active Agents" value={formatNumber(activeAgents)} />
-          <MetricCard label="Warmed-up Agents" value={formatNumber(warmedUp)} />
-          <MetricCard label="Seen Alerts" value={formatNumber(seenAlerts)} />
-          <MetricCard label="Open Active Buckets" value={formatNumber(activeBuckets)} />
+      <div className="px-6 py-6 lg:px-8 space-y-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <MetricCard label="Active Agents" value={formatNumber(activeAgents)} sub="Monitored host agents" />
+          <MetricCard label="Warmed-up Agents" value={formatNumber(warmedUp)} sub="Baseline calibrated" />
+          <MetricCard label="Seen Alerts" value={formatNumber(seenAlerts)} sub="Total incoming raw events" />
+          <MetricCard label="Open Active Buckets" value={formatNumber(activeBuckets)} sub="In-flight aggregation windows" />
         </div>
 
-        <div>
-          <h2 className="text-xs font-semibold uppercase tracking-wider mb-2 text-kumo-default">
-            Agent Temporal States ({agents.length})
-          </h2>
-          <div className="rounded-lg border border-kumo-hairline bg-kumo-base overflow-hidden">
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head>Agent ID</Table.Head>
-                  <Table.Head>Name</Table.Head>
-                  <Table.Head className="text-right">Events</Table.Head>
-                  <Table.Head className="text-center">Warmup</Table.Head>
-                  <Table.Head className="text-right">Baseline Gap</Table.Head>
-                  <Table.Head className="text-right">EMA Gap</Table.Head>
-                  <Table.Head className="text-right">Base Δt</Table.Head>
-                  <Table.Head className="text-right">Current Δt</Table.Head>
-                  <Table.Head className="text-right">Buckets</Table.Head>
-                  <Table.Head className="text-center">Status</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {agents.map((a) => (
-                  <Table.Row key={a.agent_id} className="hover:bg-kumo-tint">
-                    <Table.Cell className="font-mono text-xs font-semibold">{a.agent_id}</Table.Cell>
-                    <Table.Cell className="text-xs">{a.agent_name}</Table.Cell>
-                    <Table.Cell className="text-xs text-right font-mono">{formatNumber(a.event_count)}</Table.Cell>
-                    <Table.Cell className="text-xs text-center font-mono">
-                      {a.warmup_progress}/{a.warmup_required}
-                    </Table.Cell>
-                    <Table.Cell className="text-xs text-right font-mono">{formatSeconds(a.baseline_gap_seconds)}</Table.Cell>
-                    <Table.Cell className="text-xs text-right font-mono">{formatSeconds(a.ema_gap_seconds)}</Table.Cell>
-                    <Table.Cell className="text-xs text-right font-mono">{formatSeconds(a.base_delta_t_seconds)}</Table.Cell>
-                    <Table.Cell className="text-xs text-right font-mono font-semibold text-kumo-brand">
-                      {formatSeconds(a.current_delta_t_seconds)}
-                    </Table.Cell>
-                    <Table.Cell className="text-xs text-right font-mono">{a.active_bucket_count}</Table.Cell>
-                    <Table.Cell className="text-xs text-center">
-                      <Badge variant={a.is_warmed_up ? 'success' : 'warning'}>
-                        {a.status}
-                      </Badge>
-                    </Table.Cell>
-                  </Table.Row>
-                ))}
-                {agents.length === 0 && (
-                  <Table.Row>
-                    <Table.Cell colSpan={10} className="p-6 text-center text-xs text-kumo-subtle">
-                      No agent states active yet.
-                    </Table.Cell>
-                  </Table.Row>
-                )}
-              </Table.Body>
-            </Table>
+        <div className="rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden">
+          <div className="px-5 py-4 border-b border-kumo-hairline flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-kumo-default">
+                Agent Temporal States ({agents.length})
+              </h2>
+              <p className="text-xs text-kumo-subtle mt-0.5">
+                Dynamic inter-arrival timing, exponential moving averages, and adaptive Δt windows
+              </p>
+            </div>
           </div>
+          <Table>
+            <Table.Header>
+              <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
+                <Table.Head>Agent ID</Table.Head>
+                <Table.Head>Name</Table.Head>
+                <Table.Head className="text-right">Events</Table.Head>
+                <Table.Head className="text-center">Warmup</Table.Head>
+                <Table.Head className="text-right">Baseline Gap</Table.Head>
+                <Table.Head className="text-right">EMA Gap</Table.Head>
+                <Table.Head className="text-right">Base Δt</Table.Head>
+                <Table.Head className="text-right">Current Δt</Table.Head>
+                <Table.Head className="text-right">Buckets</Table.Head>
+                <Table.Head className="text-center">Status</Table.Head>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {agents.map((a) => (
+                <Table.Row key={a.agent_id} className="hover:bg-kumo-recessed/50 transition-colors text-xs">
+                  <Table.Cell className="font-mono font-semibold text-kumo-strong">{a.agent_id}</Table.Cell>
+                  <Table.Cell className="font-medium text-kumo-default">{a.agent_name}</Table.Cell>
+                  <Table.Cell className="text-right font-mono text-kumo-default">{formatNumber(a.event_count)}</Table.Cell>
+                  <Table.Cell className="text-center font-mono text-kumo-subtle">
+                    {a.warmup_progress}/{a.warmup_required}
+                  </Table.Cell>
+                  <Table.Cell className="text-right font-mono text-kumo-subtle">{formatSeconds(a.baseline_gap_seconds)}</Table.Cell>
+                  <Table.Cell className="text-right font-mono text-kumo-subtle">{formatSeconds(a.ema_gap_seconds)}</Table.Cell>
+                  <Table.Cell className="text-right font-mono text-kumo-subtle">{formatSeconds(a.base_delta_t_seconds)}</Table.Cell>
+                  <Table.Cell className="text-right font-mono font-bold text-[#F6821F]">
+                    {formatSeconds(a.current_delta_t_seconds)}
+                  </Table.Cell>
+                  <Table.Cell className="text-right font-mono font-semibold text-kumo-strong">{a.active_bucket_count}</Table.Cell>
+                  <Table.Cell className="text-center">
+                    <Badge variant={a.is_warmed_up ? 'success' : 'warning'} className="text-[11px]">
+                      {a.status}
+                    </Badge>
+                  </Table.Cell>
+                </Table.Row>
+              ))}
+              {agents.length === 0 && (
+                <Table.Row>
+                  <Table.Cell colSpan={10} className="py-12 text-center text-xs text-kumo-subtle">
+                    No agent states active yet.
+                  </Table.Cell>
+                </Table.Row>
+              )}
+            </Table.Body>
+          </Table>
         </div>
 
-        <div>
-          <h2 className="text-xs font-semibold uppercase tracking-wider mb-2 text-kumo-default">
-            Active Aggregation Buckets ({buckets.length})
-          </h2>
-          <div className="rounded-lg border border-kumo-hairline bg-kumo-base overflow-hidden">
-            <Table>
-              <Table.Header>
-                <Table.Row>
-                  <Table.Head>Agent</Table.Head>
-                  <Table.Head>Rule Group</Table.Head>
-                  <Table.Head>Opened At</Table.Head>
-                  <Table.Head>Last Alert</Table.Head>
-                  <Table.Head className="text-right">Count</Table.Head>
-                  <Table.Head className="text-right">Max Sev</Table.Head>
-                </Table.Row>
-              </Table.Header>
-              <Table.Body>
-                {buckets.map((b, idx) => (
-                  <Table.Row key={`${b.agent_id}-${b.rule_group_primary}-${idx}`} className="hover:bg-kumo-tint">
-                    <Table.Cell className="text-xs font-mono">{b.agent_name ? `${b.agent_name} (${b.agent_id})` : b.agent_id}</Table.Cell>
-                    <Table.Cell className="text-xs font-mono">{b.rule_group_primary}</Table.Cell>
-                    <Table.Cell className="text-xs">{formatDateTime(b.start_time)}</Table.Cell>
-                    <Table.Cell className="text-xs">{formatDateTime(b.end_time)}</Table.Cell>
-                    <Table.Cell className="text-xs text-right font-mono font-semibold">{b.alert_count}</Table.Cell>
-                    <Table.Cell className="text-xs text-right font-mono">{b.max_severity}</Table.Cell>
-                  </Table.Row>
-                ))}
-                {buckets.length === 0 && (
-                  <Table.Row>
-                    <Table.Cell colSpan={6} className="p-6 text-center text-xs text-kumo-subtle">
-                      No open buckets currently active in runtime memory.
-                    </Table.Cell>
-                  </Table.Row>
-                )}
-              </Table.Body>
-            </Table>
+        <div className="rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden">
+          <div className="px-5 py-4 border-b border-kumo-hairline flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-kumo-default">
+                Active In-Flight Aggregation Buckets ({buckets.length})
+              </h2>
+              <p className="text-xs text-kumo-subtle mt-0.5">
+                Open temporal buffers awaiting expiration timeout before Isolation Forest evaluation
+              </p>
+            </div>
           </div>
+          <Table>
+            <Table.Header>
+              <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
+                <Table.Head>Agent / Host</Table.Head>
+                <Table.Head>Primary Rule Group</Table.Head>
+                <Table.Head>Window Opened At</Table.Head>
+                <Table.Head>Last Alert Time</Table.Head>
+                <Table.Head className="text-right">Accumulated Events</Table.Head>
+                <Table.Head className="text-right">Max Severity</Table.Head>
+              </Table.Row>
+            </Table.Header>
+            <Table.Body>
+              {buckets.map((b, idx) => (
+                <Table.Row key={`${b.agent_id}-${b.rule_group_primary}-${idx}`} className="hover:bg-kumo-recessed/50 transition-colors text-xs">
+                  <Table.Cell className="font-mono text-kumo-default">{b.agent_name ? `${b.agent_name} (${b.agent_id})` : b.agent_id}</Table.Cell>
+                  <Table.Cell className="font-mono font-medium text-kumo-strong">{b.rule_group_primary}</Table.Cell>
+                  <Table.Cell className="text-kumo-subtle">{formatDateTime(b.start_time)}</Table.Cell>
+                  <Table.Cell className="text-kumo-subtle">{formatDateTime(b.end_time)}</Table.Cell>
+                  <Table.Cell className="text-right font-mono font-bold text-kumo-strong">{b.alert_count}</Table.Cell>
+                  <Table.Cell className="text-right font-mono font-semibold text-kumo-default">{b.max_severity} / 15</Table.Cell>
+                </Table.Row>
+              ))}
+              {buckets.length === 0 && (
+                <Table.Row>
+                  <Table.Cell colSpan={6} className="py-12 text-center text-xs text-kumo-subtle">
+                    No open buckets currently active in runtime memory.
+                  </Table.Cell>
+                </Table.Row>
+              )}
+            </Table.Body>
+          </Table>
         </div>
       </div>
     </>

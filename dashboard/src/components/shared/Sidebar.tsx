@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react';
 import { NavLink, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel,
-  SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem,
+  SidebarMenu, SidebarMenuButton, SidebarMenuItem,
   SidebarRail,
 } from '@cloudflare/kumo/components/sidebar';
 import {
@@ -85,24 +85,33 @@ export function AppSidebar() {
   }, [withRunId, navigate]);
 
   return (
-    <Sidebar className="border-r border-kumo-hairline">
-      <SidebarHeader className="h-12 flex items-center px-4 border-b border-kumo-hairline">
-        <span className="text-sm font-semibold text-kumo-default tracking-tight">
-          RBTA <span className="text-kumo-subtle font-normal text-xs">Security Analytics</span>
-        </span>
-      </SidebarHeader>
-      <SidebarContent>
+    <Sidebar className="border-r border-kumo-hairline bg-kumo-canvas select-none shrink-0 w-60">
+      <SidebarContent className="py-2">
         {navGroups.map((group) => (
-          <SidebarGroup key={group.label}>
-            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
-            <SidebarMenu>
+          <SidebarGroup key={group.label} className="px-2 py-1">
+            <SidebarGroupLabel className="text-[10px] font-semibold text-kumo-subtle tracking-wider uppercase px-2 py-1">
+              {group.label}
+            </SidebarGroupLabel>
+            <SidebarMenu className="space-y-0.5 mt-0.5">
               {group.items.map((item) => (
                 <SidebarMenuItem key={item.to}>
-                  <NavLink to={withRunId(item.to)}>
+                  <NavLink to={withRunId(item.to)} className="block">
                     {({ isActive }) => (
-                      <SidebarMenuButton active={isActive} tooltip={item.label}>
-                        <item.icon size={16} weight={isActive ? 'fill' : 'regular'} />
-                        <span>{item.label}</span>
+                      <SidebarMenuButton
+                        active={isActive}
+                        tooltip={item.label}
+                        className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs transition-colors ${
+                          isActive
+                            ? 'bg-kumo-recessed text-kumo-default font-semibold shadow-2xs border-l-2 border-[#F6821F]'
+                            : 'text-kumo-default hover:bg-kumo-recessed/70 hover:text-kumo-strong'
+                        }`}
+                      >
+                        <item.icon
+                          size={16}
+                          weight={isActive ? 'fill' : 'regular'}
+                          className={isActive ? 'text-[#F6821F]' : 'text-kumo-subtle'}
+                        />
+                        <span className="truncate">{item.label}</span>
                       </SidebarMenuButton>
                     )}
                   </NavLink>
@@ -112,6 +121,15 @@ export function AppSidebar() {
           </SidebarGroup>
         ))}
       </SidebarContent>
+
+      {/* Subtle Sidebar Footer */}
+      <div className="p-3 border-t border-kumo-hairline bg-kumo-canvas/80 text-[11px] text-kumo-subtle flex items-center justify-between">
+        <span className="font-mono">RBTA Engine</span>
+        <span className="text-[10px] bg-kumo-recessed px-1.5 py-0.5 rounded border border-kumo-hairline font-mono">
+          v1.0.0
+        </span>
+      </div>
+
       <SidebarRail />
     </Sidebar>
   );

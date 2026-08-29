@@ -33,69 +33,71 @@ export function OverviewPage() {
   return (
     <>
       <PageHeader
+        breadcrumbs={['Security Analytics', 'Overview']}
         title="Security Analytics Overview"
-        description="Continuous Rule-Based Temporal Aggregation and Isolation Forest Anomaly Detection"
+        description="Continuous Rule-Based Temporal Aggregation (RBTA) and Isolation Forest Anomaly Detection Engine"
       />
 
-      <div className="px-6 py-4 space-y-4">
-        {/* Needs Investigation Panel */}
+      <div className="px-6 py-6 lg:px-8 space-y-6">
+        {/* Needs Investigation Banner */}
         {needsInvestigation.length > 0 && (
-          <div className="p-4 rounded-lg border border-kumo-hairline bg-kumo-base">
-            <div className="flex items-center justify-between pb-3 mb-3 border-b border-kumo-hairline">
-              <div className="flex items-center gap-2">
-                <WarningCircle size={18} className="text-kumo-danger" weight="fill" />
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-kumo-default">
+          <div className="p-5 rounded-lg border border-rose-500/30 border-l-4 border-l-rose-500 bg-rose-500/5 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-rose-500/20">
+              <div className="flex items-center gap-2.5">
+                <WarningCircle size={20} className="text-rose-600 dark:text-rose-400 shrink-0" weight="fill" />
+                <h2 className="text-xs font-semibold uppercase tracking-wider text-kumo-strong">
                   Needs Investigation ({needsInvestigation.length} Active Escalations)
                 </h2>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
+                className="text-xs text-rose-600 dark:text-rose-400 hover:text-rose-700"
                 onClick={() => navigate(withRunId('/meta-alerts?action=ESCALATE'))}
               >
-                View all escalated alerts <ArrowRight size={14} />
+                View all escalated incidents <ArrowRight size={14} className="ml-1" />
               </Button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {needsInvestigation.slice(0, 3).map((m) => (
                 <div
                   key={m.meta_id}
                   onClick={() => navigate(withRunId(`/meta-alerts/${m.meta_id}`))}
-                  className="p-4 rounded-lg border border-kumo-hairline bg-kumo-recessed cursor-pointer transition-all hover:border-kumo-brand"
+                  className="p-4 rounded-lg border border-kumo-hairline bg-kumo-canvas cursor-pointer transition-all hover:border-[#F6821F] hover:shadow-xs"
                 >
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-mono text-xs font-semibold text-kumo-default">#{m.meta_id}</span>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="font-mono text-xs font-bold text-kumo-strong">#{m.meta_id}</span>
                     <DecisionBadge decision={m.decision} action={m.action} />
                   </div>
-                  <div className="space-y-1 text-xs mb-3 text-kumo-subtle">
-                    <div className="flex justify-between">
+                  <div className="space-y-1.5 text-xs mb-3.5 text-kumo-subtle">
+                    <div className="flex justify-between items-center">
                       <span>Agent:</span>
-                      <span className="text-kumo-default">{m.agent_name} ({m.agent_id})</span>
+                      <span className="text-kumo-default font-medium truncate max-w-[160px]">{m.agent_name} ({m.agent_id})</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Group:</span>
-                      <span className="font-mono text-kumo-default">{m.rule_group_primary}</span>
+                    <div className="flex justify-between items-center">
+                      <span>Rule Group:</span>
+                      <span className="font-mono text-kumo-default bg-kumo-recessed px-1.5 py-0.5 rounded text-[11px]">{m.rule_group_primary}</span>
                     </div>
-                    <div className="flex justify-between">
+                    <div className="flex justify-between items-center">
                       <span>Score / Thresh:</span>
-                      <span className="font-mono text-kumo-default">{m.anomaly_score.toFixed(3)} / {m.threshold_used.toFixed(3)}</span>
+                      <span className="font-mono text-kumo-strong font-semibold">{m.anomaly_score.toFixed(3)} / {m.threshold_used.toFixed(3)}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span>Member Alerts:</span>
-                      <span className="font-mono font-semibold text-kumo-default">{m.alert_count}</span>
+                    <div className="flex justify-between items-center">
+                      <span>Aggregated Alerts:</span>
+                      <span className="font-mono font-bold text-kumo-strong">{m.alert_count}</span>
                     </div>
                   </div>
                   <Button
                     variant="primary"
                     size="sm"
-                    className="w-full justify-center"
+                    className="w-full justify-center text-xs"
                     onClick={(e) => {
                       e.stopPropagation();
                       navigate(withRunId(`/meta-alerts/${m.meta_id}`));
                     }}
                   >
-                    Investigate {m.alert_count} Raw Alerts <ArrowRight size={14} />
+                    Investigate {m.alert_count} Raw Alerts <ArrowRight size={13} className="ml-1" />
                   </Button>
                 </div>
               ))}
@@ -104,9 +106,17 @@ export function OverviewPage() {
         )}
 
         {/* KPI Cards Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <MetricCard label="Raw Ingested Alerts" value={summary ? formatNumber(summary.raw_alert_count) : '—'} />
-          <MetricCard label="Finalized MetaAlerts" value={summary ? formatNumber(summary.meta_alert_count) : '—'} />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <MetricCard
+            label="Raw Ingested Alerts"
+            value={summary ? formatNumber(summary.raw_alert_count) : '—'}
+            sub="Incoming Wazuh events"
+          />
+          <MetricCard
+            label="Finalized MetaAlerts"
+            value={summary ? formatNumber(summary.meta_alert_count) : '—'}
+            sub="Clustered temporal episodes"
+          />
           <MetricCard
             label="Alert Reduction Rate"
             value={
@@ -114,90 +124,117 @@ export function OverviewPage() {
                 ? `${summary.alert_reduction_rate_percent}%`
                 : '—'
             }
+            sub="SOC noise elimination"
           />
           <div
             onClick={() => navigate(withRunId('/meta-alerts?action=ESCALATE'))}
-            className="cursor-pointer transition-opacity hover:opacity-90"
+            className="cursor-pointer transition-opacity hover:opacity-95"
           >
             <MetricCard
               label="Escalated Incidents"
               value={summary ? formatNumber(summary.escalate_count) : '—'}
+              sub="High-priority anomalies"
             />
           </div>
-          <MetricCard label="Contextual Anomalies" value={summary ? formatNumber(summary.anomalies_detected) : '—'} />
+          <MetricCard
+            label="Contextual Anomalies"
+            value={summary ? formatNumber(summary.anomalies_detected) : '—'}
+            sub="Outliers detected by IF"
+          />
           <div
             onClick={() => navigate(withRunId('/rbta'))}
-            className="cursor-pointer transition-opacity hover:opacity-90"
+            className="cursor-pointer transition-opacity hover:opacity-95"
           >
             <MetricCard
               label="Active Open Buckets"
               value={summary ? formatNumber(summary.active_buckets_count) : '—'}
+              sub="Live temporal windows"
             />
           </div>
-          <MetricCard label="Digest Queue" value={summary ? formatNumber(summary.digest_count) : '—'} />
-          <MetricCard label="Suppressed Noise" value={summary ? formatNumber(summary.suppress_count) : '—'} />
+          <MetricCard
+            label="Digest Queue"
+            value={summary ? formatNumber(summary.digest_count) : '—'}
+            sub="Low-frequency routine batches"
+          />
+          <MetricCard
+            label="Suppressed Noise"
+            value={summary ? formatNumber(summary.suppress_count) : '—'}
+            sub="Benign repetitive patterns"
+          />
         </div>
 
-        {/* Timeseries Chart */}
+        {/* Timeseries Ingestion Chart */}
         {timeseries && Array.isArray(timeseries) && timeseries.length > 0 && (
-          <div className="p-4 rounded-lg border border-kumo-hairline bg-kumo-base">
-            <h2 className="text-sm font-semibold mb-4 text-kumo-default">
-              Raw Alerts vs MetaAlerts Ingestion Timeline
-            </h2>
+          <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-kumo-hairline">
+              <div>
+                <h2 className="text-sm font-semibold text-kumo-default">
+                  Ingestion & Aggregation Velocity
+                </h2>
+                <p className="text-xs text-kumo-subtle mt-0.5">
+                  Raw Wazuh alerts stream vs finalized MetaAlerts over time
+                </p>
+              </div>
+            </div>
             <ResponsiveContainer width="100%" height={260}>
               <AreaChart data={timeseries}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-                <XAxis dataKey="timestamp" tick={{ fontSize: 10 }} />
-                <YAxis tick={{ fontSize: 10 }} />
+                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                <XAxis dataKey="timestamp" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
-                <Legend />
-                <Area type="monotone" dataKey="raw_alerts" stroke="#f6821f" fill="#f6821f20" name="Raw Alerts" />
-                <Area type="monotone" dataKey="meta_alerts" stroke="#0055dc" fill="#0055dc20" name="MetaAlerts" />
+                <Legend wrapperStyle={{ fontSize: '12px' }} />
+                <Area type="monotone" dataKey="raw_alerts" stroke="#F6821F" fill="#F6821F20" name="Raw Alerts" />
+                <Area type="monotone" dataKey="meta_alerts" stroke="#0055DC" fill="#0055DC20" name="MetaAlerts" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
         )}
 
-        {/* Latest MetaAlerts Table */}
+        {/* Recent MetaAlerts Table */}
         {recentMetas && recentMetas.items.length > 0 && (
-          <div className="rounded-lg border border-kumo-hairline bg-kumo-base overflow-hidden">
-            <div className="px-5 py-3 border-b border-kumo-hairline flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-kumo-default">
-                Recent MetaAlert Events
-              </h2>
+          <div className="rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden">
+            <div className="px-5 py-4 border-b border-kumo-hairline flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-kumo-default">
+                  Recent MetaAlert Episodes
+                </h2>
+                <p className="text-xs text-kumo-subtle mt-0.5">
+                  Latest aggregated alert groups evaluated by Isolation Forest
+                </p>
+              </div>
               <Button
-                variant="ghost"
+                variant="secondary"
                 size="sm"
                 onClick={() => navigate(withRunId('/meta-alerts'))}
               >
-                View all <ArrowRight size={14} />
+                View all MetaAlerts <ArrowRight size={13} className="ml-1" />
               </Button>
             </div>
             <Table>
               <Table.Header>
-                <Table.Row>
+                <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
                   <Table.Head>Meta ID</Table.Head>
-                  <Table.Head>Time</Table.Head>
-                  <Table.Head>Agent</Table.Head>
-                  <Table.Head>Rule Group</Table.Head>
-                  <Table.Head className="text-right">Raw Count</Table.Head>
+                  <Table.Head>Timestamp</Table.Head>
+                  <Table.Head>Agent / Host</Table.Head>
+                  <Table.Head>Primary Rule Group</Table.Head>
+                  <Table.Head className="text-right">Alert Count</Table.Head>
                   <Table.Head className="text-right">Anomaly Score</Table.Head>
-                  <Table.Head>Decision</Table.Head>
+                  <Table.Head>SOC Decision</Table.Head>
                 </Table.Row>
               </Table.Header>
               <Table.Body>
                 {recentMetas.items.map((m) => (
                   <Table.Row
                     key={m.meta_id}
-                    className="cursor-pointer hover:bg-kumo-tint"
+                    className="cursor-pointer hover:bg-kumo-recessed/50 transition-colors text-xs"
                     onClick={() => navigate(withRunId(`/meta-alerts/${m.meta_id}`))}
                   >
-                    <Table.Cell className="font-mono text-xs font-semibold">#{m.meta_id}</Table.Cell>
-                    <Table.Cell className="text-xs">{formatDateTime(m.end_time)}</Table.Cell>
-                    <Table.Cell className="text-xs">{m.agent_name} ({m.agent_id})</Table.Cell>
-                    <Table.Cell className="text-xs font-mono">{m.rule_group_primary}</Table.Cell>
-                    <Table.Cell className="text-xs text-right font-mono font-semibold">{m.alert_count}</Table.Cell>
-                    <Table.Cell className="text-xs text-right font-mono">{formatScore(m.anomaly_score)}</Table.Cell>
+                    <Table.Cell className="font-mono font-semibold text-kumo-strong">#{m.meta_id}</Table.Cell>
+                    <Table.Cell className="text-kumo-subtle">{formatDateTime(m.end_time)}</Table.Cell>
+                    <Table.Cell className="font-medium text-kumo-default">{m.agent_name} <span className="text-kumo-subtle text-[11px]">({m.agent_id})</span></Table.Cell>
+                    <Table.Cell className="font-mono text-kumo-default">{m.rule_group_primary}</Table.Cell>
+                    <Table.Cell className="text-right font-mono font-bold text-kumo-strong">{m.alert_count}</Table.Cell>
+                    <Table.Cell className="text-right font-mono text-kumo-default">{formatScore(m.anomaly_score)}</Table.Cell>
                     <Table.Cell><DecisionBadge decision={m.decision} action={m.action} /></Table.Cell>
                   </Table.Row>
                 ))}

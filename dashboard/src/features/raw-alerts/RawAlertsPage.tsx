@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
-import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchMetaAlertRawAlerts } from '@/api/rawAlerts';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { formatDateTime } from '@/lib/formatters';
@@ -74,15 +74,8 @@ export function RawAlertsPage() {
 
   return (
     <>
-      <div className="px-6 pt-4 text-xs font-mono text-kumo-subtle flex items-center gap-2">
-        <Link to={withRunId('/meta-alerts')} className="hover:underline text-kumo-default">MetaAlerts</Link>
-        <span>/</span>
-        <Link to={withRunId(`/meta-alerts/${id}`)} className="hover:underline text-kumo-default">#{id}</Link>
-        <span>/</span>
-        <span className="text-kumo-strong font-semibold">Raw Alerts</span>
-      </div>
-
       <PageHeader
+        breadcrumbs={['Security Analytics', 'MetaAlerts', `#${id}`, 'Raw Alerts']}
         title={`Member Raw Alerts for MetaAlert #${id}`}
         description="Individual security log events aggregated into this temporal cluster"
         actions={
@@ -91,12 +84,12 @@ export function RawAlertsPage() {
             size="sm"
             onClick={() => navigate(withRunId(`/meta-alerts/${id}`))}
           >
-            <ArrowLeft size={14} /> Back to MetaAlert
+            <ArrowLeft size={14} className="mr-1" /> Back to MetaAlert
           </Button>
         }
       />
 
-      <div className="px-6 py-4 space-y-4">
+      <div className="px-6 py-6 lg:px-8 space-y-4">
         {/* Unresolved Evidence Warning Banner */}
         {data && data.unresolved_alert_ids && data.unresolved_alert_ids.length > 0 && (
           <Banner
@@ -107,32 +100,32 @@ export function RawAlertsPage() {
           />
         )}
 
-        {/* Filter Toolbar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-kumo-hairline">
-          <div className="relative flex-1 max-w-sm">
+        {/* Filter Toolbar Card */}
+        <div className="p-4 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs flex flex-wrap items-center justify-between gap-3">
+          <div className="w-full sm:w-80">
             <InputGroup>
-              <InputGroup.Addon align="start"><MagnifyingGlass size={14} /></InputGroup.Addon>
+              <InputGroup.Addon align="start"><MagnifyingGlass size={14} className="text-kumo-subtle" /></InputGroup.Addon>
               <InputGroup.Input
-                placeholder="Search Alert ID, Rule ID, Description, IP..."
+                placeholder="Search Alert ID, Rule ID, IP, Desc..."
                 value={localSearch}
                 onChange={(e) => setLocalSearch(e.target.value)}
               />
             </InputGroup>
           </div>
 
-          <div className="flex items-center gap-2">
-            {isFetching && <span className="text-xs text-kumo-subtle">Refreshing...</span>}
-            <div className="text-xs font-mono text-kumo-subtle">
-              {data ? `Showing ${data.filtered_total} matching / ${data.source_total} total` : 'Loading...'}
-            </div>
+          <div className="flex items-center gap-2 text-xs text-kumo-subtle">
+            {isFetching && <span className="animate-pulse">Refreshing...</span>}
+            <span className="font-mono bg-kumo-recessed px-2 py-0.5 rounded border border-kumo-hairline">
+              {data ? `Showing ${data.filtered_total} / ${data.source_total} total` : 'Loading...'}
+            </span>
           </div>
         </div>
 
-        {/* Raw Alerts Table */}
-        <div className={`rounded-lg border border-kumo-hairline bg-kumo-base overflow-hidden transition-opacity ${isPlaceholderData ? 'opacity-70' : ''}`}>
+        {/* Raw Alerts Table Container */}
+        <div className={`rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden transition-opacity ${isPlaceholderData ? 'opacity-70' : ''}`}>
           <Table>
             <Table.Header>
-              <Table.Row>
+              <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
                 <Table.Head>Timestamp</Table.Head>
                 <Table.Head>Wazuh Alert ID</Table.Head>
                 <Table.Head>Rule ID</Table.Head>
@@ -146,33 +139,33 @@ export function RawAlertsPage() {
               {data?.items.map((a) => (
                 <Table.Row
                   key={a.wazuh_alert_id}
-                  className="cursor-pointer hover:bg-kumo-tint"
+                  className="cursor-pointer hover:bg-kumo-recessed/50 transition-colors text-xs"
                   onClick={() =>
                     navigate(withRunId(`/meta-alerts/${id}/raw-alerts/${encodeURIComponent(a.wazuh_alert_id)}`))
                   }
                 >
-                  <Table.Cell className="text-xs font-mono">{formatDateTime(a.timestamp)}</Table.Cell>
+                  <Table.Cell className="text-xs font-mono text-kumo-subtle">{formatDateTime(a.timestamp)}</Table.Cell>
                   <Table.Cell className="font-mono text-xs font-semibold text-kumo-link truncate max-w-[140px]">
                     {a.wazuh_alert_id}
                   </Table.Cell>
-                  <Table.Cell className="font-mono text-xs">{a.rule_id}</Table.Cell>
-                  <Table.Cell className="text-xs text-right font-mono font-semibold">{a.rule_level}</Table.Cell>
-                  <Table.Cell className="text-xs truncate max-w-[220px]">{a.rule_description}</Table.Cell>
-                  <Table.Cell className="font-mono text-xs">{a.srcip || '—'}</Table.Cell>
+                  <Table.Cell className="font-mono text-xs text-kumo-default">{a.rule_id}</Table.Cell>
+                  <Table.Cell className="text-xs text-right font-mono font-bold text-kumo-strong">{a.rule_level}</Table.Cell>
+                  <Table.Cell className="text-xs truncate max-w-[240px] text-kumo-default">{a.rule_description}</Table.Cell>
+                  <Table.Cell className="font-mono text-xs text-kumo-subtle">{a.srcip || '—'}</Table.Cell>
                   <Table.Cell className="text-xs">
                     {a.mitre_tactics && a.mitre_tactics.length > 0 ? (
-                      <span className="px-1.5 py-0.5 rounded-sm text-[11px] font-mono border border-kumo-hairline bg-kumo-recessed text-kumo-default">
+                      <span className="px-1.5 py-0.5 rounded text-[11px] font-mono border border-kumo-hairline bg-kumo-recessed text-kumo-default">
                         {a.mitre_tactics.join(', ')}
                       </span>
                     ) : (
-                      <span className="text-kumo-inactive">None</span>
+                      <span className="text-kumo-inactive text-[11px]">None</span>
                     )}
                   </Table.Cell>
                 </Table.Row>
               ))}
               {data && data.items.length === 0 && (
                 <Table.Row>
-                  <Table.Cell colSpan={7} className="p-6 text-center text-xs text-kumo-subtle">
+                  <Table.Cell colSpan={7} className="py-12 text-center text-xs text-kumo-subtle">
                     No matching raw alerts found.
                   </Table.Cell>
                 </Table.Row>
@@ -181,7 +174,7 @@ export function RawAlertsPage() {
           </Table>
 
           {/* Pagination */}
-          <div className="px-4 py-2 border-t border-kumo-hairline">
+          <div className="px-5 py-3 border-t border-kumo-hairline bg-kumo-recessed/20">
             <Pagination
               page={page}
               setPage={(p) => {

@@ -36,14 +36,15 @@ export function IntegrationsPage() {
   return (
     <>
       <PageHeader
-        title="Pipeline Integrations"
-        description="End-to-end telemetry from raw event canonicalization through RBTA, Isolation Forest scoring, and downstream dispatch"
+        breadcrumbs={['Operations', 'Integrations']}
+        title="Pipeline Integrations & Dispatch Sinks"
+        description="End-to-end telemetry from raw event canonicalization through RBTA, Isolation Forest scoring, and downstream dispatch sinks"
       />
 
-      <div className="px-6 py-4 space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <MetricCard label="Raw Events Ingested" value={summary ? formatNumber(summary.raw_alert_count) : '—'} />
-          <MetricCard label="MetaAlerts Generated" value={summary ? formatNumber(summary.meta_alert_count) : '—'} />
+      <div className="px-6 py-6 lg:px-8 space-y-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <MetricCard label="Raw Events Ingested" value={summary ? formatNumber(summary.raw_alert_count) : '—'} sub="Raw stream count" />
+          <MetricCard label="MetaAlerts Generated" value={summary ? formatNumber(summary.meta_alert_count) : '—'} sub="Temporal cluster count" />
           <MetricCard
             label="Reduction Achieved"
             value={
@@ -51,8 +52,9 @@ export function IntegrationsPage() {
                 ? `${summary.alert_reduction_rate_percent}%`
                 : '—'
             }
+            sub="Noise elimination"
           />
-          <MetricCard label="Active Buckets" value={summary ? formatNumber(summary.active_buckets_count) : '—'} />
+          <MetricCard label="Active In-Memory Buckets" value={summary ? formatNumber(summary.active_buckets_count) : '—'} sub="Open buffer windows" />
         </div>
 
         <div className="space-y-3">
@@ -63,18 +65,18 @@ export function IntegrationsPage() {
               return (
                 <div
                   key={key}
-                  className="p-4 rounded-lg border border-kumo-hairline bg-kumo-base flex items-start justify-between transition-colors hover:border-kumo-line"
+                  className="p-5 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs flex items-center justify-between transition-all hover:border-kumo-line"
                 >
-                  <div className="flex items-start gap-3.5">
-                    <div className="p-2 rounded-md border border-kumo-hairline bg-kumo-recessed text-kumo-brand shrink-0 mt-0.5">
-                      <Icon size={18} />
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-lg border border-kumo-hairline bg-kumo-recessed/60 text-[#F6821F] flex items-center justify-center shrink-0">
+                      <Icon size={20} />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2.5 mb-0.5">
-                        <h3 className="font-semibold text-xs text-kumo-default">
+                      <div className="flex items-center gap-2.5 mb-1">
+                        <h3 className="font-semibold text-xs text-kumo-strong">
                           {item.name || key.toUpperCase()}
                         </h3>
-                        <Badge variant={variant as any}>
+                        <Badge variant={variant as any} className="text-[11px]">
                           {item.status}
                         </Badge>
                       </div>
@@ -84,9 +86,9 @@ export function IntegrationsPage() {
                     </div>
                   </div>
                   {idx < arr.length - 1 && (
-                    <div className="hidden lg:flex items-center text-xs font-mono shrink-0 pl-4 self-center text-kumo-inactive">
-                      <span>CASCADE</span>
-                      <ArrowRight size={14} className="ml-1" />
+                    <div className="hidden lg:flex items-center text-xs font-mono shrink-0 pl-4 text-kumo-subtle">
+                      <span className="text-[11px] uppercase tracking-wider font-semibold">STAGE {idx + 1}</span>
+                      <ArrowRight size={14} className="ml-1.5 text-kumo-inactive" />
                     </div>
                   )}
                 </div>

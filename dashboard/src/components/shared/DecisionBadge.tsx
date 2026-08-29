@@ -6,10 +6,25 @@ interface DecisionBadgeProps {
 }
 
 export function DecisionBadge({ action }: DecisionBadgeProps) {
-  const isEscalate = action === 'ESCALATE';
+  if (action === 'ESCALATE') {
+    return (
+      <Badge variant="error" className="font-semibold tracking-wide">
+        ESCALATE
+      </Badge>
+    );
+  }
+
+  if (action === 'DAILY_DIGEST') {
+    return (
+      <Badge variant="info" className="font-medium">
+        DAILY_DIGEST
+      </Badge>
+    );
+  }
+
   return (
-    <Badge variant={isEscalate ? 'error' : 'secondary'}>
-      {action}
+    <Badge variant="secondary" className="font-normal text-kumo-subtle">
+      {action || 'SUPPRESS'}
     </Badge>
   );
 }
