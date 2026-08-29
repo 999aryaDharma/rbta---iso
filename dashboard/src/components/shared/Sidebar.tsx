@@ -85,14 +85,14 @@ export function AppSidebar() {
   }, [withRunId, navigate]);
 
   return (
-    <Sidebar className="border-r border-kumo-hairline bg-kumo-canvas select-none shrink-0 w-60">
-      <SidebarContent className="py-2">
+    <Sidebar className="border-r border-kumo-hairline bg-kumo-canvas select-none shrink-0 w-64">
+      <SidebarContent className="py-4 space-y-3">
         {navGroups.map((group) => (
-          <SidebarGroup key={group.label} className="px-2 py-1">
-            <SidebarGroupLabel className="text-[10px] font-semibold text-kumo-subtle tracking-wider uppercase px-2 py-1">
+          <SidebarGroup key={group.label} className="px-3">
+            <SidebarGroupLabel className="text-[10px] font-semibold text-kumo-subtle tracking-wider uppercase px-3 py-1.5">
               {group.label}
             </SidebarGroupLabel>
-            <SidebarMenu className="space-y-0.5 mt-0.5">
+            <SidebarMenu className="space-y-1 mt-1">
               {group.items.map((item) => (
                 <SidebarMenuItem key={item.to}>
                   <NavLink to={withRunId(item.to)} className="block">
@@ -100,16 +100,16 @@ export function AppSidebar() {
                       <SidebarMenuButton
                         active={isActive}
                         tooltip={item.label}
-                        className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-xs transition-colors ${
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-all ${
                           isActive
-                            ? 'bg-kumo-recessed text-kumo-default font-semibold shadow-2xs border-l-2 border-[#F6821F]'
-                            : 'text-kumo-default hover:bg-kumo-recessed/70 hover:text-kumo-strong'
+                            ? 'bg-kumo-recessed text-kumo-strong font-semibold shadow-2xs border border-kumo-hairline'
+                            : 'text-kumo-subtle hover:bg-kumo-recessed/50 hover:text-kumo-strong'
                         }`}
                       >
                         <item.icon
-                          size={16}
-                          weight={isActive ? 'fill' : 'regular'}
-                          className={isActive ? 'text-[#F6821F]' : 'text-kumo-subtle'}
+                          size={17}
+                          weight={isActive ? 'duotone' : 'regular'}
+                          className={isActive ? 'text-kumo-strong' : 'text-kumo-subtle'}
                         />
                         <span className="truncate">{item.label}</span>
                       </SidebarMenuButton>
@@ -123,9 +123,9 @@ export function AppSidebar() {
       </SidebarContent>
 
       {/* Subtle Sidebar Footer */}
-      <div className="p-3 border-t border-kumo-hairline bg-kumo-canvas/80 text-[11px] text-kumo-subtle flex items-center justify-between">
+      <div className="p-4 border-t border-kumo-hairline bg-kumo-canvas text-[11px] text-kumo-subtle flex items-center justify-between">
         <span className="font-mono">RBTA Engine</span>
-        <span className="text-[10px] bg-kumo-recessed px-1.5 py-0.5 rounded border border-kumo-hairline font-mono">
+        <span className="text-[10px] bg-kumo-recessed px-2 py-0.5 rounded border border-kumo-hairline font-mono text-kumo-strong">
           v1.0.0
         </span>
       </div>

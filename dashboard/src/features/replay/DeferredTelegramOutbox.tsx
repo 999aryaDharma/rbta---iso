@@ -22,42 +22,44 @@ export function DeferredTelegramOutbox() {
   const totalCount = data?.total_count || 0;
 
   return (
-    <div className="rounded-lg border border-kumo-hairline bg-kumo-base p-4 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-kumo-hairline">
-        <div className="flex items-center gap-2">
-          <PaperPlaneRight size={14} className="text-red-500" />
-          <span className="text-xs font-semibold uppercase tracking-wider text-kumo-subtle">
+    <div className="rounded-xl border border-kumo-hairline bg-kumo-canvas p-6 shadow-xs space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-4 pb-3 border-b border-kumo-hairline">
+        <div className="flex items-center gap-3">
+          <div className="w-6 h-6 rounded-md border border-kumo-hairline bg-kumo-recessed flex items-center justify-center text-kumo-strong">
+            <PaperPlaneRight size={14} />
+          </div>
+          <span className="text-xs font-semibold uppercase tracking-wider text-kumo-strong">
             Deferred Telegram Payload Outbox
           </span>
-          <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-400 border border-red-200 dark:border-red-900/40">
+          <span className="font-mono text-xs font-semibold px-2.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
             {totalCount} ESCALATE Payloads
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <span className="text-[11px] font-mono text-kumo-subtle">
-            File: <code>telegram_escalate_payloads.txt</code>
+            File: <code className="bg-kumo-recessed px-1.5 py-0.5 rounded border border-kumo-hairline">telegram_escalate_payloads.txt</code>
           </span>
           <button
             type="button"
             onClick={() => refetch()}
-            className="p-1 rounded text-kumo-subtle hover:text-kumo-default hover:bg-kumo-recessed"
+            className="p-1 rounded text-kumo-subtle hover:text-kumo-default hover:bg-kumo-recessed transition-colors"
             title="Refresh outbox"
           >
-            <ArrowClockwise size={13} />
+            <ArrowClockwise size={14} />
           </button>
         </div>
       </div>
 
       {isLoading ? (
-        <div className="py-6 text-center text-xs text-kumo-subtle font-mono">
+        <div className="py-8 text-center text-xs text-kumo-subtle font-mono">
           Loading recorded escalation payloads...
         </div>
       ) : payloads.length > 0 ? (
-        <div className="overflow-x-auto rounded border border-kumo-hairline">
+        <div className="overflow-x-auto rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs">
           <Table>
             <Table.Header>
-              <Table.Row>
+              <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
                 <Table.Head>Timestamp</Table.Head>
                 <Table.Head>Meta ID</Table.Head>
                 <Table.Head>Decision</Table.Head>
@@ -71,25 +73,25 @@ export function DeferredTelegramOutbox() {
               {payloads.map((p) => {
                 const isCopied = copiedId === p.idempotency_key;
                 return (
-                  <Table.Row key={p.idempotency_key} className="font-mono text-xs">
+                  <Table.Row key={p.idempotency_key} className="font-mono text-xs hover:bg-kumo-recessed/40 transition-colors">
                     <Table.Cell className="text-kumo-subtle text-[11px] whitespace-nowrap">
                       {p.timestamp.replace('T', ' ').substring(0, 19)}
                     </Table.Cell>
-                    <Table.Cell className="font-semibold text-kumo-default">
+                    <Table.Cell className="font-semibold text-kumo-strong">
                       <div>#{p.meta_id}</div>
                       <div className="text-[10px] text-kumo-subtle font-normal">{p.idempotency_key}</div>
                     </Table.Cell>
                     <Table.Cell>
-                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-400 border border-red-200 dark:border-red-900/40">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
                         {p.decision}
                       </span>
                     </Table.Cell>
                     <Table.Cell className="text-[11px]">
-                      <div className="font-medium text-kumo-default">{p.rule_group_primary}</div>
+                      <div className="font-medium text-kumo-strong">{p.rule_group_primary}</div>
                       <div className="text-kumo-subtle text-[10px]">{p.agent_name} ({p.agent_id})</div>
                     </Table.Cell>
                     <Table.Cell className="text-[11px]">
-                      <span className="text-red-500 font-semibold">{p.anomaly_score.toFixed(4)}</span>
+                      <span className="text-rose-500 font-bold">{p.anomaly_score.toFixed(4)}</span>
                       <span className="text-kumo-subtle"> &gt; {p.threshold.toFixed(4)}</span>
                     </Table.Cell>
                     <Table.Cell className="text-[11px] text-kumo-subtle max-w-sm truncate" title={p.message}>
@@ -98,12 +100,12 @@ export function DeferredTelegramOutbox() {
                     <Table.Cell className="text-right">
                       <button
                         type="button"
-                        onClick={() => handleCopy(p.idempotency_key, JSON.stringify(p, null, 2))}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded bg-kumo-recessed hover:bg-kumo-canvas text-[11px] text-kumo-subtle hover:text-kumo-default border border-kumo-hairline"
-                        title="Copy JSON Payload"
+                        onClick={() => handleCopy(p.idempotency_key, p.message)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-mono border border-kumo-hairline bg-kumo-canvas text-kumo-subtle hover:text-kumo-strong hover:bg-kumo-recessed transition-colors cursor-pointer"
+                        title="Copy Telegram message"
                       >
-                        {isCopied ? <Check size={11} className="text-green-500" /> : <Copy size={11} />}
-                        <span>{isCopied ? 'Copied' : 'JSON'}</span>
+                        {isCopied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+                        <span>{isCopied ? 'Copied' : 'Copy'}</span>
                       </button>
                     </Table.Cell>
                   </Table.Row>
@@ -113,9 +115,8 @@ export function DeferredTelegramOutbox() {
           </Table>
         </div>
       ) : (
-        <div className="py-6 text-center text-xs text-kumo-subtle font-mono italic">
-          No ESCALATE payloads recorded in <code className="bg-kumo-recessed px-1 py-0.5 rounded">telegram_escalate_payloads.txt</code>.
-          When an anomaly score strictly breaches the Tukey threshold and triggers an ESCALATE action, payload will appear here.
+        <div className="py-8 text-center text-xs text-kumo-subtle font-mono">
+          No ESCALATE payloads recorded yet in this replay run.
         </div>
       )}
     </div>

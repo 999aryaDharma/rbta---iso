@@ -13,13 +13,13 @@ export function PageHeader({
 }) {
   return (
     <div className="border-b border-kumo-hairline bg-kumo-canvas">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-6 py-5 lg:px-8">
-        <div className="space-y-1">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-6 py-6 lg:px-10">
+        <div className="space-y-1.5">
           {breadcrumbs && breadcrumbs.length > 0 ? (
             <div className="text-[11px] font-medium text-kumo-subtle flex items-center gap-1.5 uppercase tracking-wider mb-1">
               {breadcrumbs.map((crumb, idx) => (
                 <span key={crumb} className="flex items-center gap-1.5">
-                  {idx > 0 && <span className="text-kumo-inactive">/</span>}
+                  {idx > 0 && <span className="text-kumo-hairline">/</span>}
                   <span className={idx === breadcrumbs.length - 1 ? 'text-kumo-strong font-semibold' : ''}>
                     {crumb}
                   </span>
@@ -27,13 +27,13 @@ export function PageHeader({
               ))}
             </div>
           ) : (
-            <div className="text-[11px] font-medium text-kumo-subtle uppercase tracking-wider mb-1 flex items-center gap-1">
+            <div className="text-[11px] font-medium text-kumo-subtle uppercase tracking-wider mb-1 flex items-center gap-1.5">
               <span>Security Analytics</span>
-              <span className="text-kumo-inactive">/</span>
+              <span className="text-kumo-hairline">/</span>
               <span className="text-kumo-strong font-semibold">{title}</span>
             </div>
           )}
-          <h1 className="text-xl lg:text-2xl font-semibold tracking-tight text-kumo-default">
+          <h1 className="text-xl lg:text-2xl font-bold tracking-tight text-kumo-strong">
             {title}
           </h1>
           {description && (
@@ -42,7 +42,7 @@ export function PageHeader({
             </p>
           )}
         </div>
-        {actions && <div className="flex items-center gap-2.5 shrink-0">{actions}</div>}
+        {actions && <div className="flex items-center gap-3 shrink-0">{actions}</div>}
       </div>
     </div>
   );

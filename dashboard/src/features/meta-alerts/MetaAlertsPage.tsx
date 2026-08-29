@@ -99,11 +99,11 @@ export function MetaAlertsPage() {
         description="Aggregated security alert clusters scored by Isolation Forest with deterministic Tukey IQR thresholding"
       />
 
-      <div className="px-6 py-6 lg:px-8 space-y-4">
+      <div className="px-6 py-8 lg:px-10 space-y-6">
         {/* Filter toolbar card */}
-        <div className="p-4 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs flex flex-wrap items-center justify-between gap-3">
+        <div className="p-5 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
-            <div className="w-full sm:w-72">
+            <div className="w-full sm:w-80">
               <InputGroup>
                 <InputGroup.Addon align="start"><MagnifyingGlass size={14} className="text-kumo-subtle" /></InputGroup.Addon>
                 <InputGroup.Input
@@ -143,21 +143,21 @@ export function MetaAlertsPage() {
 
           <div className="flex items-center gap-2 text-xs text-kumo-subtle">
             {isFetching && <span className="animate-pulse">Refreshing...</span>}
-            <span className="font-mono bg-kumo-recessed px-2 py-0.5 rounded border border-kumo-hairline">
+            <span className="font-mono bg-kumo-recessed px-2.5 py-1 rounded border border-kumo-hairline text-kumo-strong font-medium">
               Total: {data?.total ?? 0}
             </span>
           </div>
         </div>
 
         {/* Table container */}
-        <div className={`rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden transition-opacity ${isPlaceholderData ? 'opacity-70' : ''}`}>
+        <div className={`rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden transition-opacity ${isPlaceholderData ? 'opacity-70' : ''}`}>
           <Table>
             <Table.Header>
               <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
                 <Table.Head>Meta ID</Table.Head>
                 <Table.Head>End Time</Table.Head>
                 <Table.Head>Agent / Host</Table.Head>
-                <Table.Head>Primary Rule Group</Table.Head>
+                <Table.Head>Rule Name</Table.Head>
                 <Table.Head className="text-right">Alert Count</Table.Head>
                 <Table.Head className="text-right">Max Sev</Table.Head>
                 <Table.Head className="text-right">Anomaly Score</Table.Head>
@@ -168,7 +168,7 @@ export function MetaAlertsPage() {
               {data?.items.map((m) => (
                 <Table.Row
                   key={m.meta_id}
-                  className="cursor-pointer hover:bg-kumo-recessed/50 transition-colors text-xs"
+                  className="cursor-pointer hover:bg-kumo-recessed/40 transition-colors text-xs"
                   onClick={() => navigate(withRunId(`/meta-alerts/${m.meta_id}`))}
                 >
                   <Table.Cell className="font-mono font-semibold text-kumo-strong">#{m.meta_id}</Table.Cell>
@@ -183,7 +183,7 @@ export function MetaAlertsPage() {
               ))}
               {data && data.items.length === 0 && (
                 <Table.Row>
-                  <Table.Cell colSpan={8} className="py-12 text-center text-xs text-kumo-subtle">
+                  <Table.Cell colSpan={8} className="py-12 text-center text-xs text-kumo-subtle font-mono">
                     No MetaAlerts match the specified filter criteria.
                   </Table.Cell>
                 </Table.Row>
@@ -192,7 +192,7 @@ export function MetaAlertsPage() {
           </Table>
 
           {/* Pagination */}
-          <div className="px-5 py-3 border-t border-kumo-hairline bg-kumo-recessed/20">
+          <div className="px-6 py-4 border-t border-kumo-hairline bg-kumo-recessed/20">
             <Pagination
               page={page}
               setPage={(p) => {

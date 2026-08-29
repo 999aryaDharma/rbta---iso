@@ -38,13 +38,13 @@ export function OverviewPage() {
         description="Continuous Rule-Based Temporal Aggregation (RBTA) and Isolation Forest Anomaly Detection Engine"
       />
 
-      <div className="px-6 py-6 lg:px-8 space-y-6">
+      <div className="px-6 py-8 lg:px-10 space-y-8">
         {/* Needs Investigation Banner */}
         {needsInvestigation.length > 0 && (
-          <div className="p-5 rounded-lg border border-rose-500/30 border-l-4 border-l-rose-500 bg-rose-500/5 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-rose-500/20">
-              <div className="flex items-center gap-2.5">
-                <WarningCircle size={20} className="text-rose-600 dark:text-rose-400 shrink-0" weight="fill" />
+          <div className="p-6 rounded-xl border border-rose-500/30 border-l-4 border-l-rose-500 bg-rose-500/5 shadow-xs space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-rose-500/20">
+              <div className="flex items-center gap-3">
+                <WarningCircle size={22} className="text-rose-600 dark:text-rose-400 shrink-0" weight="fill" />
                 <h2 className="text-xs font-semibold uppercase tracking-wider text-kumo-strong">
                   Needs Investigation ({needsInvestigation.length} Active Escalations)
                 </h2>
@@ -59,25 +59,25 @@ export function OverviewPage() {
               </Button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {needsInvestigation.slice(0, 3).map((m) => (
                 <div
                   key={m.meta_id}
                   onClick={() => navigate(withRunId(`/meta-alerts/${m.meta_id}`))}
-                  className="p-4 rounded-lg border border-kumo-hairline bg-kumo-canvas cursor-pointer transition-all hover:border-[#F6821F] hover:shadow-xs"
+                  className="p-5 rounded-xl border border-kumo-hairline bg-kumo-canvas cursor-pointer transition-all hover:border-kumo-strong hover:shadow-xs space-y-3"
                 >
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between">
                     <span className="font-mono text-xs font-bold text-kumo-strong">#{m.meta_id}</span>
                     <DecisionBadge decision={m.decision} action={m.action} />
                   </div>
-                  <div className="space-y-1.5 text-xs mb-3.5 text-kumo-subtle">
+                  <div className="space-y-2 text-xs text-kumo-subtle">
                     <div className="flex justify-between items-center">
                       <span>Agent:</span>
                       <span className="text-kumo-default font-medium truncate max-w-[160px]">{m.agent_name} ({m.agent_id})</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>Rule Group:</span>
-                      <span className="font-mono text-kumo-default bg-kumo-recessed px-1.5 py-0.5 rounded text-[11px]">{m.rule_group_primary}</span>
+                      <span className="font-mono text-kumo-default bg-kumo-recessed px-2 py-0.5 rounded text-[11px] border border-kumo-hairline">{m.rule_group_primary}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>Score / Thresh:</span>
@@ -91,7 +91,7 @@ export function OverviewPage() {
                   <Button
                     variant="primary"
                     size="sm"
-                    className="w-full justify-center text-xs"
+                    className="w-full justify-center text-xs mt-2"
                     onClick={(e) => {
                       e.stopPropagation();
                       navigate(withRunId(`/meta-alerts/${m.meta_id}`));
@@ -106,7 +106,7 @@ export function OverviewPage() {
         )}
 
         {/* KPI Cards Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
           <MetricCard
             label="Raw Ingested Alerts"
             value={summary ? formatNumber(summary.raw_alert_count) : '—'}
@@ -165,10 +165,10 @@ export function OverviewPage() {
 
         {/* Timeseries Ingestion Chart */}
         {timeseries && Array.isArray(timeseries) && timeseries.length > 0 && (
-          <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-kumo-hairline">
+          <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-kumo-hairline">
               <div>
-                <h2 className="text-sm font-semibold text-kumo-default">
+                <h2 className="text-sm font-semibold text-kumo-strong">
                   Ingestion & Aggregation Velocity
                 </h2>
                 <p className="text-xs text-kumo-subtle mt-0.5">
@@ -183,8 +183,8 @@ export function OverviewPage() {
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Legend wrapperStyle={{ fontSize: '12px' }} />
-                <Area type="monotone" dataKey="raw_alerts" stroke="#F6821F" fill="#F6821F20" name="Raw Alerts" />
-                <Area type="monotone" dataKey="meta_alerts" stroke="#0055DC" fill="#0055DC20" name="MetaAlerts" />
+                <Area type="monotone" dataKey="raw_alerts" stroke="#64748b" fill="#64748b20" name="Raw Alerts" />
+                <Area type="monotone" dataKey="meta_alerts" stroke="#0f172a" fill="#0f172a20" name="MetaAlerts" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -192,10 +192,10 @@ export function OverviewPage() {
 
         {/* Recent MetaAlerts Table */}
         {recentMetas && recentMetas.items.length > 0 && (
-          <div className="rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden">
-            <div className="px-5 py-4 border-b border-kumo-hairline flex items-center justify-between">
+          <div className="rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden">
+            <div className="px-6 py-4 border-b border-kumo-hairline flex items-center justify-between">
               <div>
-                <h2 className="text-sm font-semibold text-kumo-default">
+                <h2 className="text-sm font-semibold text-kumo-strong">
                   Recent MetaAlert Episodes
                 </h2>
                 <p className="text-xs text-kumo-subtle mt-0.5">
@@ -216,7 +216,7 @@ export function OverviewPage() {
                   <Table.Head>Meta ID</Table.Head>
                   <Table.Head>Timestamp</Table.Head>
                   <Table.Head>Agent / Host</Table.Head>
-                  <Table.Head>Primary Rule Group</Table.Head>
+                  <Table.Head>Rule Name</Table.Head>
                   <Table.Head className="text-right">Alert Count</Table.Head>
                   <Table.Head className="text-right">Anomaly Score</Table.Head>
                   <Table.Head>SOC Decision</Table.Head>
@@ -226,7 +226,7 @@ export function OverviewPage() {
                 {recentMetas.items.map((m) => (
                   <Table.Row
                     key={m.meta_id}
-                    className="cursor-pointer hover:bg-kumo-recessed/50 transition-colors text-xs"
+                    className="cursor-pointer hover:bg-kumo-recessed/40 transition-colors text-xs"
                     onClick={() => navigate(withRunId(`/meta-alerts/${m.meta_id}`))}
                   >
                     <Table.Cell className="font-mono font-semibold text-kumo-strong">#{m.meta_id}</Table.Cell>

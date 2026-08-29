@@ -548,11 +548,11 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     }, VALID_API_KEY);
     await page.goto('/dashboard/overview');
 
-    await expect(page.locator('text=Raw Ingested Alerts')).toBeVisible();
-    await expect(page.locator('text=Finalized MetaAlerts')).toBeVisible();
-    await expect(page.locator('text=Alert Reduction Rate')).toBeVisible();
-    await expect(page.locator('text=98.73%')).toBeVisible();
-    await expect(page.locator('text=Escalated Incidents')).toBeVisible();
+    await expect(page.locator('text=Raw Ingested Alerts').first()).toBeVisible();
+    await expect(page.getByText('Finalized MetaAlerts', { exact: true })).toBeVisible();
+    await expect(page.locator('text=Alert Reduction Rate').first()).toBeVisible();
+    await expect(page.locator('text=98.73%').first()).toBeVisible();
+    await expect(page.locator('text=Escalated Incidents').first()).toBeVisible();
   });
 
   test('4. ESCALATE / Needs Investigation deep-link navigates to filtered MetaAlerts', async ({ page }) => {
@@ -572,7 +572,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     }, VALID_API_KEY);
     await page.goto('/dashboard/meta-alerts');
 
-    await expect(page.locator('text=MetaAlerts Investigation Table')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'MetaAlerts Investigation Explorer' })).toBeVisible();
     await expect(page.locator('text=authentication_failed').first()).toBeVisible();
     await expect(page.locator('text=0.8920').first()).toBeVisible();
   });
@@ -676,7 +676,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
 
     const startBtn = page.locator('button:has-text("Start Replay")');
     await startBtn.click();
-    await expect(page.locator('text=RUNNING')).toBeVisible();
+    await expect(page.locator('text=RUNNING').first()).toBeVisible();
   });
 
   test('14. Replay pause and resume control states transition cleanly', async ({ page }) => {
@@ -707,7 +707,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
       await resetBtn.click();
       await expect(page.locator('text=Start New Replay Run?')).toBeVisible();
       await page.locator('button:has-text("Confirm & Prepare New Run")').click();
-      await expect(page.locator('text=IDLE')).toBeVisible();
+      await expect(page.locator('text=IDLE').first()).toBeVisible();
     }
   });
 
@@ -780,7 +780,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     }, VALID_API_KEY);
     await page.goto('/dashboard/meta-alerts?run_id=test-run-123');
 
-    const searchInput = page.locator('input[placeholder*="Search Meta ID"]');
+    const searchInput = page.getByPlaceholder('Filter Meta ID, Agent, Rule Group...');
     await searchInput.fill('authentication_failed');
     await expect(page.locator('text=authentication_failed').first()).toBeVisible();
     expect(page.url()).toContain('run_id=test-run-123');

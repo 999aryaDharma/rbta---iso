@@ -5,7 +5,6 @@ import { MetricCard } from '@/components/shared/MetricCard';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { formatNumber, formatSeconds, formatDateTime } from '@/lib/formatters';
 import { Table } from '@cloudflare/kumo/components/table';
-import { Badge } from '@cloudflare/kumo/components/badge';
 
 export function RBTAPage() {
   const [searchParams] = useSearchParams();
@@ -27,18 +26,18 @@ export function RBTAPage() {
         description="Real-time agent temporal state tracking, dynamic window adaptation (Δt), and active in-memory buckets"
       />
 
-      <div className="px-6 py-6 lg:px-8 space-y-6">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="px-6 py-8 lg:px-10 space-y-8">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
           <MetricCard label="Active Agents" value={formatNumber(activeAgents)} sub="Monitored host agents" />
           <MetricCard label="Warmed-up Agents" value={formatNumber(warmedUp)} sub="Baseline calibrated" />
           <MetricCard label="Seen Alerts" value={formatNumber(seenAlerts)} sub="Total incoming raw events" />
           <MetricCard label="Open Active Buckets" value={formatNumber(activeBuckets)} sub="In-flight aggregation windows" />
         </div>
 
-        <div className="rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden">
-          <div className="px-5 py-4 border-b border-kumo-hairline flex items-center justify-between">
+        <div className="rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden">
+          <div className="px-6 py-4 border-b border-kumo-hairline flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-kumo-default">
+              <h2 className="text-sm font-semibold text-kumo-strong">
                 Agent Temporal States ({agents.length})
               </h2>
               <p className="text-xs text-kumo-subtle mt-0.5">
@@ -63,7 +62,7 @@ export function RBTAPage() {
             </Table.Header>
             <Table.Body>
               {agents.map((a) => (
-                <Table.Row key={a.agent_id} className="hover:bg-kumo-recessed/50 transition-colors text-xs">
+                <Table.Row key={a.agent_id} className="hover:bg-kumo-recessed/40 transition-colors text-xs">
                   <Table.Cell className="font-mono font-semibold text-kumo-strong">{a.agent_id}</Table.Cell>
                   <Table.Cell className="font-medium text-kumo-default">{a.agent_name}</Table.Cell>
                   <Table.Cell className="text-right font-mono text-kumo-default">{formatNumber(a.event_count)}</Table.Cell>
@@ -73,20 +72,24 @@ export function RBTAPage() {
                   <Table.Cell className="text-right font-mono text-kumo-subtle">{formatSeconds(a.baseline_gap_seconds)}</Table.Cell>
                   <Table.Cell className="text-right font-mono text-kumo-subtle">{formatSeconds(a.ema_gap_seconds)}</Table.Cell>
                   <Table.Cell className="text-right font-mono text-kumo-subtle">{formatSeconds(a.base_delta_t_seconds)}</Table.Cell>
-                  <Table.Cell className="text-right font-mono font-bold text-[#F6821F]">
+                  <Table.Cell className="text-right font-mono font-bold text-kumo-strong">
                     {formatSeconds(a.current_delta_t_seconds)}
                   </Table.Cell>
                   <Table.Cell className="text-right font-mono font-semibold text-kumo-strong">{a.active_bucket_count}</Table.Cell>
                   <Table.Cell className="text-center">
-                    <Badge variant={a.is_warmed_up ? 'success' : 'warning'} className="text-[11px]">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[11px] font-mono font-medium border ${
+                      a.is_warmed_up
+                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                        : 'bg-kumo-recessed text-kumo-subtle border-kumo-hairline'
+                    }`}>
                       {a.status}
-                    </Badge>
+                    </span>
                   </Table.Cell>
                 </Table.Row>
               ))}
               {agents.length === 0 && (
                 <Table.Row>
-                  <Table.Cell colSpan={10} className="py-12 text-center text-xs text-kumo-subtle">
+                  <Table.Cell colSpan={10} className="py-12 text-center text-xs text-kumo-subtle font-mono">
                     No agent states active yet.
                   </Table.Cell>
                 </Table.Row>
@@ -95,10 +98,10 @@ export function RBTAPage() {
           </Table>
         </div>
 
-        <div className="rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden">
-          <div className="px-5 py-4 border-b border-kumo-hairline flex items-center justify-between">
+        <div className="rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden">
+          <div className="px-6 py-4 border-b border-kumo-hairline flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-kumo-default">
+              <h2 className="text-sm font-semibold text-kumo-strong">
                 Active In-Flight Aggregation Buckets ({buckets.length})
               </h2>
               <p className="text-xs text-kumo-subtle mt-0.5">
@@ -119,7 +122,7 @@ export function RBTAPage() {
             </Table.Header>
             <Table.Body>
               {buckets.map((b, idx) => (
-                <Table.Row key={`${b.agent_id}-${b.rule_group_primary}-${idx}`} className="hover:bg-kumo-recessed/50 transition-colors text-xs">
+                <Table.Row key={`${b.agent_id}-${b.rule_group_primary}-${idx}`} className="hover:bg-kumo-recessed/40 transition-colors text-xs">
                   <Table.Cell className="font-mono text-kumo-default">{b.agent_name ? `${b.agent_name} (${b.agent_id})` : b.agent_id}</Table.Cell>
                   <Table.Cell className="font-mono font-medium text-kumo-strong">{b.rule_group_primary}</Table.Cell>
                   <Table.Cell className="text-kumo-subtle">{formatDateTime(b.start_time)}</Table.Cell>
@@ -130,7 +133,7 @@ export function RBTAPage() {
               ))}
               {buckets.length === 0 && (
                 <Table.Row>
-                  <Table.Cell colSpan={6} className="py-12 text-center text-xs text-kumo-subtle">
+                  <Table.Cell colSpan={6} className="py-12 text-center text-xs text-kumo-subtle font-mono">
                     No open buckets currently active in runtime memory.
                   </Table.Cell>
                 </Table.Row>

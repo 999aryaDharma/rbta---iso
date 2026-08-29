@@ -4,7 +4,6 @@ import { PageHeader } from '@/components/shared/PageHeader';
 import { MetricCard } from '@/components/shared/MetricCard';
 import { formatNumber } from '@/lib/formatters';
 import { useSearchParams } from 'react-router-dom';
-import { Badge } from '@cloudflare/kumo/components/badge';
 import { ArrowRight, Database, Stack, ShieldCheck, PaperPlaneTilt, Plugs, ChatTeardropText } from '@phosphor-icons/react';
 
 export function IntegrationsPage() {
@@ -13,16 +12,6 @@ export function IntegrationsPage() {
 
   const { data: integrations } = usePollingQuery(['integrations'], fetchIntegrations, 5000);
   const { data: summary } = usePollingQuery(['summary', runId || 'live'], () => fetchSummary(runId || undefined), 3000);
-
-  const getBadgeVariant = (status: string) => {
-    if (status === 'READY' || status === 'ONLINE' || status === 'ACTIVE') {
-      return 'success';
-    }
-    if (status === 'DEFERRED') {
-      return 'warning';
-    }
-    return 'secondary';
-  };
 
   const getIcon = (key: string) => {
     if (key === 'wazuh') return Database;
@@ -41,8 +30,8 @@ export function IntegrationsPage() {
         description="End-to-end telemetry from raw event canonicalization through RBTA, Isolation Forest scoring, and downstream dispatch sinks"
       />
 
-      <div className="px-6 py-6 lg:px-8 space-y-6">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="px-6 py-8 lg:px-10 space-y-8">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
           <MetricCard label="Raw Events Ingested" value={summary ? formatNumber(summary.raw_alert_count) : '—'} sub="Raw stream count" />
           <MetricCard label="MetaAlerts Generated" value={summary ? formatNumber(summary.meta_alert_count) : '—'} sub="Temporal cluster count" />
           <MetricCard
@@ -57,28 +46,33 @@ export function IntegrationsPage() {
           <MetricCard label="Active In-Memory Buckets" value={summary ? formatNumber(summary.active_buckets_count) : '—'} sub="Open buffer windows" />
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-4">
           {integrations &&
             Object.entries(integrations).map(([key, item], idx, arr) => {
               const Icon = getIcon(key);
-              const variant = getBadgeVariant(item.status);
               return (
                 <div
                   key={key}
-                  className="p-5 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs flex items-center justify-between transition-all hover:border-kumo-line"
+                  className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs flex items-center justify-between transition-all hover:border-kumo-line"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-lg border border-kumo-hairline bg-kumo-recessed/60 text-[#F6821F] flex items-center justify-center shrink-0">
+                    <div className="w-10 h-10 rounded-lg border border-kumo-hairline bg-kumo-recessed text-kumo-strong flex items-center justify-center shrink-0">
                       <Icon size={20} />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2.5 mb-1">
+                      <div className="flex items-center gap-3 mb-1">
                         <h3 className="font-semibold text-xs text-kumo-strong">
                           {item.name || key.toUpperCase()}
                         </h3>
-                        <Badge variant={variant as any} className="text-[11px]">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[11px] font-mono font-medium border ${
+                          item.status === 'READY' || item.status === 'ONLINE' || item.status === 'ACTIVE'
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                            : item.status === 'DEFERRED'
+                            ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                            : 'bg-kumo-recessed text-kumo-subtle border-kumo-hairline'
+                        }`}>
                           {item.status}
-                        </Badge>
+                        </span>
                       </div>
                       <p className="text-xs text-kumo-subtle">
                         {item.detail || 'Operational service integration component'}
@@ -88,7 +82,7 @@ export function IntegrationsPage() {
                   {idx < arr.length - 1 && (
                     <div className="hidden lg:flex items-center text-xs font-mono shrink-0 pl-4 text-kumo-subtle">
                       <span className="text-[11px] uppercase tracking-wider font-semibold">STAGE {idx + 1}</span>
-                      <ArrowRight size={14} className="ml-1.5 text-kumo-inactive" />
+                      <ArrowRight size={14} className="ml-1.5 text-kumo-hairline" />
                     </div>
                   )}
                 </div>

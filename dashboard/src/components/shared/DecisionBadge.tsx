@@ -8,7 +8,7 @@ interface DecisionBadgeProps {
 export function DecisionBadge({ action }: DecisionBadgeProps) {
   if (action === 'ESCALATE') {
     return (
-      <Badge variant="error" className="font-semibold tracking-wide">
+      <Badge variant="error" className="font-mono text-[11px] font-semibold tracking-wide">
         ESCALATE
       </Badge>
     );
@@ -16,14 +16,14 @@ export function DecisionBadge({ action }: DecisionBadgeProps) {
 
   if (action === 'DAILY_DIGEST') {
     return (
-      <Badge variant="info" className="font-medium">
+      <Badge variant="info" className="font-mono text-[11px] font-medium">
         DAILY_DIGEST
       </Badge>
     );
   }
 
   return (
-    <Badge variant="secondary" className="font-normal text-kumo-subtle">
+    <Badge variant="secondary" className="font-mono text-[11px] text-kumo-subtle font-normal">
       {action || 'SUPPRESS'}
     </Badge>
   );

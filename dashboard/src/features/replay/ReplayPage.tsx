@@ -93,13 +93,13 @@ export function ReplayPage() {
         description="Deterministic historical workload replay streaming with calibrated pacing, session isolation, and strict evidence logging"
       />
 
-      <div className="px-6 py-6 lg:px-8 space-y-6">
+      <div className="px-6 py-8 lg:px-10 space-y-8">
         {/* Control Panel Card */}
-        <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex flex-wrap items-center gap-4">
+        <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-5">
+            <div className="flex flex-wrap items-center gap-5">
               <div>
-                <label className="block text-[11px] font-semibold mb-1 text-kumo-subtle uppercase tracking-wider">
+                <label className="block text-[11px] font-semibold mb-1.5 text-kumo-subtle uppercase tracking-wider">
                   Replay Dataset (.jsonl)
                 </label>
                 <div className="w-[280px]">
@@ -107,7 +107,7 @@ export function ReplayPage() {
                     value={selectedDataset}
                     onChange={(e) => setSelectedDataset(e.target.value)}
                     disabled={!isIdle || isLoading || !datasetsData?.items?.length}
-                    className="w-full px-3 py-1.5 border border-kumo-hairline rounded-md text-xs font-mono bg-kumo-recessed/50 text-kumo-default focus:ring-1 focus:ring-[#F6821F] outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3.5 py-2 border border-kumo-hairline rounded-lg text-xs font-mono bg-kumo-recessed/40 text-kumo-strong focus:border-kumo-strong outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="__ALL__">All datasets (Sequential)</option>
                     {datasetsData?.items?.map((ds) => (
@@ -120,7 +120,7 @@ export function ReplayPage() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold mb-1 text-kumo-subtle uppercase tracking-wider">
+                <label className="block text-[11px] font-semibold mb-1.5 text-kumo-subtle uppercase tracking-wider">
                   Playback Speed
                 </label>
                 <div className="w-[220px]">
@@ -128,7 +128,7 @@ export function ReplayPage() {
                     value={speed}
                     onChange={(e) => setSpeed(e.target.value as any)}
                     disabled={!isIdle || isLoading}
-                    className="w-full px-3 py-1.5 border border-kumo-hairline rounded-md text-xs font-mono bg-kumo-recessed/50 text-kumo-default focus:ring-1 focus:ring-[#F6821F] outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3.5 py-2 border border-kumo-hairline rounded-lg text-xs font-mono bg-kumo-recessed/40 text-kumo-strong focus:border-kumo-strong outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="1">1x (Realtime Clock)</option>
                     <option value="10">10x Throttled</option>
@@ -140,7 +140,7 @@ export function ReplayPage() {
             </div>
 
             {/* Action Buttons */}
-            <div className="flex items-center gap-2 mt-2 sm:mt-0">
+            <div className="flex items-center gap-3 mt-2 sm:mt-0">
               {isIdle && (
                 <Button
                   variant="primary"
@@ -198,14 +198,14 @@ export function ReplayPage() {
 
           {/* Progress Bar */}
           {status && status.total_count > 0 && (
-            <div className="pt-3 border-t border-kumo-hairline">
-              <div className="flex justify-between text-xs mb-1.5 font-mono">
+            <div className="pt-4 border-t border-kumo-hairline">
+              <div className="flex justify-between text-xs mb-2 font-mono">
                 <span className="text-kumo-subtle">Replay Progress</span>
                 <span className="font-semibold text-kumo-strong">{progressPercent.toFixed(1)}% ({formatNumber(status.processed_count)} / {formatNumber(status.total_count)})</span>
               </div>
-              <div className="w-full h-2 rounded-full overflow-hidden bg-kumo-recessed">
+              <div className="w-full h-2.5 rounded-full overflow-hidden bg-kumo-recessed">
                 <div
-                  className="h-full bg-[#F6821F] transition-all duration-300 rounded-full"
+                  className="h-full bg-kumo-strong transition-all duration-300 rounded-full"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>
@@ -267,7 +267,7 @@ export function ReplayPage() {
         <DeferredTelegramOutbox />
 
         {/* Telemetry KPI Metrics */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
           <MetricCard label="Playback Status" value={status?.status || 'IDLE'} sub="Replay engine lifecycle" />
           <MetricCard label="Processed Events" value={status ? formatNumber(status.processed_count) : '0'} sub="Events parsed from dataset" />
           <MetricCard label="Total Dataset Events" value={status ? formatNumber(status.total_count) : '0'} sub="Total lines in dataset" />
@@ -276,22 +276,22 @@ export function ReplayPage() {
 
         {/* Replay Details Card */}
         {status && status.run_id && (
-          <div className="p-5 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs text-xs font-mono space-y-2.5">
-            <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+          <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs text-xs font-mono space-y-3">
+            <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
               <span className="text-kumo-subtle">Active Run Workspace ID:</span>
               <span className="font-semibold text-kumo-strong">{status.run_id}</span>
             </div>
-            <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+            <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
               <span className="text-kumo-subtle">Dataset Source:</span>
               <span className="text-kumo-default">{status.dataset}</span>
             </div>
             {status.dataset_mode === 'all' && (
               <>
-                <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+                <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                   <span className="text-kumo-subtle">Current File:</span>
                   <span className="text-kumo-default">{status.current_dataset || '—'}</span>
                 </div>
-                <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+                <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                   <span className="text-kumo-subtle">Dataset Index:</span>
                   <span className="text-kumo-default">
                     {status.current_dataset_index !== undefined && status.dataset_count !== undefined
@@ -301,15 +301,15 @@ export function ReplayPage() {
                 </div>
               </>
             )}
-            <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+            <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
               <span className="text-kumo-subtle">Current Event Timestamp:</span>
               <span className="text-kumo-default">{status.current_event_time || '—'}</span>
             </div>
-            <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+            <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
               <span className="text-kumo-subtle">Wall-Clock Elapsed Time:</span>
               <span className="text-kumo-default">{formatDuration(status.wall_clock_elapsed_seconds)}</span>
             </div>
-            <div className="flex justify-between items-center py-1">
+            <div className="flex justify-between items-center py-1.5">
               <span className="text-kumo-subtle">Isolation Forest Model:</span>
               <span className="text-kumo-default">{status.model_version}</span>
             </div>
@@ -320,11 +320,11 @@ export function ReplayPage() {
       {/* Reset Confirmation Dialog */}
       <DialogRoot open={showResetConfirm} onOpenChange={(o) => { if (!o) setShowResetConfirm(false); }}>
         <Dialog className="max-w-md w-full p-6 bg-kumo-canvas border border-kumo-hairline shadow-2xl rounded-xl">
-          <DialogTitle className="text-base font-semibold text-kumo-default">Start New Replay Run?</DialogTitle>
+          <DialogTitle className="text-base font-bold text-kumo-strong">Start New Replay Run?</DialogTitle>
           <DialogDescription className="text-xs text-kumo-subtle mt-2 leading-relaxed">
             Resetting will prepare a clean, isolated workspace for your next replay run. All data and SQLite evidence from the current run ({status?.run_id?.slice(0, 8)}) will remain preserved on disk for audit investigation.
           </DialogDescription>
-          <div className="flex justify-end gap-2.5 pt-4 mt-4 border-t border-kumo-hairline">
+          <div className="flex justify-end gap-3 pt-4 mt-4 border-t border-kumo-hairline">
             <DialogClose>
               <Button variant="ghost" size="sm" onClick={() => setShowResetConfirm(false)}>
                 Cancel

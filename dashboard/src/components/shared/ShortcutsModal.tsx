@@ -34,12 +34,12 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
   return (
     <DialogRoot open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <Dialog className="max-w-md w-full p-6 bg-kumo-canvas border border-kumo-hairline shadow-2xl rounded-xl">
-        <div className="flex items-center gap-2.5 pb-3 border-b border-kumo-hairline">
-          <div className="w-8 h-8 rounded-lg bg-[#F6821F]/10 border border-[#F6821F]/20 flex items-center justify-center text-[#F6821F]">
+        <div className="flex items-center gap-3 pb-3 border-b border-kumo-hairline">
+          <div className="w-8 h-8 rounded-lg bg-kumo-recessed border border-kumo-hairline flex items-center justify-center text-kumo-strong">
             <Keyboard size={18} weight="duotone" />
           </div>
           <div>
-            <DialogTitle className="text-base font-semibold text-kumo-default leading-none">
+            <DialogTitle className="text-base font-bold text-kumo-strong leading-none">
               Keyboard Shortcuts
             </DialogTitle>
             <p className="text-xs text-kumo-subtle mt-1">

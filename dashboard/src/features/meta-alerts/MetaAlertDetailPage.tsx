@@ -78,29 +78,29 @@ export function MetaAlertDetailPage() {
         />
       </div>
 
-      <div className="px-6 py-6 lg:px-8 space-y-6">
+      <div className="px-6 py-8 lg:px-10 space-y-8">
         {/* Tab 1: Overview & Detection */}
         {activeTab === 'overview' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Aggregation Profile Card */}
-            <div className="p-6 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs">
+            <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs">
               <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong mb-4 pb-3 border-b border-kumo-hairline">
                 Temporal Aggregation Profile
               </h3>
               <dl className="space-y-3 text-xs">
-                <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+                <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                   <dt className="text-kumo-subtle font-medium">Cluster Window:</dt>
                   <dd className="font-mono text-kumo-default">{formatDateTime(data.start_time)} → {formatDateTime(data.end_time)}</dd>
                 </div>
-                <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+                <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                   <dt className="text-kumo-subtle font-medium">Aggregated Event Count:</dt>
                   <dd className="font-mono font-bold text-kumo-strong">{data.alert_count} events</dd>
                 </div>
-                <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+                <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                   <dt className="text-kumo-subtle font-medium">Max Rule Severity:</dt>
                   <dd className="font-mono font-semibold text-kumo-default">{data.max_severity} / 15</dd>
                 </div>
-                <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+                <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                   <dt className="text-kumo-subtle font-medium">Agent Criticality Weight:</dt>
                   <dd className="font-mono text-kumo-default">{data.seven_features.agent_criticality ?? 1.0}</dd>
                 </div>
@@ -112,24 +112,24 @@ export function MetaAlertDetailPage() {
             </div>
 
             {/* Isolation Forest Evaluation Card */}
-            <div className="p-6 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs">
+            <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs">
               <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong mb-4 pb-3 border-b border-kumo-hairline">
                 Isolation Forest Evaluation & Scoring
               </h3>
               <dl className="space-y-3 text-xs">
-                <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+                <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                   <dt className="text-kumo-subtle font-medium">Calibrated Anomaly Score:</dt>
                   <dd className="font-mono font-bold text-kumo-strong text-sm">{formatScore(data.anomaly_score)}</dd>
                 </div>
-                <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+                <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                   <dt className="text-kumo-subtle font-medium">Deterministic Tukey Threshold:</dt>
                   <dd className="font-mono font-medium text-kumo-default">{formatScore(data.threshold_used)}</dd>
                 </div>
-                <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+                <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                   <dt className="text-kumo-subtle font-medium">Classification Decision:</dt>
                   <dd className="font-semibold text-kumo-default">{data.decision}</dd>
                 </div>
-                <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40">
+                <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                   <dt className="text-kumo-subtle font-medium">SOC Action Trigger:</dt>
                   <dd><DecisionBadge decision={data.decision} action={data.action} /></dd>
                 </div>
@@ -144,7 +144,7 @@ export function MetaAlertDetailPage() {
 
         {/* Tab 2: Seven Features */}
         {activeTab === 'features' && (
-          <div className="p-6 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-4">
+          <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-5">
             <div>
               <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong pb-2 border-b border-kumo-hairline">
                 Canonical 7-Feature Vector (Locked Research Specification)
@@ -153,13 +153,13 @@ export function MetaAlertDetailPage() {
                 Exact numerical features extracted from the temporal episode and fed into Isolation Forest
               </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 pt-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 pt-2">
               {SEVEN_FEATURE_KEYS.map((key, idx) => {
                 const val = data.seven_features[key];
                 return (
                   <div
                     key={key}
-                    className="p-4 rounded-lg border border-kumo-hairline bg-kumo-recessed/40 space-y-2"
+                    className="p-5 rounded-xl border border-kumo-hairline bg-kumo-recessed/30 space-y-2.5"
                   >
                     <div className="text-[11px] font-mono text-kumo-subtle flex items-center justify-between">
                       <span className="font-semibold text-kumo-default">#{idx + 1}</span>
@@ -177,7 +177,7 @@ export function MetaAlertDetailPage() {
 
         {/* Tab 3: Provenance Trace */}
         {activeTab === 'provenance' && trace && (
-          <div className="p-6 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-4">
+          <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-5">
             <div>
               <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong pb-2 border-b border-kumo-hairline">
                 Cryptographic Audit Provenance Trace ({trace.source_alert_ids.length} member alerts)
@@ -186,14 +186,14 @@ export function MetaAlertDetailPage() {
                 Every raw Wazuh event aggregated into this MetaAlert is cryptographically hashed and indexed in SQLite evidence storage
               </p>
             </div>
-            <div className="flex flex-wrap gap-2 max-h-72 overflow-y-auto p-3 rounded-lg border border-kumo-hairline bg-kumo-recessed/20">
+            <div className="flex flex-wrap gap-2.5 max-h-80 overflow-y-auto p-4 rounded-xl border border-kumo-hairline bg-kumo-recessed/20">
               {trace.source_alert_ids.map((aid, i) => (
                 <button
                   key={aid}
                   onClick={() => navigate(withRunId(`/meta-alerts/${id}/raw-alerts/${encodeURIComponent(aid)}`))}
-                  className="px-2.5 py-1 text-xs font-mono rounded border border-kumo-hairline bg-kumo-canvas text-kumo-default hover:border-[#F6821F] hover:text-[#F6821F] transition-all cursor-pointer shadow-2xs"
+                  className="px-3 py-1.5 text-xs font-mono rounded-lg border border-kumo-hairline bg-kumo-canvas text-kumo-default hover:border-kumo-strong hover:text-kumo-strong transition-all cursor-pointer shadow-2xs"
                 >
-                  <span className="text-[10px] mr-1 text-kumo-subtle">#{i + 1}</span>
+                  <span className="text-[10px] mr-1.5 text-kumo-subtle">#{i + 1}</span>
                   {aid}
                 </button>
               ))}

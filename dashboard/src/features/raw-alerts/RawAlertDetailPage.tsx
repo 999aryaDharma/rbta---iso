@@ -132,7 +132,7 @@ export function RawAlertDetailPage() {
         }
       />
 
-      <div className="px-6 py-6 lg:px-8 space-y-6">
+      <div className="px-6 py-8 lg:px-10 space-y-8">
         {/* Unavailable Evidence Banner */}
         {isError && (
           <Banner
@@ -148,15 +148,15 @@ export function RawAlertDetailPage() {
             {/* Left: Structured Fields */}
             <div className="space-y-6">
               {/* Identity & Ingestion */}
-              <div className="p-6 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs">
+              <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs">
                 <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong mb-4 pb-3 border-b border-kumo-hairline">Identity & Source Origin</h3>
                 <dl className="space-y-3 text-xs">
-                  <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Wazuh Alert ID:</dt> <dd className="font-mono font-semibold text-kumo-strong">{data.wazuh_alert_id}</dd></div>
-                  <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Timestamp (UTC):</dt> <dd className="font-mono text-kumo-default">{formatDateTime(data.timestamp)}</dd></div>
-                  <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Source Mode:</dt> <dd className="font-mono text-kumo-default">{data.source_mode || 'LIVE'}</dd></div>
-                  <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Agent:</dt> <dd className="text-kumo-default font-medium">{data.agent_name} ({data.agent_id}) · Crit: {data.agent_criticality}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Wazuh Alert ID:</dt> <dd className="font-mono font-semibold text-kumo-strong">{data.wazuh_alert_id}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Timestamp (UTC):</dt> <dd className="font-mono text-kumo-default">{formatDateTime(data.timestamp)}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Source Mode:</dt> <dd className="font-mono text-kumo-default">{data.source_mode || 'LIVE'}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Agent:</dt> <dd className="text-kumo-default font-medium">{data.agent_name} ({data.agent_id}) · Crit: {data.agent_criticality}</dd></div>
                   {data.source_index && (
-                    <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Source Index:</dt> <dd className="font-mono text-kumo-default">{data.source_index}</dd></div>
+                    <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Source Index:</dt> <dd className="font-mono text-kumo-default">{data.source_index}</dd></div>
                   )}
                   {data.source_document_id && (
                     <div className="flex justify-between items-center py-1"><dt className="text-kumo-subtle font-medium">Document ID:</dt> <dd className="font-mono text-kumo-default truncate max-w-xs">{data.source_document_id}</dd></div>
@@ -165,25 +165,25 @@ export function RawAlertDetailPage() {
               </div>
 
               {/* Rule Details */}
-              <div className="p-6 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs">
+              <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs">
                 <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong mb-4 pb-3 border-b border-kumo-hairline">Rule & Signature Detection</h3>
                 <dl className="space-y-3 text-xs">
-                  <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Rule ID:</dt> <dd className="font-mono font-semibold text-kumo-default">{data.rule_id}</dd></div>
-                  <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Severity Level:</dt> <dd className="font-mono font-bold text-kumo-strong">{data.rule_level} / 15</dd></div>
-                  <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Primary Group:</dt> <dd className="font-mono text-kumo-default">{data.rule_group_primary}</dd></div>
-                  <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Rule Groups:</dt> <dd className="font-mono text-kumo-default">{data.rule_groups_all.join(', ') || data.rule_group_primary}</dd></div>
-                  <div className="pt-1"><dt className="text-kumo-subtle font-medium">Description:</dt> <dd className="mt-1.5 p-3 rounded-md border border-kumo-hairline bg-kumo-recessed/40 text-xs text-kumo-default leading-relaxed">{data.rule_description}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Rule ID:</dt> <dd className="font-mono font-semibold text-kumo-default">{data.rule_id}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Severity Level:</dt> <dd className="font-mono font-bold text-kumo-strong">{data.rule_level} / 15</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Primary Group:</dt> <dd className="font-mono text-kumo-default">{data.rule_group_primary}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Rule Groups:</dt> <dd className="font-mono text-kumo-default">{data.rule_groups_all.join(', ') || data.rule_group_primary}</dd></div>
+                  <div className="pt-1"><dt className="text-kumo-subtle font-medium">Description:</dt> <dd className="mt-2 p-3.5 rounded-lg border border-kumo-hairline bg-kumo-recessed/30 text-xs text-kumo-default leading-relaxed">{data.rule_description}</dd></div>
                 </dl>
               </div>
 
               {/* Network & MITRE */}
-              <div className="p-6 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs">
+              <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs">
                 <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong mb-4 pb-3 border-b border-kumo-hairline">Network & MITRE ATT&CK Context</h3>
                 <dl className="space-y-3 text-xs">
-                  <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Source IP:</dt> <dd className="font-mono text-kumo-default font-semibold">{data.srcip || '—'}</dd></div>
-                  <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Location:</dt> <dd className="font-mono text-kumo-default">{data.location || '—'}</dd></div>
-                  <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Decoder:</dt> <dd className="font-mono text-kumo-default">{data.decoder || '—'}</dd></div>
-                  <div className="flex justify-between items-center py-1 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">MITRE Tactics:</dt> <dd className="font-mono text-kumo-default">{data.mitre_tactics.join(', ') || 'None'}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Source IP:</dt> <dd className="font-mono text-kumo-default font-semibold">{data.srcip || '—'}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Location:</dt> <dd className="font-mono text-kumo-default">{data.location || '—'}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Decoder:</dt> <dd className="font-mono text-kumo-default">{data.decoder || '—'}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">MITRE Tactics:</dt> <dd className="font-mono text-kumo-default">{data.mitre_tactics.join(', ') || 'None'}</dd></div>
                   <div className="flex justify-between items-center py-1"><dt className="text-kumo-subtle font-medium">MITRE Techniques:</dt> <dd className="font-mono text-kumo-default">{data.mitre_techniques.join(', ') || 'None'}</dd></div>
                 </dl>
               </div>
@@ -192,20 +192,20 @@ export function RawAlertDetailPage() {
             {/* Right: Full Log & JSON Profile */}
             <div className="space-y-6">
               {data.full_log && (
-                <div className="p-6 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs">
+                <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs">
                   <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong mb-3 pb-2 border-b border-kumo-hairline">Full Event Log Message</h3>
-                  <pre className="text-xs font-mono p-3 rounded-md border border-kumo-hairline bg-kumo-recessed/40 text-kumo-default overflow-auto max-h-48 whitespace-pre-wrap leading-relaxed">
+                  <pre className="text-xs font-mono p-3.5 rounded-lg border border-kumo-hairline bg-kumo-recessed/30 text-kumo-default overflow-auto max-h-48 whitespace-pre-wrap leading-relaxed">
                     {data.full_log}
                   </pre>
                 </div>
               )}
 
-              <div className="p-6 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs">
+              <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs">
                 <div className="flex items-center justify-between mb-3 pb-2 border-b border-kumo-hairline">
                   <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong">Canonical & Evidence JSON</h3>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded border border-kumo-hairline bg-kumo-recessed text-kumo-subtle">IMMUTABLE EVIDENCE</span>
                 </div>
-                <pre className="text-xs font-mono p-3.5 rounded-md border border-kumo-hairline bg-kumo-recessed/40 text-kumo-default overflow-auto max-h-[500px] leading-relaxed">
+                <pre className="text-xs font-mono p-4 rounded-lg border border-kumo-hairline bg-kumo-recessed/30 text-kumo-default overflow-auto max-h-[500px] leading-relaxed">
                   {JSON.stringify(data, null, 2)}
                 </pre>
               </div>

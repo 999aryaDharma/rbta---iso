@@ -25,15 +25,17 @@ export function PipelineStageDetail({
   };
 
   return (
-    <div className="rounded-lg border border-kumo-hairline bg-kumo-base p-4 space-y-3">
-      <div className="flex items-center justify-between pb-2 border-b border-kumo-hairline">
-        <div className="flex items-center gap-2">
-          <Info size={14} className="text-kumo-brand" />
-          <span className="text-xs font-semibold uppercase tracking-wider text-kumo-subtle">
+    <div className="rounded-xl border border-kumo-hairline bg-kumo-canvas p-6 shadow-xs space-y-4">
+      <div className="flex items-center justify-between pb-3 border-b border-kumo-hairline">
+        <div className="flex items-center gap-2.5">
+          <div className="w-6 h-6 rounded-md border border-kumo-hairline bg-kumo-recessed flex items-center justify-center text-kumo-strong">
+            <Info size={14} />
+          </div>
+          <span className="text-xs font-semibold uppercase tracking-wider text-kumo-strong">
             Stage Inspection: {activeStage.replace('_', ' ')}
           </span>
         </div>
-        <span className="text-[11px] font-mono text-kumo-subtle">
+        <span className="text-[11px] font-mono text-kumo-subtle px-2 py-0.5 rounded border border-kumo-hairline bg-kumo-recessed">
           Authoritative Backend Telemetry
         </span>
       </div>

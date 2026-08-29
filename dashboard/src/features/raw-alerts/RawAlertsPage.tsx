@@ -89,7 +89,7 @@ export function RawAlertsPage() {
         }
       />
 
-      <div className="px-6 py-6 lg:px-8 space-y-4">
+      <div className="px-6 py-8 lg:px-10 space-y-6">
         {/* Unresolved Evidence Warning Banner */}
         {data && data.unresolved_alert_ids && data.unresolved_alert_ids.length > 0 && (
           <Banner
@@ -101,7 +101,7 @@ export function RawAlertsPage() {
         )}
 
         {/* Filter Toolbar Card */}
-        <div className="p-4 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs flex flex-wrap items-center justify-between gap-3">
+        <div className="p-5 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs flex flex-wrap items-center justify-between gap-4">
           <div className="w-full sm:w-80">
             <InputGroup>
               <InputGroup.Addon align="start"><MagnifyingGlass size={14} className="text-kumo-subtle" /></InputGroup.Addon>
@@ -115,14 +115,14 @@ export function RawAlertsPage() {
 
           <div className="flex items-center gap-2 text-xs text-kumo-subtle">
             {isFetching && <span className="animate-pulse">Refreshing...</span>}
-            <span className="font-mono bg-kumo-recessed px-2 py-0.5 rounded border border-kumo-hairline">
+            <span className="font-mono bg-kumo-recessed px-2.5 py-1 rounded border border-kumo-hairline text-kumo-strong font-medium">
               {data ? `Showing ${data.filtered_total} / ${data.source_total} total` : 'Loading...'}
             </span>
           </div>
         </div>
 
         {/* Raw Alerts Table Container */}
-        <div className={`rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden transition-opacity ${isPlaceholderData ? 'opacity-70' : ''}`}>
+        <div className={`rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden transition-opacity ${isPlaceholderData ? 'opacity-70' : ''}`}>
           <Table>
             <Table.Header>
               <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
@@ -139,13 +139,13 @@ export function RawAlertsPage() {
               {data?.items.map((a) => (
                 <Table.Row
                   key={a.wazuh_alert_id}
-                  className="cursor-pointer hover:bg-kumo-recessed/50 transition-colors text-xs"
+                  className="cursor-pointer hover:bg-kumo-recessed/40 transition-colors text-xs"
                   onClick={() =>
                     navigate(withRunId(`/meta-alerts/${id}/raw-alerts/${encodeURIComponent(a.wazuh_alert_id)}`))
                   }
                 >
                   <Table.Cell className="text-xs font-mono text-kumo-subtle">{formatDateTime(a.timestamp)}</Table.Cell>
-                  <Table.Cell className="font-mono text-xs font-semibold text-kumo-link truncate max-w-[140px]">
+                  <Table.Cell className="font-mono text-xs font-semibold text-kumo-strong truncate max-w-[140px]">
                     {a.wazuh_alert_id}
                   </Table.Cell>
                   <Table.Cell className="font-mono text-xs text-kumo-default">{a.rule_id}</Table.Cell>
@@ -154,18 +154,18 @@ export function RawAlertsPage() {
                   <Table.Cell className="font-mono text-xs text-kumo-subtle">{a.srcip || '—'}</Table.Cell>
                   <Table.Cell className="text-xs">
                     {a.mitre_tactics && a.mitre_tactics.length > 0 ? (
-                      <span className="px-1.5 py-0.5 rounded text-[11px] font-mono border border-kumo-hairline bg-kumo-recessed text-kumo-default">
+                      <span className="px-2 py-0.5 rounded text-[11px] font-mono border border-kumo-hairline bg-kumo-recessed text-kumo-strong">
                         {a.mitre_tactics.join(', ')}
                       </span>
                     ) : (
-                      <span className="text-kumo-inactive text-[11px]">None</span>
+                      <span className="text-kumo-subtle text-[11px]">None</span>
                     )}
                   </Table.Cell>
                 </Table.Row>
               ))}
               {data && data.items.length === 0 && (
                 <Table.Row>
-                  <Table.Cell colSpan={7} className="py-12 text-center text-xs text-kumo-subtle">
+                  <Table.Cell colSpan={7} className="py-12 text-center text-xs text-kumo-subtle font-mono">
                     No matching raw alerts found.
                   </Table.Cell>
                 </Table.Row>
@@ -174,7 +174,7 @@ export function RawAlertsPage() {
           </Table>
 
           {/* Pagination */}
-          <div className="px-5 py-3 border-t border-kumo-hairline bg-kumo-recessed/20">
+          <div className="px-6 py-4 border-t border-kumo-hairline bg-kumo-recessed/20">
             <Pagination
               page={page}
               setPage={(p) => {
