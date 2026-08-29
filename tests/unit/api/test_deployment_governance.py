@@ -1,11 +1,14 @@
-"""Governance and security tests for production deployment manifests, Dockerfile, and Compose."""
+"""Governance and behavioral security tests for production deployment manifests, scripts, and Compose."""
 
 from datetime import datetime, timedelta, timezone
+import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import pytest
 
+from scripts.deploy.validate_state_dir import check_state_dir_permissions
 from src.contracts.raw_alert import CanonicalRawAlert
 from src.model.registry import ModelRegistry
 from src.model.scoring_pipeline import train_reference_pipeline
@@ -47,18 +50,66 @@ def test_compose_security_baseline():
     assert "no-new-privileges:true" in content
     assert "cap_drop:" in content
     assert "ALL" in content
-    assert ":ro" in content, "Model directory must be mounted read-only"
-    assert ":rw" in content, "State directory must be mounted read-write"
+    assert "../../models:/app/artifacts/models:ro" in content, "Model directory must be mounted root-relative read-only"
+    assert "../../state:/app/data/runtime:rw" in content, "State directory must be mounted root-relative read-write"
 
 
 def test_compose_fail_closed_on_missing_api_key_and_model_version():
-    """Verify Docker Compose manifest enforces fail-closed behavior for mandatory variables."""
+    """Verify Docker Compose manifest syntax enforces fail-closed parameter expansion."""
     compose_path = REPO_ROOT / "deploy" / "asus" / "compose.yml"
     content = compose_path.read_text(encoding="utf-8")
 
     assert "${RBTA_API_KEY:?" in content, "RBTA_API_KEY must be required via fail-closed parameter expansion"
     assert "${RBTA_MODEL_VERSION:?" in content, "RBTA_MODEL_VERSION must be required via fail-closed parameter expansion"
     assert "deploy-smoke-v1" not in content, "deploy-smoke-v1 must not be an automatic fallback in Compose"
+
+
+def test_compose_behavioral_fail_closed_missing_api_key():
+    """Behavioral execution test: Compose fails when RBTA_API_KEY is missing."""
+    compose_path = REPO_ROOT / "deploy" / "asus" / "compose.yml"
+    env = {k: v for k, v in os.environ.items() if k not in ("RBTA_API_KEY", "RBTA_MODEL_VERSION")}
+    env["RBTA_MODEL_VERSION"] = "ci-test-v1"
+
+    res = subprocess.run(
+        ["docker", "compose", "-f", str(compose_path), "config"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0, "Compose config must fail when RBTA_API_KEY is missing"
+    assert "RBTA_API_KEY" in res.stderr, f"Error output should mention missing RBTA_API_KEY: {res.stderr}"
+
+
+def test_compose_behavioral_fail_closed_missing_model_version():
+    """Behavioral execution test: Compose fails when RBTA_MODEL_VERSION is missing."""
+    compose_path = REPO_ROOT / "deploy" / "asus" / "compose.yml"
+    env = {k: v for k, v in os.environ.items() if k not in ("RBTA_API_KEY", "RBTA_MODEL_VERSION")}
+    env["RBTA_API_KEY"] = "ci-test-key"
+
+    res = subprocess.run(
+        ["docker", "compose", "-f", str(compose_path), "config"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0, "Compose config must fail when RBTA_MODEL_VERSION is missing"
+    assert "RBTA_MODEL_VERSION" in res.stderr, f"Error output should mention missing RBTA_MODEL_VERSION: {res.stderr}"
+
+
+def test_compose_behavioral_success_with_required_vars():
+    """Behavioral execution test: Compose succeeds when both mandatory variables are supplied."""
+    compose_path = REPO_ROOT / "deploy" / "asus" / "compose.yml"
+    env = {k: v for k, v in os.environ.items()}
+    env["RBTA_API_KEY"] = "ci-test-key"
+    env["RBTA_MODEL_VERSION"] = "ci-test-v1"
+
+    res = subprocess.run(
+        ["docker", "compose", "-f", str(compose_path), "config", "--quiet"],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, f"Compose config must succeed when mandatory variables are provided: {res.stderr}"
 
 
 def test_dockerignore_excludes_state_and_models():
@@ -109,6 +160,92 @@ def test_smoke_script_requires_api_key_fail_closed():
 
     assert "RBTA_API_KEY" in content
     assert "Authorization: Bearer" in content
+
+
+def test_smoke_script_behavioral_auth_fail_closed():
+    """Behavioral execution test: smoke.sh exits non-zero before network call if RBTA_API_KEY is unset."""
+    if os.name != "posix":
+        pytest.skip("Bash script behavioral execution requires POSIX environment (Linux CI)")
+
+    smoke_script = REPO_ROOT / "scripts" / "deploy" / "smoke.sh"
+    env = {k: v for k, v in os.environ.items() if k != "RBTA_API_KEY"}
+    res = subprocess.run(
+        ["bash", str(smoke_script)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0, "smoke.sh must exit non-zero when unauthenticated"
+    assert "RBTA_API_KEY" in res.stderr, f"Stderr should explain missing API key: {res.stderr}"
+
+
+def test_preflight_behavioral_missing_env():
+    """Behavioral execution test: asus-preflight.sh fails when RBTA_ENV_FILE is invalid."""
+    if os.name != "posix":
+        pytest.skip("Bash script behavioral execution requires POSIX environment (Linux CI)")
+
+    preflight_script = REPO_ROOT / "scripts" / "deploy" / "asus-preflight.sh"
+    env = {**os.environ, "RBTA_ENV_FILE": "nonexistent_env_file.env"}
+    res = subprocess.run(
+        ["bash", str(preflight_script)],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0, "preflight must exit non-zero when env file does not exist"
+    assert "not found" in res.stderr, f"Stderr should indicate file not found: {res.stderr}"
+
+
+def test_state_dir_validation_behavioral_wrong_uid_gid(tmp_path: Path):
+    """Behavioral test: state validator rejects directories not owned by UID/GID 10001 on POSIX."""
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    if os.name == "posix":
+        # Test with an impossible UID (e.g. 99999) to verify rejection logic
+        is_valid, msg = check_state_dir_permissions(state_dir, target_uid=99999, target_gid=99999)
+        assert is_valid is False
+        assert "99999:99999" in msg
+        assert "sudo chown -R 99999:99999" in msg
+        assert "sudo chmod 0750" in msg
+
+
+def test_state_dir_validation_behavioral_mock_uid_gid(tmp_path: Path, monkeypatch):
+    """Behavioral test: state validator accepts matching UID/GID 10001 with 0750 mode."""
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    class MockStat:
+        st_uid = 10001
+        st_gid = 10001
+        st_mode = stat.S_IFDIR | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR | stat.S_IRGRP | stat.S_IXGRP  # 0750
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "stat", lambda *args, **kwargs: MockStat())
+
+    is_valid, msg = check_state_dir_permissions(state_dir, target_uid=10001, target_gid=10001)
+    assert is_valid is True
+    assert "10001:10001" in msg
+    assert "PASS" in msg
+
+
+def test_state_dir_validation_behavioral_rejects_world_writable(tmp_path: Path, monkeypatch):
+    """Behavioral test: state validator rejects insecure world-writable (0777) state directory."""
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    class MockStat777:
+        st_uid = 10001
+        st_gid = 10001
+        st_mode = stat.S_IFDIR | 0o777
+
+    monkeypatch.setattr(os, "name", "posix")
+    monkeypatch.setattr(os, "stat", lambda *args, **kwargs: MockStat777())
+
+    is_valid, msg = check_state_dir_permissions(state_dir, target_uid=10001, target_gid=10001)
+    assert is_valid is False
+    assert "world-writable" in msg.lower()
+    assert "forbidden" in msg.lower()
 
 
 def test_validate_model_script_cli(tmp_path: Path):

@@ -21,10 +21,10 @@ services:
       - RBTA_PORT=8000
       - RBTA_LOG_LEVEL=${RBTA_LOG_LEVEL:-INFO}
     volumes:
-      # Host-mounted durable runtime state (RW)
-      - ./state:/app/data/runtime:rw
-      # Host-mounted immutable model registry (RO)
-      - ./models:/app/artifacts/models:ro
+      # Host-mounted durable runtime state (RW at repository root state/)
+      - ../../state:/app/data/runtime:rw
+      # Host-mounted immutable model registry (RO at repository root models/)
+      - ../../models:/app/artifacts/models:ro
     security_opt:
       - no-new-privileges:true
     cap_drop:

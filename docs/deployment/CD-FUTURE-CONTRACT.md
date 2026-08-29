@@ -27,7 +27,7 @@ When the ASUS server and Wazuh network route are confirmed, the future CD workfl
 
 1. **Connection Method**: Secure deployment agent via self-hosted GitHub Actions runner on ASUS server or isolated Tailscale / WireGuard overlay network.
 2. **Secret Storage**: Production `RBTA_API_KEY`, Wazuh credentials, and TLS certificates injected strictly at runtime on the server via `deploy/asus/.env` (mode `0600`). No secrets stored in GitHub repository.
-3. **Model Artifact Distribution**: Immutable model bundle pre-staged under `/srv/rbta-iso/deploy/asus/models/<model_version>` with valid `manifest.json`.
+3. **Model Artifact Distribution**: Immutable model bundle pre-staged under `/srv/rbta-iso/models/<model_version>` with valid `manifest.json`.
 
 ---
 

@@ -8,6 +8,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DEPLOY_DIR="${ROOT_DIR}/deploy/asus"
+STATE_DIR="${ROOT_DIR}/state"
+MODELS_DIR="${ROOT_DIR}/models"
 
 echo "=== [1/5] Resolving Environment Configuration ==="
 ENV_FILE="${RBTA_ENV_FILE:-${DEPLOY_DIR}/.env}"
@@ -42,7 +44,6 @@ fi
 echo "RBTA_MODEL_VERSION: ${RBTA_MODEL_VERSION}"
 
 echo "=== [3/5] Validating Model Artifact Registry ==="
-MODELS_DIR="${DEPLOY_DIR}/models"
 if [ ! -d "${MODELS_DIR}/${RBTA_MODEL_VERSION}" ]; then
   echo "ERROR: Model directory '${MODELS_DIR}/${RBTA_MODEL_VERSION}' does not exist." >&2
   echo "       Please stage the immutable model bundle before deploying." >&2
@@ -51,21 +52,9 @@ fi
 
 python "${SCRIPT_DIR}/validate_model.py" --models-dir "${MODELS_DIR}" --version "${RBTA_MODEL_VERSION}"
 
-echo "=== [4/5] Validating State Directory Permissions ==="
-STATE_DIR="${DEPLOY_DIR}/state"
+echo "=== [4/5] Validating State Directory Ownership & Permissions ==="
 mkdir -p "${STATE_DIR}"
-
-# Validate write accessibility on host state directory
-TEST_FILE="${STATE_DIR}/.preflight_write_test_$$"
-if ! touch "${TEST_FILE}" 2>/dev/null; then
-  echo "ERROR: Host state directory '${STATE_DIR}' is not writable by current user." >&2
-  echo "       Remediation (run as root on host):" >&2
-  echo "       sudo chown -R 10001:10001 ${STATE_DIR}" >&2
-  echo "       sudo chmod 0750 ${STATE_DIR}" >&2
-  exit 1
-fi
-rm -f "${TEST_FILE}"
-echo "Host state directory write check: OK"
+python "${SCRIPT_DIR}/validate_state_dir.py" --state-dir "${STATE_DIR}" --target-uid 10001 --target-gid 10001
 
 echo "=== [5/5] Validating Container Engine & Compose Specification ==="
 command -v docker >/dev/null 2>&1 || { echo "ERROR: docker command not found." >&2; exit 1; }
