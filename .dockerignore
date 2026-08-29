@@ -1,0 +1,48 @@
+# Git & GitHub
+.git
+.github
+.gitignore
+
+# Environment & Secrets
+.env
+.env.*
+*.pem
+*.key
+*.crt
+
+# Python & Testing Caches
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+.tox
+.mypy_cache
+
+# Virtual Environments
+.venv
+venv
+env
+
+# IDE Metadata
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Research Data & Notebooks
+notebooks
+data/
+artifacts/
+*.log
+*.sqlite
+*.db
+
+# Documentation & AI Agent Metadata
+docs/
+.agents/
+.gemini/
+tests/

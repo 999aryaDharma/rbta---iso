@@ -40,6 +40,7 @@ Thumbs.db
 # Secrets and Environment Configs
 .env
 .env.*
+!.env.example
 *.env
 *.pem
 *.key
@@ -67,6 +68,7 @@ reports/
 # Documentation
 docs/*
 !docs/research-spec/
+!docs/deployment/
 
 # Data files (large)
 data/*

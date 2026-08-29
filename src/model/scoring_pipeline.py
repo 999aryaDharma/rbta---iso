@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 import subprocess
 import sys
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import IsolationForest

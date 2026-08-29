@@ -1,0 +1,44 @@
+services:
+  rbta-service:
+    container_name: rbta-service
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: rbta-service:s10
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    read_only: false
+    ports:
+      - "127.0.0.1:${RBTA_HOST_PORT:-8000}:8000"
+    environment:
+      - RBTA_API_KEY=${RBTA_API_KEY:-}
+      - RBTA_MODEL_REGISTRY_DIR=/app/artifacts/models
+      - RBTA_MODEL_VERSION=${RBTA_MODEL_VERSION:-deploy-smoke-v1}
+      - RBTA_STATE_FILE=/app/data/runtime/state.json
+      - RBTA_HOST=0.0.0.0
+      - RBTA_PORT=8000
+      - RBTA_LOG_LEVEL=${RBTA_LOG_LEVEL:-INFO}
+    volumes:
+      # Host-mounted durable runtime state (RW)
+      - ./state:/app/data/runtime:rw
+      # Host-mounted immutable model registry (RO)
+      - ./models:/app/artifacts/models:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.00"
+          memory: 1024M
+          pids: 100
+        reservations:
+          cpus: "0.25"
+          memory: 256M

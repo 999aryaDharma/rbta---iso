@@ -228,8 +228,8 @@ class LiveRBTAService:
         finalized_metas = self.engine.process(alert)
         if finalized_metas:
             self.pending_scoring.extend(finalized_metas)
-            self._persist_to_disk()
 
+        self._persist_to_disk()
         return self._drain_pending_scoring()
 
     def check_idle_flush(self, current_event_time: datetime) -> List[ScoredMetaAlert]:
@@ -300,6 +300,6 @@ class LiveRBTAService:
             drained_metas = self.engine.drain()
             if drained_metas:
                 self.pending_scoring.extend(drained_metas)
-                self._persist_to_disk()
 
+        self._persist_to_disk()
         return self._drain_pending_scoring()
