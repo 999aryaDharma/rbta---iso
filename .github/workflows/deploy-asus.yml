@@ -1,0 +1,324 @@
+name: CD Deploy ASUS Production
+
+on:
+  workflow_run:
+    workflows:
+      - CI Verification & Production Gates
+    types:
+      - completed
+    branches:
+      - prod/final-dashboard-demo
+      - main
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: rbta-asus-production
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: 1. Package Verified Production Image
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Exact CI-Verified SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+
+      - name: Resolve Immutable Image Metadata
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          CODE_SHA="${{ github.event.workflow_run.head_sha }}"
+          IMAGE_TAG="sha-${CODE_SHA:0:12}"
+          BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          echo "code_sha=${CODE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Immutable Production Image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build \
+            --build-arg "GIT_SHA=${{ steps.image.outputs.code_sha }}" \
+            --build-arg "BUILD_DATE=${{ steps.image.outputs.build_date }}" \
+            --tag "rbta-service:${{ steps.image.outputs.image_tag }}" \
+            .
+
+      - name: Verify Image Provenance and Runtime User
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="rbta-service:${{ steps.image.outputs.image_tag }}"
+          EXPECTED_SHA="${{ steps.image.outputs.code_sha }}"
+
+          ACTUAL_SHA="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")"
+          RUNTIME_USER="$(docker inspect --format '{{ .Config.User }}' "$IMAGE")"
+
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "ERROR: OCI revision '$ACTUAL_SHA' does not match '$EXPECTED_SHA'." >&2
+            exit 1
+          fi
+
+          if [ "$RUNTIME_USER" != "appuser:appgroup" ] && [ "$RUNTIME_USER" != "10001:10001" ]; then
+            echo "ERROR: Unexpected production runtime user '$RUNTIME_USER'." >&2
+            exit 1
+          fi
+
+          echo "Verified immutable image provenance: $ACTUAL_SHA"
+          echo "Verified non-root runtime user: $RUNTIME_USER"
+
+      - name: Package Docker Image Artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rbta-production-image
+          docker save "rbta-service:${{ steps.image.outputs.image_tag }}" \
+            | gzip -1 \
+            > /tmp/rbta-production-image/rbta-service.tar.gz
+          sha256sum /tmp/rbta-production-image/rbta-service.tar.gz \
+            > /tmp/rbta-production-image/rbta-service.tar.gz.sha256
+
+      - name: Upload Production Image Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rbta-production-image-${{ github.event.workflow_run.head_sha }}
+          path: /tmp/rbta-production-image/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+  deploy:
+    name: 2. Deploy ASUS Production
+    needs: package
+    runs-on: [self-hosted, linux, x64, asus-deploy]
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      actions: read
+    env:
+      PROD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      RBTA_ENV_FILE: /srv/rbta-iso/deploy/asus/.env
+      VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+      IMAGE_TAG: sha-${{ github.event.workflow_run.head_sha }}
+
+    steps:
+      - name: Checkout Exact CI-Verified SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+          clean: true
+
+      - name: Resolve Short Immutable Tag
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHORT_TAG="sha-${VERIFIED_SHA:0:12}"
+          echo "image_tag=${SHORT_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Guard Against Stale or Superseded Deployment
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin "$PROD_BRANCH"
+          REMOTE_SHA="$(git rev-parse "origin/$PROD_BRANCH")"
+
+          if [ "$REMOTE_SHA" != "$VERIFIED_SHA" ]; then
+            echo "ERROR: Production branch advanced from verified SHA $VERIFIED_SHA to $REMOTE_SHA." >&2
+            echo "Refusing stale deployment." >&2
+            exit 1
+          fi
+
+      - name: Verify ASUS Host Prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$RBTA_ENV_FILE" || {
+            echo "ERROR: ASUS production environment file is missing: $RBTA_ENV_FILE" >&2
+            exit 1
+          }
+          command -v docker >/dev/null
+          docker compose version >/dev/null
+          command -v python3 >/dev/null
+
+      - name: Download CI-Built Production Image
+        uses: actions/download-artifact@v4
+        with:
+          name: rbta-production-image-${{ github.event.workflow_run.head_sha }}
+          path: /tmp/rbta-production-image
+
+      - name: Verify and Load Immutable Image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/rbta-production-image
+          sha256sum -c rbta-service.tar.gz.sha256
+          gzip -dc rbta-service.tar.gz | docker load
+
+          IMAGE="rbta-service:${{ steps.image.outputs.image_tag }}"
+          ACTUAL_SHA="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$IMAGE")"
+          if [ "$ACTUAL_SHA" != "$VERIFIED_SHA" ]; then
+            echo "ERROR: Loaded image revision '$ACTUAL_SHA' does not match verified SHA '$VERIFIED_SHA'." >&2
+            exit 1
+          fi
+
+      - name: Promote CI-Verified SHA in Local Provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path('.agents/campaign/STATE.json')
+          state = json.loads(path.read_text(encoding='utf-8'))
+          state['code_sha_tested'] = os.environ['VERIFIED_SHA']
+          state['active_branch'] = os.environ['PROD_BRANCH']
+          path.write_text(json.dumps(state, indent=2) + '\n', encoding='utf-8')
+          PY
+
+      - name: Capture Previous Production Image
+        id: previous
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREVIOUS_IMAGE="$(docker inspect --format '{{ .Config.Image }}' rbta-service 2>/dev/null || true)"
+          PREVIOUS_RUNNING="$(docker inspect --format '{{ .State.Running }}' rbta-service 2>/dev/null || true)"
+          echo "image=${PREVIOUS_IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "running=${PREVIOUS_RUNNING}" >> "$GITHUB_OUTPUT"
+          echo "Previous production image: ${PREVIOUS_IMAGE:-<none>}"
+          echo "Previous production running: ${PREVIOUS_RUNNING:-false}"
+
+      - name: Deploy CI-Verified Image
+        id: deploy
+        continue-on-error: true
+        shell: bash
+        env:
+          RBTA_CODE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RBTA_SKIP_BUILD: "1"
+        run: |
+          set -euo pipefail
+          bash scripts/deploy/asus-deploy.sh
+
+      - name: Roll Back Previous Production Image
+        if: steps.deploy.outcome == 'failure'
+        shell: bash
+        env:
+          PREVIOUS_IMAGE: ${{ steps.previous.outputs.image }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$PREVIOUS_IMAGE" ]; then
+            echo "No previous production image was recorded; automatic rollback is unavailable." >&2
+            exit 0
+          fi
+
+          if [[ "$PREVIOUS_IMAGE" != rbta-service:* ]]; then
+            echo "Previous image '$PREVIOUS_IMAGE' is not an rbta-service image; refusing unsafe rollback." >&2
+            exit 0
+          fi
+
+          CURRENT_IMAGE="$(docker inspect --format '{{ .Config.Image }}' rbta-service 2>/dev/null || true)"
+          CURRENT_RUNNING="$(docker inspect --format '{{ .State.Running }}' rbta-service 2>/dev/null || true)"
+
+          if [ "$CURRENT_IMAGE" = "$PREVIOUS_IMAGE" ] && [ "$CURRENT_RUNNING" = "true" ]; then
+            echo "Deployment failed before replacing production; previous container is still healthy/running candidate."
+            exit 0
+          fi
+
+          PREVIOUS_TAG="${PREVIOUS_IMAGE#rbta-service:}"
+          export RBTA_IMAGE_TAG="$PREVIOUS_TAG"
+
+          echo "Rolling back production to $PREVIOUS_IMAGE ..."
+          docker compose \
+            --env-file "$RBTA_ENV_FILE" \
+            -f deploy/asus/compose.yml \
+            up -d --no-build --force-recreate
+
+          PORT="$(python3 scripts/deploy/read_env.py "$RBTA_ENV_FILE" RBTA_HOST_PORT --require)"
+          READY=false
+          for attempt in $(seq 1 30); do
+            if curl -sSf "http://127.0.0.1:${PORT}/ready" >/dev/null 2>&1; then
+              READY=true
+              echo "Rollback readiness passed on attempt $attempt."
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" != "true" ]; then
+            echo "ERROR: Rollback container failed readiness checks." >&2
+            docker logs rbta-service --tail=100 || true
+            exit 1
+          fi
+
+          RBTA_ENV_FILE="$RBTA_ENV_FILE" bash scripts/deploy/smoke.sh
+          echo "Rollback completed successfully: $PREVIOUS_IMAGE"
+
+      - name: Fail Job After Deployment Rollback
+        if: steps.deploy.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "Production deployment failed. Rollback was attempted; preserving failed job status." >&2
+          exit 1
+
+      - name: Persist Tested SHA Provenance
+        if: steps.deploy.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch origin "$PROD_BRANCH"
+          REMOTE_SHA="$(git rev-parse "origin/$PROD_BRANCH")"
+          if [ "$REMOTE_SHA" != "$VERIFIED_SHA" ]; then
+            echo "ERROR: Production branch changed during deployment; refusing provenance push." >&2
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .agents/campaign/STATE.json
+
+          if git diff --cached --quiet; then
+            echo "Provenance already records $VERIFIED_SHA; nothing to commit."
+            exit 0
+          fi
+
+          git commit -m "chore(provenance): record deployed tested SHA ${VERIFIED_SHA:0:12} [skip ci]"
+          git push origin "HEAD:$PROD_BRANCH"
+
+      - name: Write Deployment Summary
+        if: steps.deploy.outcome == 'success'
+        shell: bash
+        run: |
+          {
+            echo "## ASUS Production Deployment"
+            echo ""
+            echo "- Verified SHA: \`$VERIFIED_SHA\`"
+            echo "- Image: \`rbta-service:${{ steps.image.outputs.image_tag }}\`"
+            echo "- Target: ASUS self-hosted runner"
+            echo "- Build location: GitHub-hosted Ubuntu runner"
+            echo "- Result: deployment and read-only smoke gates passed"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Cleanup Transferred Artifact
+        if: always()
+        shell: bash
+        run: |
+          rm -rf /tmp/rbta-production-image || true
