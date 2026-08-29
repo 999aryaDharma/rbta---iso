@@ -65,7 +65,7 @@ def test_structural_silhouette_and_permutation_baseline():
 def test_structural_silhouette_action_partitioning():
     """Verify explicit mapping and two/single-class edge cases for silhouette."""
     base_t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
-    
+
     # Create dummy bundle for scaler
     alerts = [
         make_alert(
@@ -80,18 +80,18 @@ def test_structural_silhouette_action_partitioning():
     ]
     batch_res = BatchResearchRunner(base_delta_t=timedelta(minutes=15), adaptive=False).run(alerts)
     bundle = train_reference_pipeline(batch_res.meta_alerts, random_state=42, model_version="eval-v1")
-    
+
     from src.contracts.scored_meta_alert import ScoredMetaAlert
-    
+
     def mock_sma(action: str, decision: str, feat_val: float) -> ScoredMetaAlert:
         return ScoredMetaAlert(
             meta_id=1, agent_id="A", agent_name="A", rule_group_primary="P",
             start_time=base_t, end_time=base_t, alert_count=1, max_severity=1,
-            mitre_tactics=(), 
+            mitre_tactics=(),
             seven_features={
-                "max_severity": feat_val, "mitre_tactic_count": feat_val, 
-                "critical_mitre_tactic_present": feat_val, "alert_count_log": feat_val, 
-                "rule_diversity_shannon": feat_val, "severity_dispersion": feat_val, 
+                "max_severity": feat_val, "mitre_tactic_count": feat_val,
+                "critical_mitre_tactic_present": feat_val, "alert_count_log": feat_val,
+                "rule_diversity_shannon": feat_val, "severity_dispersion": feat_val,
                 "agent_criticality": feat_val
             },
             raw_model_score=0.5, anomaly_score=0.5, threshold_used=0.5,
@@ -106,13 +106,13 @@ def test_structural_silhouette_action_partitioning():
         mock_sma("DAILY_DIGEST", "CONTEXTUAL_ANOMALY", -1.0),
         mock_sma("SUPPRESS", "NOISE", -1.0)
     ]
-    
+
     # 1. Controlled two-class test
     res_two = run_structural_silhouette_evaluation(metas_two_class, bundle, n_permutations=100)
     assert res_two.is_calculable is True
     assert res_two.n_valid_permutations == 100
     assert res_two.random_mean is not None
-    
+
     # 2. Single-class test
     metas_single = [
         mock_sma("SUPPRESS", "NOISE", 0.0),
@@ -120,7 +120,7 @@ def test_structural_silhouette_action_partitioning():
     ]
     res_single = run_structural_silhouette_evaluation(metas_single, bundle, n_permutations=100)
     assert res_single.is_calculable is False
-    
+
     # 3. Explicit mapping assertion
     import numpy as np
     observed = np.array([1 if s.action == "ESCALATE" else 0 for s in metas_two_class], dtype=int)

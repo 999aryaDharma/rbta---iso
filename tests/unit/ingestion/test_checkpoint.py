@@ -55,7 +55,7 @@ def test_checkpoint_invalid_json_raises_error(tmp_path: Path):
     from src.ingestion.checkpoint import CheckpointError
     cp_file = tmp_path / "bad.json"
     cp_file.write_text("{bad json", encoding="utf-8")
-    
+
     manager = CheckpointManager(cp_file)
     with pytest.raises(CheckpointError, match="Corrupt checkpoint file"):
         manager.load()
@@ -65,7 +65,7 @@ def test_checkpoint_invalid_indices_type_raises_error(tmp_path: Path):
     import json
     cp_file = tmp_path / "bad2.json"
     cp_file.write_text(json.dumps({"completed_indices": "not a list"}), encoding="utf-8")
-    
+
     manager = CheckpointManager(cp_file)
     with pytest.raises(CheckpointError, match="Invalid 'completed_indices' type"):
         manager.load()
@@ -75,7 +75,7 @@ def test_checkpoint_invalid_processed_count_raises_error(tmp_path: Path):
     import json
     cp_file = tmp_path / "bad3.json"
     cp_file.write_text(json.dumps({"processed_count": "not an int"}), encoding="utf-8")
-    
+
     manager = CheckpointManager(cp_file)
     with pytest.raises(CheckpointError, match="Invalid 'processed_count'"):
         manager.load()

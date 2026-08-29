@@ -58,12 +58,12 @@ def test_ready_endpoint_with_service_but_no_registry():
     class DummyPipeline:
         metadata = {"model_version": "meta-v1"}
         bundle = None
-    
+
     service = MagicMock()
     service.scoring_pipeline = DummyPipeline()
     app = create_app(service=service, model_registry=None)
     client = TestClient(app)
-    
+
     resp = client.get("/ready")
     assert resp.status_code == 200
     assert resp.json()["ready"] is True

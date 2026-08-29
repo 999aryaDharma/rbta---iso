@@ -69,6 +69,13 @@ reports/
 docs/*
 !docs/research-spec/
 !docs/deployment/
+!docs/design/
+
+# Frontend
+node_modules/
+dashboard/node_modules/
+dashboard/dist/
+*.tsbuildinfo
 
 # Data files (large)
 data/*

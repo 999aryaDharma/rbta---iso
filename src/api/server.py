@@ -74,6 +74,12 @@ def create_production_app(
             model_version,
         )
 
+    from src.runtime.raw_evidence import RawAlertEvidenceStore
+    from src.runtime.replay_controller import ReplayController
+
+    raw_evidence_db = env_map.get("RBTA_RAW_EVIDENCE_DB", "data/runtime/raw_alert_evidence.sqlite3")
+    raw_evidence_store = RawAlertEvidenceStore(raw_evidence_db)
+
     # 4. Construct live stateful service
     service: Optional[LiveRBTAService] = None
     if scoring_pipe is not None:
@@ -81,14 +87,27 @@ def create_production_app(
             scoring_pipeline=scoring_pipe,
             state_manager=state_mgr,
             adaptive=True,
+            raw_evidence_store=raw_evidence_store,
         )
 
-    # 5. Lifespan for graceful shutdown
+    # 5. Construct demonstration replay controller
+    replay_controller: Optional[ReplayController] = None
+    if scoring_pipe is not None:
+        replay_data_dir = Path(env_map.get("RBTA_REPLAY_DATA_DIR", "data/test_datasets")).resolve()
+        replay_controller = ReplayController(
+            scoring_pipeline=scoring_pipe,
+            raw_evidence_store=raw_evidence_store,
+            replay_data_dir=replay_data_dir,
+        )
+
+    # 6. Lifespan for graceful shutdown
     @asynccontextmanager
     async def lifespan(app_instance: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Starting RBTA production service...")
         yield
         logger.info("Shutting down RBTA production service (preserving active buckets)...")
+        if replay_controller is not None:
+            replay_controller.stop()
         if service is not None:
             service.shutdown(drain=False)
 
@@ -96,6 +115,8 @@ def create_production_app(
         service=service,
         model_registry=registry,
         api_key=api_key,
+        raw_evidence_store=raw_evidence_store,
+        replay_controller=replay_controller,
     )
     app.router.lifespan_context = lifespan
 

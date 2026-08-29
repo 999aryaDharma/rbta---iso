@@ -76,14 +76,14 @@ def test_wazuh_client_retry_429():
 
     mock_resp_429 = MagicMock()
     mock_resp_429.status_code = 429
-    
+
     mock_resp_200 = MagicMock()
     mock_resp_200.status_code = 200
     mock_resp_200.json.return_value = {"pit_id": "pit_success"}
 
     with patch.object(client._session, "request", side_effect=[mock_resp_429, mock_resp_200]):
         client.create_point_in_time("test")
-        
+
         assert mock_sleep.call_count == 1
         expected_delay = 0.5 + 0.1 * 0.5 # 2**(1-1)*0.5 + 0.05 = 0.55
         mock_sleep.assert_called_with(expected_delay)
@@ -101,5 +101,5 @@ def test_wazuh_client_retry_exhausted():
     with patch.object(client._session, "request", return_value=mock_resp_502):
         with pytest.raises(WazuhClientError, match="HTTP error"):
             client.create_point_in_time("test")
-        
+
         assert mock_sleep.call_count == 2

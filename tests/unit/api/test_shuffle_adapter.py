@@ -72,7 +72,7 @@ def test_shuffle_forwarder_idempotent_retry_on_lost_response():
     def fake_receiver_post(url, headers=None, json=None, timeout=None, verify=None):
         nonlocal business_executions
         event_id = headers.get("X-Event-ID")
-        
+
         # Check if already processed
         if event_id in processed_events:
             # Duplicate detection: no business side effects, return 200 OK

@@ -303,3 +303,43 @@ class RBTAEngine:
         self._active_buckets.clear()
         finalized_list.sort(key=lambda m: m.meta_id)
         return finalized_list
+
+    def snapshot_agents(self) -> list[dict]:
+        """Read-only snapshot of agent temporal states for dashboard."""
+        result = []
+        for agent_id, state in self._temporal_states.items():
+            agent_buckets = [
+                (key, bucket) for key, bucket in self._active_buckets.items()
+                if key[0] == agent_id
+            ]
+            result.append({
+                "agent_id": agent_id,
+                "agent_name": agent_buckets[0][1].agent_name if agent_buckets else "unknown",
+                "event_count": state.warmup_event_count,
+                "warmup_required": 100,
+                "warmup_progress": min(state.warmup_event_count, 100),
+                "is_warmed_up": state.is_warmed_up,
+                "baseline_gap_seconds": state.baseline_gap if state.is_warmed_up else None,
+                "ema_gap_seconds": state.ema_gap if state.is_warmed_up else None,
+                "base_delta_t_seconds": state.base_delta_t.total_seconds(),
+                "current_delta_t_seconds": state.current_delta_t.total_seconds(),
+                "active_bucket_count": len(agent_buckets),
+                "status": "ADAPTIVE" if state.is_warmed_up and state.adaptive else ("WARMUP" if not state.is_warmed_up else "FIXED"),
+            })
+        return result
+
+    def snapshot_buckets(self) -> list[dict]:
+        """Read-only snapshot of active buckets for dashboard."""
+        result = []
+        for (agent_id, rule_group), bucket in self._active_buckets.items():
+            result.append({
+                "meta_id": bucket.meta_id,
+                "agent_id": agent_id,
+                "agent_name": bucket.agent_name,
+                "rule_group_primary": rule_group,
+                "start_time": bucket.start_time.isoformat(),
+                "end_time": bucket.end_time.isoformat(),
+                "alert_count": bucket.alert_count,
+                "max_severity": bucket.max_severity,
+            })
+        return result

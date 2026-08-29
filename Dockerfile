@@ -1,4 +1,14 @@
 # syntax=docker/dockerfile:1
+# ── Stage 1: Dashboard Build ───────────────────────────────────
+FROM node:20-alpine AS dashboard-build
+
+WORKDIR /build
+COPY dashboard/package*.json /build/
+RUN npm ci || npm install
+COPY dashboard/ /build/
+RUN npm run build
+
+# ── Stage 2: Production Python Runtime ─────────────────────────
 FROM python:3.11-slim AS runtime
 
 # Image provenance build arguments
@@ -21,7 +31,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     RBTA_HOST=0.0.0.0 \
     RBTA_PORT=8000 \
     RBTA_MODEL_REGISTRY_DIR=/app/artifacts/models \
-    RBTA_STATE_FILE=/app/data/runtime/state.json
+    RBTA_STATE_FILE=/app/data/runtime/state.json \
+    RBTA_RAW_EVIDENCE_DB=/app/data/runtime/raw_alert_evidence.sqlite3 \
+    RBTA_DASHBOARD_DIST=/app/dashboard/dist
 
 # Create non-root application user and group (UID/GID 10001:10001)
 RUN groupadd --gid 10001 appgroup && \
@@ -35,6 +47,9 @@ RUN pip install --no-cache-dir .
 
 # Copy application source code
 COPY src/ /app/src/
+
+# Copy built dashboard static assets from stage 1
+COPY --from=dashboard-build /build/dist /app/dashboard/dist
 
 # Create runtime mount points with appropriate ownership
 RUN mkdir -p /app/data/runtime /app/artifacts/models && \

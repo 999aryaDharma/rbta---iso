@@ -39,10 +39,39 @@ jobs:
         run: |
           python -m pytest -v
 
+  frontend:
+    name: Frontend Build & Typecheck (Node.js 20)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install Dashboard Dependencies
+        working-directory: dashboard
+        run: |
+          npm ci || npm install
+
+      - name: Dashboard TypeScript Verification
+        working-directory: dashboard
+        run: |
+          npm run typecheck
+
+      - name: Dashboard Production Build
+        working-directory: dashboard
+        run: |
+          npm run build
+
   docker:
     name: Production Docker Build & Container Smoke
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, frontend]
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -77,12 +106,23 @@ jobs:
           for i in {1..30}; do
             if docker exec rbta-smoke python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)" 2>/dev/null; then
               echo "Liveness check passed successfully on attempt $i."
-              exit 0
+              break
             fi
             echo "Waiting for server startup... ($i/30)"
             sleep 1
           done
-          echo "Error: Server failed to respond to /health within 30 seconds"
+
+      - name: Verify Dashboard Serving Probe (/dashboard/)
+        run: |
+          for i in {1..10}; do
+            if docker exec rbta-smoke python -c "import urllib.request; res = urllib.request.urlopen('http://127.0.0.1:8000/dashboard/', timeout=2); assert res.status == 200" 2>/dev/null; then
+              echo "Dashboard static serving passed successfully on attempt $i."
+              exit 0
+            fi
+            echo "Waiting for dashboard route... ($i/10)"
+            sleep 1
+          done
+          echo "Error: Server failed to serve /dashboard/ with 200"
           docker logs rbta-smoke
           exit 1
 

@@ -113,11 +113,15 @@ class LiveRBTAService:
         state_manager: Optional[DurableStateManager] = None,
         base_delta_t: timedelta = DEFAULT_BASE_DELTA_T,
         adaptive: bool = True,
+        raw_evidence_store: Optional[Any] = None,
+        source_mode: str = 'LIVE',
     ) -> None:
         self.scoring_pipeline: ScoringPipeline = scoring_pipeline
         self.state_manager: DurableStateManager = state_manager or DurableStateManager()
         self.base_delta_t: timedelta = base_delta_t
         self.adaptive: bool = adaptive
+        self.raw_evidence_store = raw_evidence_store
+        self.source_mode = source_mode
 
         self.engine: RBTAEngine = RBTAEngine(base_delta_t=self.base_delta_t, adaptive=self.adaptive)
         self.pending_scoring: List[MetaAlert] = []
@@ -177,7 +181,7 @@ class LiveRBTAService:
             meta = self._parse_scored_alert(item)
             if meta:
                 self.outbox.append(meta)
-                
+
         for item in raw_history:
             meta = self._parse_scored_alert(item)
             if meta:
@@ -225,6 +229,10 @@ class LiveRBTAService:
         List[ScoredMetaAlert]
             Any newly finalized and scored meta-alerts produced during this step.
         """
+        if self.raw_evidence_store is not None:
+            # We don't have original payload here directly, pass None
+            self.raw_evidence_store.store(alert, source_mode=self.source_mode)
+
         finalized_metas = self.engine.process(alert)
         if finalized_metas:
             self.pending_scoring.extend(finalized_metas)

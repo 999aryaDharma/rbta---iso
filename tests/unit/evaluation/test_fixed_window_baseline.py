@@ -67,7 +67,7 @@ def test_fixed_window_baseline_calendar_anchoring():
     assert result.meta_alerts[0].alert_count == 2
     assert result.meta_alerts[1].alert_count == 3
     assert result.meta_alerts[2].alert_count == 1
-    
+
     # Assert different agent_ids/rule_groups within same window are NOT split
     assert len(result.meta_alerts[1].rule_id_distribution) > 0 # it aggregates them
 

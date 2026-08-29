@@ -109,7 +109,7 @@ def test_registry_explicit_version(tmp_path: Path):
     """Test explicit_version selection works and pointing to non-existent dir returns None."""
     metas = [make_meta(i) for i in range(1, 40)]
     bundle = train_reference_pipeline(metas, random_state=42, model_version="v_explicit_1")
-    
+
     registry = ModelRegistry(base_dir=tmp_path)
     registry.publish_bundle(bundle, model_version="v_explicit_1")
     registry.publish_bundle(bundle, model_version="v_explicit_2")
