@@ -78,3 +78,14 @@ class CollectorIngressBoundary:
             is_duplicate=False,
             canonical_alert=canonical_alert,
         )
+
+    def ingest(
+        self,
+        payload: Dict[str, Any],
+        authorization: Optional[str] = None,
+    ) -> CanonicalRawAlert:
+        """Convenience method returning canonical alert directly."""
+        res = self.process_incoming(payload, auth_header=authorization)
+        if res.canonical_alert is None:
+            raise IngressPayloadError("Failed to produce canonical alert")
+        return res.canonical_alert

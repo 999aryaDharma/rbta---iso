@@ -269,6 +269,13 @@ class LiveRBTAService:
         self.outbox = [item for item in self.outbox if item.meta_id != meta_id]
         self._persist_to_disk()
 
+    def commit_outbox(self, meta_ids: List[int]) -> int:
+        """Acknowledge and remove multiple scored meta-alerts from the outbox."""
+        initial = len(self.outbox)
+        self.outbox = [item for item in self.outbox if item.meta_id not in meta_ids]
+        self._persist_to_disk()
+        return initial - len(self.outbox)
+
     def get_history(self) -> List[ScoredMetaAlert]:
         return list(self.finalized_history)
 

@@ -21,4 +21,12 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
   },
+  // @ts-expect-error vitest config
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: [],
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    exclude: ['e2e/**', 'node_modules/**', 'dist/**'],
+  },
 });

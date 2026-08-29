@@ -1,46 +1,36 @@
-"""Deterministic replay controller managing background replay runs with speed control and session isolation."""
-
-from datetime import datetime, timezone
 import json
+import logging
 import os
 from pathlib import Path
 import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
+from uuid import uuid4
 
+from src.etl.wazuh_canonicalizer import canonicalize_wazuh_alert
 from src.contracts.raw_alert import CanonicalRawAlert
-from src.runners.clock import ReplayClock
-from src.runners.replay_runner import ReplayStreamRunner
 from src.model.scoring_pipeline import ScoringPipeline
+from src.runtime.durable_state import DurableStateManager
+from src.runtime.raw_evidence import RawAlertEvidenceStore
+from src.runtime.service import LiveRBTAService
+
+logger = logging.getLogger(__name__)
+
+SpeedFactor = Literal["1", "10", "100", "MAX"]
+ReplayStatus = Literal["IDLE", "RUNNING", "PAUSED", "STOPPED", "COMPLETED", "ERROR"]
 
 
 class ReplayController:
-    """Manages background replay runs deterministically."""
+    """Manages background replay runs deterministically with session isolation, strict canonicalization, and pacing."""
 
     def __init__(
         self,
         scoring_pipeline: ScoringPipeline,
-        raw_evidence_store: Any = None,
-        replay_data_dir: Optional[Path] = None,
-        replay_runs_dir: Optional[Path] = None,
+        replay_data_dir: Optional[Union[str, Path]] = None,
+        replay_runs_dir: Optional[Union[str, Path]] = None,
     ) -> None:
         self.scoring_pipeline = scoring_pipeline
-        self.raw_evidence_store = raw_evidence_store
-        self.run_id: Optional[str] = None
-        self.status: str = "IDLE"
-        self.processed_count: int = 0
-        self.total_count: int = 0
-        self.current_event_time: Optional[str] = None
-        self.wall_clock_start: Optional[float] = None
-        self.speed: float = 1.0
 
-        self._thread: Optional[threading.Thread] = None
-        self._pause_event = threading.Event()
-        self._pause_event.set()
-        self._stop_event = threading.Event()
-        self._lock = threading.Lock()
-
-        # Mount directory from env or argument
         if replay_data_dir is not None:
             self.data_dir = Path(replay_data_dir).resolve()
         else:
@@ -50,165 +40,341 @@ class ReplayController:
             self.runs_dir = Path(replay_runs_dir).resolve()
         else:
             self.runs_dir = Path("data/runtime/replay-runs").resolve()
+
+        self.data_dir.mkdir(parents=True, exist_ok=True)
         self.runs_dir.mkdir(parents=True, exist_ok=True)
 
-    def _read_dataset(self) -> List[CanonicalRawAlert]:
-        """Read alerts from the dataset directory (JSONL files)."""
-        alerts: List[CanonicalRawAlert] = []
+        self._lock = threading.RLock()
+        self._pause_event = threading.Event()
+        self._pause_event.set()
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+        # Current active run state
+        self.run_id: Optional[str] = None
+        self.status: ReplayStatus = "IDLE"
+        self.dataset_name: Optional[str] = None
+        self.speed_factor: SpeedFactor = "MAX"
+        self.processed_count: int = 0
+        self.total_count: int = 0
+        self.current_event_time: Optional[str] = None
+        self.wall_clock_start: Optional[float] = None
+        self.wall_clock_elapsed: float = 0.0
+        self.last_error: Optional[Dict[str, Any]] = None
+
+        self.current_service: Optional[LiveRBTAService] = None
+        self.current_evidence_store: Optional[RawAlertEvidenceStore] = None
+
+    def list_datasets(self) -> List[Dict[str, Any]]:
+        """List valid .jsonl replay datasets available in the data directory."""
+        items: List[Dict[str, Any]] = []
         if not self.data_dir.exists():
-            return alerts
+            return items
 
-        for filepath in sorted(self.data_dir.glob("*.jsonl")):
-            with open(filepath, "r", encoding="utf-8") as f:
-                for line in f:
-                    if not line.strip():
-                        continue
-                    try:
-                        data = json.loads(line)
-                        if "timestamp" in data:
-                            data["timestamp"] = datetime.fromisoformat(data["timestamp"])
-                            if data["timestamp"].tzinfo is None:
-                                data["timestamp"] = data["timestamp"].replace(tzinfo=timezone.utc)
-                        alert = CanonicalRawAlert(
-                            wazuh_alert_id=str(data.get("wazuh_alert_id", "")),
-                            timestamp=data["timestamp"],
-                            agent_id=str(data.get("agent_id", "001")),
-                            agent_name=str(data.get("agent_name", "unknown")),
-                            rule_group_primary=str(data.get("rule_group_primary", "unknown")),
-                            rule_level=int(data.get("rule_level", 3)),
-                            rule_id=str(data.get("rule_id", "1000")),
-                            mitre_tactics=tuple(data.get("mitre_tactics", ())),
-                            srcip=data.get("srcip"),
-                            agent_criticality=int(data.get("agent_criticality", 1)),
-                            metadata=data.get("metadata", {}),
-                        )
-                        alerts.append(alert)
-                    except Exception:
-                        pass
-        return alerts
+        for p in sorted(self.data_dir.glob("*.jsonl")):
+            if p.is_file():
+                items.append({
+                    "name": p.name,
+                    "size_bytes": p.stat().st_size,
+                })
+        return items
 
-    def get_status(self) -> Dict[str, Any]:
-        with self._lock:
-            elapsed = 0.0
-            if self.wall_clock_start is not None:
-                elapsed = max(0.0, time.time() - self.wall_clock_start)
-            events_per_sec = (self.processed_count / elapsed) if elapsed > 0 else 0.0
-            return {
-                "run_id": self.run_id,
-                "status": self.status,
-                "dataset": self.data_dir.name if self.data_dir.exists() else None,
-                "processed_count": self.processed_count,
-                "total_count": self.total_count,
-                "current_event_time": self.current_event_time,
-                "wall_clock_elapsed_seconds": elapsed,
-                "wall_clock_start": self.wall_clock_start,
-                "speed": self.speed,
-                "events_per_second": events_per_sec,
-            }
+    def validate_dataset_path(self, dataset_name: str) -> Path:
+        """Validate dataset name against directory traversal, absolute paths, and unsupported extensions."""
+        if not dataset_name:
+            raise ValueError("Dataset name cannot be empty")
 
-    def start(self, speed: float = 1.0, dataset: Optional[str] = None) -> None:
+        # Reject path separators and traversal
+        if os.path.basename(dataset_name) != dataset_name or ".." in dataset_name or "/" in dataset_name or "\\" in dataset_name:
+            raise ValueError(f"Path traversal detected in dataset_name: '{dataset_name}'")
+
+        if not dataset_name.endswith(".jsonl"):
+            raise ValueError(f"Replay datasets must be .jsonl files, got: '{dataset_name}'")
+
+        target_path = (self.data_dir / dataset_name).resolve()
+        # Verify it stays strictly within data_dir
+        try:
+            target_path.relative_to(self.data_dir)
+        except ValueError:
+            raise ValueError(f"Dataset path escapes data directory: '{dataset_name}'")
+
+        if not target_path.exists() or not target_path.is_file():
+            raise FileNotFoundError(f"Replay dataset not found: '{dataset_name}'")
+
+        return target_path
+
+    def _init_run_workspace(self, dataset_name: str, speed_factor: SpeedFactor) -> str:
+        """Create a dedicated, isolated run directory with its own state and evidence databases."""
+        new_run_id = str(uuid4())
+        run_workspace = self.runs_dir / new_run_id
+        run_workspace.mkdir(parents=True, exist_ok=True)
+
+        state_mgr = DurableStateManager(run_workspace / "state.json")
+        evidence_store = RawAlertEvidenceStore(run_workspace / "raw_alert_evidence.sqlite3")
+
+        service = LiveRBTAService(
+            scoring_pipeline=self.scoring_pipeline,
+            state_manager=state_mgr,
+            raw_evidence_store=evidence_store,
+            source_mode="REPLAY",
+        )
+
+        self.run_id = new_run_id
+        self.dataset_name = dataset_name
+        self.speed_factor = speed_factor
+        self.current_service = service
+        self.current_evidence_store = evidence_store
+        self.processed_count = 0
+        self.total_count = 0
+        self.current_event_time = None
+        self.wall_clock_start = None
+        self.wall_clock_elapsed = 0.0
+        self.last_error = None
+        self.status = "IDLE"
+
+        self._persist_run_meta()
+        return new_run_id
+
+    def _persist_run_meta(self) -> None:
+        if not self.run_id:
+            return
+        meta_path = self.runs_dir / self.run_id / "run.json"
+        data = {
+            "run_id": self.run_id,
+            "dataset_name": self.dataset_name,
+            "speed_factor": self.speed_factor,
+            "status": self.status,
+            "processed_count": self.processed_count,
+            "total_count": self.total_count,
+            "current_event_time": self.current_event_time,
+            "wall_clock_elapsed_seconds": self.wall_clock_elapsed,
+            "last_error": self.last_error,
+            "model_version": getattr(self.scoring_pipeline.bundle, "model_version", "v1") if self.scoring_pipeline and hasattr(self.scoring_pipeline, "bundle") else "v1",
+        }
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
+    def start(self, dataset_name: str, speed_factor: SpeedFactor = "MAX") -> Dict[str, Any]:
+        """Start a new deterministic replay stream on the specified dataset."""
         with self._lock:
             if self.status in ("RUNNING", "PAUSED"):
-                return
+                raise RuntimeError(f"Cannot start replay while status is '{self.status}'")
 
-            self.run_id = f"run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+            dataset_path = self.validate_dataset_path(dataset_name)
+
+            # Count total non-empty lines in dataset
+            total = 0
+            with open(dataset_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.strip():
+                        total += 1
+
+            if total == 0:
+                raise ValueError(f"Replay dataset '{dataset_name}' contains no events")
+
+            self._init_run_workspace(dataset_name, speed_factor)
+            self.total_count = total
             self.status = "RUNNING"
-            self.processed_count = 0
-            self.total_count = 0
-            self.speed = speed
             self.wall_clock_start = time.time()
-
             self._stop_event.clear()
             self._pause_event.set()
 
-            self._thread = threading.Thread(target=self._run_worker, daemon=True)
+            self._thread = threading.Thread(
+                target=self._run_loop,
+                args=(dataset_path,),
+                daemon=True,
+                name=f"replay-{self.run_id[:8]}",
+            )
             self._thread.start()
+            self._persist_run_meta()
+            return self.get_status()
 
-    def pause(self) -> None:
+    def pause(self) -> Dict[str, Any]:
+        """Pause wall-clock streaming progression without mutating event times or state."""
         with self._lock:
-            if self.status == "RUNNING":
-                self.status = "PAUSED"
-                self._pause_event.clear()
+            if self.status != "RUNNING":
+                return self.get_status()
+            self._pause_event.clear()
+            self.status = "PAUSED"
+            self._persist_run_meta()
+            return self.get_status()
 
-    def resume(self) -> None:
+    def resume(self) -> Dict[str, Any]:
+        """Resume streaming for the active paused run."""
         with self._lock:
-            if self.status == "PAUSED":
-                self.status = "RUNNING"
-                self._pause_event.set()
+            if self.status != "PAUSED":
+                return self.get_status()
+            self._pause_event.set()
+            self.status = "RUNNING"
+            self._persist_run_meta()
+            return self.get_status()
 
-    def stop(self) -> None:
-        self._stop_event.set()
-        self._pause_event.set()
-        if self._thread is not None and self._thread.is_alive():
+    def stop(self) -> Dict[str, Any]:
+        """Stop replay immediately. Does NOT force-drain active buckets, preserving partial state."""
+        with self._lock:
+            if self.status not in ("RUNNING", "PAUSED"):
+                return self.get_status()
+
+            self._stop_event.set()
+            self._pause_event.set()  # Unblock if paused
+            self.status = "STOPPED"
+            self._persist_run_meta()
+
+        if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
-        with self._lock:
-            self.status = "COMPLETED"
 
-    def reset(self) -> None:
-        self.stop()
+        return self.get_status()
+
+    def reset(self) -> Dict[str, Any]:
+        """Reset replay controller and prepare a clean new run workspace."""
         with self._lock:
+            if self.status in ("RUNNING", "PAUSED"):
+                self.stop()
+
             self.run_id = None
             self.status = "IDLE"
+            self.dataset_name = None
             self.processed_count = 0
             self.total_count = 0
             self.current_event_time = None
             self.wall_clock_start = None
+            self.wall_clock_elapsed = 0.0
+            self.last_error = None
+            self.current_service = None
+            self.current_evidence_store = None
+            return self.get_status()
 
-    def _run_worker(self) -> None:
-        try:
-            alerts = self._read_dataset()
+    def wait_until_complete(self, timeout: float = 10.0) -> Dict[str, Any]:
+        """Wait until active replay run reaches a terminal state (COMPLETED, STOPPED, ERROR)."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
             with self._lock:
-                self.total_count = len(alerts)
+                if self.status in ("COMPLETED", "STOPPED", "ERROR"):
+                    return self.get_status()
+            time.sleep(0.05)
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=1.0)
+        return self.get_status()
 
-            run_out_dir = self.runs_dir / (self.run_id or "unknown")
-            run_out_dir.mkdir(parents=True, exist_ok=True)
-            out_file_path = run_out_dir / "meta_alerts.jsonl"
+    def _run_loop(self, dataset_path: Path) -> None:
+        """Internal replay worker thread processing canonical alerts strictly."""
+        last_event_ts: Optional[float] = None
+        speed_multiplier = float(self.speed_factor) if self.speed_factor != "MAX" else None
 
-            clock_speed = "MAX" if (self.speed <= 0 or self.speed == float("inf")) else self.speed
-            clock = ReplayClock(speed_factor=clock_speed)
-            runner = ReplayStreamRunner(
-                scoring_pipeline=self.scoring_pipeline,
-                clock=clock,
-                adaptive=True,
-            )
+        line_no = 0
+        try:
+            with open(dataset_path, "r", encoding="utf-8") as f:
+                for raw_line in f:
+                    line_no += 1
+                    line_str = raw_line.strip()
+                    if not line_str:
+                        continue
 
-            def alert_generator():
-                for alert in alerts:
+                    # Check stop signal
                     if self._stop_event.is_set():
                         break
 
-                    while not self._pause_event.is_set() and not self._stop_event.is_set():
-                        time.sleep(0.01)
+                    # Check pause signal (blocks until resumed or stopped)
+                    while not self._pause_event.is_set():
+                        if self._stop_event.is_set():
+                            break
+                        time.sleep(0.02)
 
                     if self._stop_event.is_set():
                         break
+
+                    # Parse JSON
+                    try:
+                        raw_data = json.loads(line_str)
+                    except Exception as e:
+                        raise ValueError(f"Malformed JSON on line {line_no}: {e}") from e
+
+                    # Canonicalize strictly through single canonical path
+                    canonical_alert = canonicalize_wazuh_alert(raw_data)
+
+                    # Pacing if not MAX speed
+                    event_ts_sec = canonical_alert.timestamp.timestamp()
+                    if speed_multiplier is not None and last_event_ts is not None:
+                        dt = (event_ts_sec - last_event_ts) / speed_multiplier
+                        if dt > 0:
+                            sleep_end = time.monotonic() + min(dt, 5.0)
+                            while time.monotonic() < sleep_end:
+                                if self._stop_event.is_set():
+                                    break
+                                if not self._pause_event.is_set():
+                                    break
+                                time.sleep(0.01)
+
+                    if self._stop_event.is_set():
+                        break
+                    while not self._pause_event.is_set():
+                        if self._stop_event.is_set():
+                            break
+                        time.sleep(0.02)
+                    if self._stop_event.is_set():
+                        break
+
+                    last_event_ts = event_ts_sec
+
+                    # Ingest alert into isolated run service
+                    assert self.current_service is not None
+                    self.current_service.ingest_alert(canonical_alert)
 
                     with self._lock:
                         self.processed_count += 1
-                        self.current_event_time = alert.timestamp.isoformat()
+                        self.current_event_time = canonical_alert.timestamp.isoformat()
+                        if self.wall_clock_start is not None:
+                            self.wall_clock_elapsed = max(0.0, time.time() - self.wall_clock_start)
 
-                    if self.raw_evidence_store:
-                        self.raw_evidence_store.store(alert, source_mode="REPLAY")
+            # Check if finished naturally (EOF reached without manual stop)
+            if not self._stop_event.is_set():
+                # Drain remaining active buckets at natural EOF
+                if self.current_service:
+                    self.current_service.shutdown(drain=True)
 
-                    yield alert
-
-            with open(out_file_path, "w", encoding="utf-8") as out_file:
-                for meta in runner.run(alert_generator()):
-                    out_file.write(
-                        json.dumps({
-                            "meta_id": meta.meta_id,
-                            "anomaly_score": meta.anomaly_score,
-                            "decision": meta.decision,
-                            "action": meta.action,
-                        })
-                        + "\n"
-                    )
-                    out_file.flush()
-
-            with self._lock:
-                if not self._stop_event.is_set():
+                with self._lock:
                     self.status = "COMPLETED"
+                    if self.wall_clock_start is not None:
+                        self.wall_clock_elapsed = max(0.0, time.time() - self.wall_clock_start)
+                    self._persist_run_meta()
 
-        except Exception as exc:
+        except Exception as e:
+            logger.exception("Replay failed on dataset '%s', line %d", dataset_path.name, line_no)
             with self._lock:
                 self.status = "ERROR"
+                self.last_error = {
+                    "dataset": dataset_path.name,
+                    "line_number": line_no,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                }
+                if self.wall_clock_start is not None:
+                    self.wall_clock_elapsed = max(0.0, time.time() - self.wall_clock_start)
+                self._persist_run_meta()
+
+    def get_status(self) -> Dict[str, Any]:
+        """Return standardized status DTO for the replay controller."""
+        with self._lock:
+            elapsed = self.wall_clock_elapsed
+            if self.status == "RUNNING" and self.wall_clock_start is not None:
+                elapsed = max(0.0, time.time() - self.wall_clock_start)
+
+            eps = (self.processed_count / elapsed) if elapsed > 0 else 0.0
+            progress = (self.processed_count / self.total_count) if self.total_count > 0 else 0.0
+            model_ver = getattr(self.scoring_pipeline.bundle, "model_version", "v1") if self.scoring_pipeline and hasattr(self.scoring_pipeline, "bundle") else "v1"
+
+            return {
+                "run_id": self.run_id,
+                "status": self.status,
+                "dataset": self.dataset_name,
+                "speed": self.speed_factor,
+                "processed_count": self.processed_count,
+                "total_count": self.total_count,
+                "progress": round(progress, 4),
+                "current_event_time": self.current_event_time,
+                "wall_clock_elapsed_seconds": round(elapsed, 2),
+                "events_per_second": round(eps, 2),
+                "model_version": model_ver,
+                "error": self.last_error.get("error_message") if self.last_error else None,
+                "last_error": self.last_error,
+            }

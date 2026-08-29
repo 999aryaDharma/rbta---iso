@@ -1,16 +1,21 @@
 import { apiFetch } from './client';
-import { ReplayStatusSchema } from './schemas';
-import type { ReplayStatus } from './schemas';
+import { ReplayStatusSchema, ReplayDatasetListSchema } from './schemas';
+import type { ReplayStatus, ReplayDatasetList } from './schemas';
+
+export async function fetchReplayDatasets(): Promise<ReplayDatasetList> {
+  const data = await apiFetch<unknown>('/replay/datasets');
+  return ReplayDatasetListSchema.parse(data);
+}
 
 export async function fetchReplayStatus(): Promise<ReplayStatus> {
   const data = await apiFetch<unknown>('/replay/status');
   return ReplayStatusSchema.parse(data);
 }
 
-export async function startReplay(dataset: string, speed: number | string = 'MAX'): Promise<ReplayStatus> {
+export async function startReplay(dataset_name: string, speed_factor: string = 'MAX'): Promise<ReplayStatus> {
   const data = await apiFetch<unknown>('/replay/start', {
     method: 'POST',
-    body: JSON.stringify({ dataset, speed }),
+    body: JSON.stringify({ dataset_name, speed_factor }),
   });
   return ReplayStatusSchema.parse(data);
 }

@@ -58,10 +58,16 @@ jobs:
         run: |
           npm ci || npm install
 
-      - name: Dashboard TypeScript Verification
+      - name: Dashboard TypeScript & Lint Verification
         working-directory: dashboard
         run: |
+          npm run lint
           npm run typecheck
+
+      - name: Dashboard Unit Tests (Vitest)
+        working-directory: dashboard
+        run: |
+          npm run test
 
       - name: Dashboard Production Build
         working-directory: dashboard

@@ -12,6 +12,8 @@ import { IntegrationsPage } from '@/features/integrations/IntegrationsPage';
 import { SystemPage } from '@/features/system/SystemPage';
 import { AuthGate } from '@/components/shared/AuthGate';
 
+import { ThemeProvider } from '@/context/ThemeContext';
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -23,10 +25,11 @@ const queryClient = new QueryClient({
 
 export function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter basename="/dashboard">
-        <AuthGate>
-          <AppShell>
+    <ThemeProvider>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter basename="/dashboard">
+          <AuthGate>
+            <AppShell>
             <Routes>
               <Route path="/" element={<Navigate to="/overview" replace />} />
               <Route path="/overview" element={<OverviewPage />} />
@@ -43,5 +46,6 @@ export function App() {
         </AuthGate>
       </BrowserRouter>
     </QueryClientProvider>
+  </ThemeProvider>
   );
 }

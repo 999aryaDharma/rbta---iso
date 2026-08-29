@@ -1,3 +1,4 @@
+import { useSearchParams } from 'react-router-dom';
 import { usePollingQuery } from '@/hooks/usePolling';
 import { fetchAgents, fetchBuckets } from '@/api/dashboard';
 import { MetricCard } from '@/components/shared/MetricCard';
@@ -5,8 +6,11 @@ import { PageHeader } from '@/components/shared/PageHeader';
 import { formatNumber, formatSeconds } from '@/lib/utils';
 
 export function RBTAPage() {
-  const { data: agents = [] } = usePollingQuery(['agents'], fetchAgents, 3000);
-  const { data: buckets = [] } = usePollingQuery(['buckets'], fetchBuckets, 3000);
+  const [searchParams] = useSearchParams();
+  const runId = searchParams.get('run_id');
+
+  const { data: agents = [] } = usePollingQuery(['agents', runId || 'live'], () => fetchAgents(runId || undefined), 3000);
+  const { data: buckets = [] } = usePollingQuery(['buckets', runId || 'live'], () => fetchBuckets(runId || undefined), 3000);
 
   const activeAgents = agents.length;
   const warmedUp = agents.filter((a) => a.is_warmed_up).length;
@@ -16,15 +20,15 @@ export function RBTAPage() {
   return (
     <div>
       <PageHeader
-        title="RBTA Engine"
-        description="Real-time agent temporal state, dynamic aggregation windows, and active buckets"
+        title="RBTA Engine Telemetry"
+        description="Real-time agent temporal state, dynamic aggregation windows, and active open buckets"
       />
 
-      <div className="grid grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <MetricCard label="Active Agents" value={formatNumber(activeAgents)} />
         <MetricCard label="Warmed-up Agents" value={formatNumber(warmedUp)} />
         <MetricCard label="Seen Alerts" value={formatNumber(seenAlerts)} />
-        <MetricCard label="Active Buckets" value={formatNumber(activeBuckets)} />
+        <MetricCard label="Open Active Buckets" value={formatNumber(activeBuckets)} />
       </div>
 
       <h2 className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>
@@ -78,6 +82,13 @@ export function RBTAPage() {
                 </td>
               </tr>
             ))}
+            {agents.length === 0 && (
+              <tr>
+                <td colSpan={10} className="p-6 text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  No agent states active yet.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -102,15 +113,22 @@ export function RBTAPage() {
           </thead>
           <tbody>
             {buckets.map((b) => (
-              <tr key={b.meta_id} className="border-b hover:bg-[var(--bg-hover)]" style={{ borderColor: 'var(--border-subtle)' }}>
-                <td className="px-4 py-2.5 font-mono text-xs font-semibold">{b.meta_id}</td>
+              <tr key={b.meta_id || b.agent_id} className="border-b hover:bg-[var(--bg-hover)]" style={{ borderColor: 'var(--border-subtle)' }}>
+                <td className="px-4 py-2.5 font-mono text-xs font-semibold">#{b.meta_id}</td>
                 <td className="px-4 py-2.5 text-xs">{b.agent_name} ({b.agent_id})</td>
                 <td className="px-4 py-2.5 font-mono text-xs">{b.rule_group_primary}</td>
                 <td className="px-4 py-2.5 text-xs text-right font-mono font-semibold">{b.alert_count}</td>
                 <td className="px-4 py-2.5 text-xs text-right font-mono">{b.max_severity}/15</td>
-                <td className="px-4 py-2.5 text-xs">{b.start_time}</td>
+                <td className="px-4 py-2.5 text-xs font-mono">{b.start_time || '—'}</td>
               </tr>
             ))}
+            {buckets.length === 0 && (
+              <tr>
+                <td colSpan={6} className="p-6 text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>
+                  No open aggregation buckets currently active.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

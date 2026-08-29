@@ -26,7 +26,7 @@ export async function apiFetch<T>(path: string, options?: RequestInit): Promise<
 
   if (res.status === 401) {
     clearApiKey();
-    window.location.reload();
+    window.dispatchEvent(new CustomEvent('rbta:unauthorized'));
     throw new ApiError(401, 'Unauthorized');
   }
 

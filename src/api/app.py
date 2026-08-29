@@ -1,14 +1,18 @@
-"""FastAPI operational service application exposing REST ingress, outbox, and liveness."""
-
 from datetime import datetime, timezone
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
+from src.api.routes import auth, dashboard, meta_alerts, raw_alerts, replay
 from src.contracts.scored_meta_alert import ScoredMetaAlert
 from src.model.registry import ModelRegistry
+from src.runtime.context_resolver import DashboardRuntimeResolver
 from src.runtime.ingress import CollectorIngressBoundary, IngressPayloadError
+from src.runtime.raw_evidence import RawAlertEvidenceStore
+from src.runtime.replay_controller import ReplayController
 from src.runtime.service import LiveRBTAService, _serialize_scored_alert
 
 
@@ -16,10 +20,10 @@ def create_app(
     service: Optional[LiveRBTAService] = None,
     model_registry: Optional[ModelRegistry] = None,
     api_key: Optional[str] = None,
-    raw_evidence_store: Optional[Any] = None,
-    replay_controller: Optional[Any] = None,
+    raw_evidence_store: Optional[RawAlertEvidenceStore] = None,
+    replay_controller: Optional[ReplayController] = None,
 ) -> FastAPI:
-    """Factory creating configured FastAPI instance with dependency injection."""
+    """Factory creating configured FastAPI instance with dependency injection and modular routers."""
     app = FastAPI(
         title="RBTA Security Analytics REST Service",
         version="1.0.0",
@@ -29,8 +33,22 @@ def create_app(
     auth_key = api_key or os.getenv("RBTA_API_KEY")
     ingress_boundary = CollectorIngressBoundary(api_key=auth_key)
 
-    app.state.raw_evidence_store = raw_evidence_store
-    app.state.replay_controller = replay_controller
+    # Initialize runtime resolver for Live vs. Replay Run data isolation
+    scoring_pipe = service.scoring_pipeline if service else None
+    if scoring_pipe is None and replay_controller:
+        scoring_pipe = replay_controller.scoring_pipeline
+
+    runtime_resolver = DashboardRuntimeResolver(
+        live_service=service,
+        live_evidence_store=raw_evidence_store or RawAlertEvidenceStore(),
+        replay_controller=replay_controller or ReplayController(scoring_pipeline=scoring_pipe),
+        scoring_pipeline=scoring_pipe,
+    )
+
+    app.state.runtime_resolver = runtime_resolver
+    app.state.raw_evidence_store = raw_evidence_store or runtime_resolver.live_evidence_store
+    app.state.replay_controller = replay_controller or runtime_resolver.replay_controller
+    app.state.auth_key = auth_key
 
     def verify_auth(authorization: Optional[str] = Header(None)) -> None:
         if auth_key:
@@ -61,9 +79,18 @@ def create_app(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     content={"ready": False, "reason": "No active model bundle or scoring pipeline configured"},
                 )
+
+            # Extract version from metadata or bundle
+            version = "unknown"
+            pipe = service.scoring_pipeline
+            if hasattr(pipe, "metadata") and isinstance(pipe.metadata, dict):
+                version = pipe.metadata.get("model_version", "unknown")
+            elif hasattr(pipe, "bundle") and pipe.bundle is not None:
+                version = getattr(pipe.bundle, "model_version", "unknown")
+
             return JSONResponse(
                 status_code=status.HTTP_200_OK,
-                content={"ready": True, "active_model_version": service.scoring_pipeline.metadata.get("model_version", "unknown")},
+                content={"ready": True, "active_model_version": version},
             )
 
         active_version = model_registry.get_active_version()
@@ -80,8 +107,8 @@ def create_app(
                 content={
                     "ready": True,
                     "active_model_version": active_version,
-                    "threshold_q3": bundle.threshold.q3,
-                    "threshold": bundle.threshold.threshold,
+                    "threshold_q3": bundle.threshold.q3 if hasattr(bundle, "threshold") else 0.0,
+                    "threshold": bundle.threshold.threshold if hasattr(bundle, "threshold") else 0.0,
                 },
             )
         except Exception as exc:
@@ -97,386 +124,129 @@ def create_app(
         if service is None:
             return {"status": "uninitialized"}
 
-        return {
-            "seen_alerts_count": len(service.engine._seen_alert_ids),
-            "active_buckets_count": len(service.engine._active_buckets),
-            "outbox_depth": len(service.get_outbox()),
-            "meta_id_counter": service.engine._meta_id_counter,
-        }
+        seen_cnt = len(service.engine._seen_alert_ids) if hasattr(service.engine, "_seen_alert_ids") else 0
+        buckets_cnt = len(service.engine.snapshot_buckets())
 
-    @app.post("/api/v1/alerts/ingest", tags=["Ingress"])
-    def ingest_alert(
+        return {
+            "status": "ready",
+            "active_buckets": buckets_cnt,
+            "active_buckets_count": buckets_cnt,
+            "temporal_agents": len(service.engine.snapshot_agents()),
+            "seen_alerts_count": seen_cnt,
+            "outbox_count": len(service.outbox),
+            "finalized_history_count": len(service.finalized_history),
+            "pending_scoring_count": len(service.pending_scoring),
+            "raw_evidence_count": app.state.raw_evidence_store.count() if app.state.raw_evidence_store else 0,
+        }
+    @app.post("/ingest/wazuh", tags=["Ingress"])
+    def ingest_wazuh(
         payload: Dict[str, Any],
         authorization: Optional[str] = Header(None),
     ) -> Dict[str, Any]:
-        """Ingest raw Wazuh alert, aggregate in RBTA, and trigger online scoring if bucket finalized."""
+        """Ingest raw Wazuh log item via boundary canonicalization."""
         verify_auth(authorization)
-
-        try:
-            res = ingress_boundary.process_incoming(payload, auth_header=authorization)
-        except IngressPayloadError as exc:
-            if "Unauthorized" in str(exc):
-                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc))
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-
-        if res.is_duplicate or res.canonical_alert is None:
-            return {
-                "status": "accepted",
-                "alert_id": res.alert_id,
-                "is_duplicate": True,
-            }
-
         if service is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Service not initialized — cannot process alerts",
+                detail="Runtime service uninitialized",
             )
-        if res.canonical_alert.wazuh_alert_id in service.engine._seen_alert_ids:
-            return {"status": "accepted", "alert_id": res.alert_id, "is_duplicate": True}
-        service.ingest_alert(res.canonical_alert)
-
+        try:
+            canonical_alert = ingress_boundary.ingest(payload, authorization=authorization)
+        except IngressPayloadError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            )
+        scored_alerts = service.ingest_alert(canonical_alert)
         return {
             "status": "accepted",
-            "alert_id": res.alert_id,
-            "is_duplicate": False,
+            "wazuh_alert_id": canonical_alert.wazuh_alert_id,
+            "generated_meta_alerts": len(scored_alerts),
+            "meta_alerts": [_serialize_scored_alert(m) for m in scored_alerts],
         }
+
+    @app.post("/api/v1/alerts/ingest", tags=["Ingress"])
+    def ingest_alert_v1(
+        payload: Dict[str, Any],
+        authorization: Optional[str] = Header(None),
+    ) -> Dict[str, Any]:
+        """Ingest raw alert compatibility endpoint."""
+        verify_auth(authorization)
+        if service is None:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Runtime service uninitialized",
+            )
+        try:
+            canonical_alert = ingress_boundary.ingest(payload, authorization=authorization)
+        except IngressPayloadError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            )
+        is_dup = hasattr(service.engine, "_seen_alert_ids") and (canonical_alert.wazuh_alert_id in service.engine._seen_alert_ids)
+        service.ingest_alert(canonical_alert)
+        return {
+            "status": "accepted",
+            "alert_id": canonical_alert.wazuh_alert_id,
+            "is_duplicate": is_dup,
+        }
+
+    @app.get("/outbox/pending", tags=["Outbox"])
+    def get_pending_outbox(
+        authorization: Optional[str] = Header(None),
+    ) -> Dict[str, Any]:
+        """Retrieve uncommitted scored meta-alerts waiting for external dispatch."""
+        verify_auth(authorization)
+        if service is None:
+            return {"count": 0, "alerts": []}
+
+        alerts = [_serialize_scored_alert(m) for m in service.outbox]
+        return {"count": len(alerts), "alerts": alerts}
 
     @app.get("/api/v1/outbox", tags=["Outbox"])
-    def get_outbox(authorization: Optional[str] = Header(None)) -> List[Dict[str, Any]]:
-        """Retrieve unacknowledged scored meta-alerts from the durable outbox."""
+    def get_outbox_v1(
+        authorization: Optional[str] = Header(None),
+    ) -> List[Dict[str, Any]]:
+        """Retrieve uncommitted outbox alerts list directly."""
         verify_auth(authorization)
         if service is None:
             return []
-
-        outbox_metas = service.get_outbox()
-        return [_serialize_scored_alert(m) for m in outbox_metas]
+        return [_serialize_scored_alert(m) for m in service.outbox]
 
     @app.post("/api/v1/outbox/{meta_id}/ack", tags=["Outbox"])
-    def acknowledge_outbox(
+    def ack_outbox_v1(
         meta_id: int,
         authorization: Optional[str] = Header(None),
     ) -> Dict[str, Any]:
-        """Acknowledge and dequeue a scored meta-alert from the outbox."""
+        """Acknowledge dispatch of single meta alert."""
         verify_auth(authorization)
-        if service is not None:
-            service.acknowledge_outbox(meta_id)
+        if service is None:
+            raise HTTPException(status_code=503, detail="Service uninitialized")
+        service.commit_outbox([meta_id])
         return {"status": "acknowledged", "meta_id": meta_id}
 
-    @app.get("/api/v1/meta-alerts/{meta_id}", tags=["Outbox"])
-    def get_meta_alert_detail(
-        meta_id: int,
+    @app.post("/outbox/commit", tags=["Outbox"])
+    def commit_outbox(
+        meta_ids: List[int],
         authorization: Optional[str] = Header(None),
     ) -> Dict[str, Any]:
-        """Retrieve detail and provenance trace for a specific meta-alert."""
+        """Acknowledge successful dispatch of meta-alerts."""
         verify_auth(authorization)
         if service is None:
-            raise HTTPException(status_code=404, detail="Service not initialized")
+            return {"committed": 0, "remaining": 0}
 
-        # Search finalized history first (survives ACK)
-        detail = service.get_meta_detail(meta_id) if hasattr(service, 'get_meta_detail') else None
-        if detail is not None:
-            return _serialize_scored_alert(detail)
+        committed_count = service.commit_outbox(meta_ids)
+        return {"committed": committed_count, "remaining": len(service.outbox)}
 
-        # Fallback to active outbox
-        for item in service.get_outbox():
-            if item.meta_id == meta_id:
-                return _serialize_scored_alert(item)
-
-        raise HTTPException(status_code=404, detail=f"MetaAlert {meta_id} not found")
-
-    @app.get("/api/v1/meta-alerts/{meta_id}/trace", tags=["Outbox"])
-    def get_meta_alert_trace(
-        meta_id: int,
-        authorization: Optional[str] = Header(None),
-    ) -> Dict[str, Any]:
-        verify_auth(authorization)
-        if service is None:
-            raise HTTPException(status_code=404, detail="Service not initialized")
-
-        detail = service.get_meta_detail(meta_id) if hasattr(service, 'get_meta_detail') else None
-        if detail is None:
-            for item in service.get_outbox():
-                if item.meta_id == meta_id:
-                    detail = item
-                    break
-
-        if detail is None:
-            raise HTTPException(status_code=404, detail=f"MetaAlert {meta_id} not found")
-
-        return {
-            "meta_id": detail.meta_id,
-            "source_alert_ids": list(detail.source_alert_ids),
-            "agent_id": detail.agent_id,
-            "rule_group_primary": detail.rule_group_primary,
-            "decision": detail.decision,
-            "action": detail.action,
-            "model_version": detail.model_version,
-        }
-
-    @app.get("/api/v1/dashboard/summary", tags=["Dashboard"])
-    def dashboard_summary(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-        verify_auth(authorization)
-        if service is None:
-            return {"ready": False}
-
-        raw_count = len(service.engine._seen_alert_ids)
-        meta_count = len(service.finalized_history)
-
-        return {
-            "raw_alert_count": raw_count,
-            "meta_alert_count": meta_count,
-            "alert_reduction_rate": 1 - (meta_count / raw_count) if raw_count > 0 else 0.0,
-            "escalate_count": sum(1 for m in service.finalized_history if m.escalate),
-            "suppress_count": sum(1 for m in service.finalized_history if m.action == 'SUPPRESS'),
-            "active_agents_count": len(service.engine._temporal_states),
-            "active_buckets_count": len(service.engine._active_buckets),
-            "outbox_depth": len(service.get_outbox()),
-            "source_mode": getattr(service, 'source_mode', 'LIVE'),
-            "model_version": service.scoring_pipeline.metadata.get("model_version", "unknown") if service.scoring_pipeline else "unknown",
-            "ready": True,
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }
-
-    @app.get("/api/v1/dashboard/agents", tags=["Dashboard"])
-    def dashboard_agents(authorization: Optional[str] = Header(None)) -> List[Dict[str, Any]]:
-        verify_auth(authorization)
-        if service is None:
-            return []
-        return service.engine.snapshot_agents()
-
-    @app.get("/api/v1/dashboard/buckets", tags=["Dashboard"])
-    def dashboard_buckets(authorization: Optional[str] = Header(None)) -> List[Dict[str, Any]]:
-        verify_auth(authorization)
-        if service is None:
-            return []
-        return service.engine.snapshot_buckets()
-
-    @app.get("/api/v1/dashboard/timeseries", tags=["Dashboard"])
-    def dashboard_timeseries(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-        verify_auth(authorization)
-        if service is None:
-            return {"series": []}
-
-        from collections import defaultdict
-
-        buckets = defaultdict(lambda: {"raw_alerts": 0, "meta_alerts": 0})
-        for meta in service.finalized_history:
-            if not meta.start_time:
-                continue
-            hour_str = meta.start_time.replace(minute=0, second=0, microsecond=0).isoformat()
-            buckets[hour_str]["meta_alerts"] += 1
-            buckets[hour_str]["raw_alerts"] += meta.alert_count
-
-        series = [{"time": k, "raw_alerts": v["raw_alerts"], "meta_alerts": v["meta_alerts"]}
-                  for k, v in sorted(buckets.items())]
-        return {"series": series}
-
-    @app.get("/api/v1/dashboard/system", tags=["Dashboard"])
-    def dashboard_system(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-        verify_auth(authorization)
-        if service is None:
-            return {"api_status": "ok", "runtime_ready": False}
-
-        pipeline = service.scoring_pipeline
-        return {
-            "api_status": "ok",
-            "runtime_ready": True,
-            "source_mode": getattr(service, 'source_mode', 'LIVE'),
-            "model_version": pipeline.metadata.get("model_version", "unknown") if pipeline else "unknown",
-            "feature_schema_version": "1.0",
-            "score_calibration_version": pipeline.metadata.get("score_calibration_version", "minmax-v1") if pipeline else "unknown",
-            "threshold": pipeline.threshold.threshold if pipeline and pipeline.threshold else 0.0,
-            "seen_alerts": len(service.engine._seen_alert_ids),
-            "active_buckets": len(service.engine._active_buckets),
-            "outbox_depth": len(service.get_outbox()),
-            "current_run_id": app.state.replay_controller.run_id if app.state.replay_controller else None
-        }
-
-    @app.get("/api/v1/meta-alerts", tags=["Dashboard"])
-    def meta_alerts_list(
-        page: int = 1,
-        page_size: int = 20,
-        decision: Optional[str] = None,
-        agent_id: Optional[str] = None,
-        rule_group: Optional[str] = None,
-        search: Optional[str] = None,
-        sort_by: Optional[str] = None,
-        sort_order: Optional[str] = "desc",
-        authorization: Optional[str] = Header(None)
-    ) -> Dict[str, Any]:
-        verify_auth(authorization)
-        if service is None:
-            return {"items": [], "total": 0, "page": page, "page_size": page_size}
-
-        filtered = service.finalized_history
-        if decision:
-            filtered = [m for m in filtered if m.decision == decision]
-        if agent_id:
-            filtered = [m for m in filtered if m.agent_id == agent_id]
-        if rule_group:
-            filtered = [m for m in filtered if m.rule_group_primary == rule_group]
-        if search:
-            search = search.lower()
-            filtered = [m for m in filtered if search in m.agent_name.lower() or search in m.rule_group_primary.lower()]
-
-        if sort_by:
-            rev = (sort_order == "desc")
-            try:
-                filtered = sorted(filtered, key=lambda m: getattr(m, sort_by), reverse=rev)
-            except AttributeError:
-                pass
-        else:
-            filtered = sorted(filtered, key=lambda m: m.meta_id, reverse=True)
-
-        total = len(filtered)
-        start = (page - 1) * page_size
-        end = start + page_size
-
-        items = [_serialize_scored_alert(m) for m in filtered[start:end]]
-        return {
-            "items": items,
-            "total": total,
-            "page": page,
-            "page_size": page_size
-        }
-
-    @app.get("/api/v1/meta-alerts/{meta_id}/raw-alerts", tags=["Dashboard"])
-    def meta_alert_raw_alerts(
-        meta_id: int,
-        page: int = 1,
-        page_size: int = 50,
-        search: Optional[str] = None,
-        rule_id: Optional[str] = None,
-        level_min: Optional[int] = None,
-        level_max: Optional[int] = None,
-        srcip: Optional[str] = None,
-        mitre_tactic: Optional[str] = None,
-        from_ts: Optional[str] = None,
-        to_ts: Optional[str] = None,
-        authorization: Optional[str] = Header(None)
-    ) -> Dict[str, Any]:
-        verify_auth(authorization)
-        if service is None:
-            raise HTTPException(404)
-
-        detail = service.get_meta_detail(meta_id)
-        if not detail:
-            for item in service.get_outbox():
-                if item.meta_id == meta_id:
-                    detail = item
-                    break
-        if not detail:
-            raise HTTPException(404, "Meta alert not found")
-
-        store = app.state.raw_evidence_store
-        if not store:
-            return {
-                "meta_id": meta_id,
-                "total": 0,
-                "resolved_count": 0,
-                "unresolved_alert_ids": list(detail.source_alert_ids),
-                "items": [],
-                "page": page,
-                "page_size": page_size
-            }
-
-        items, total = store.search(
-            meta_id_alert_ids=list(detail.source_alert_ids),
-            page=page,
-            page_size=page_size,
-            search=search,
-            rule_id=rule_id,
-            level_min=level_min,
-            level_max=level_max,
-            srcip=srcip,
-            mitre_tactic=mitre_tactic,
-            from_ts=from_ts,
-            to_ts=to_ts
-        )
-
-        return {
-            "meta_id": meta_id,
-            "total": total,
-            "resolved_count": len(items) if not search and not rule_id and level_min is None else -1, # partial indicator
-            "unresolved_alert_ids": [],
-            "items": items,
-            "page": page,
-            "page_size": page_size
-        }
-
-    @app.get("/api/v1/raw-alerts/{wazuh_alert_id}", tags=["Dashboard"])
-    def raw_alert_detail(
-        wazuh_alert_id: str,
-        authorization: Optional[str] = Header(None)
-    ) -> Dict[str, Any]:
-        verify_auth(authorization)
-        store = app.state.raw_evidence_store
-        if not store:
-            raise HTTPException(503, "Store not initialized")
-
-        alert = store.get(wazuh_alert_id)
-        if not alert:
-            raise HTTPException(404, "Raw alert not found")
-        return alert
-
-    @app.get("/api/v1/replay/status", tags=["Dashboard"])
-    def replay_status(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-        verify_auth(authorization)
-        ctrl = app.state.replay_controller
-        if not ctrl:
-            return {"status": "UNAVAILABLE"}
-        return ctrl.get_status()
-
-    @app.post("/api/v1/replay/start", tags=["Dashboard"])
-    def replay_start(speed: float = 1.0, authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-        verify_auth(authorization)
-        ctrl = app.state.replay_controller
-        if not ctrl:
-            raise HTTPException(503)
-        ctrl.start(speed)
-        return ctrl.get_status()
-
-    @app.post("/api/v1/replay/pause", tags=["Dashboard"])
-    def replay_pause(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-        verify_auth(authorization)
-        ctrl = app.state.replay_controller
-        if not ctrl:
-            raise HTTPException(503)
-        ctrl.pause()
-        return ctrl.get_status()
-
-    @app.post("/api/v1/replay/resume", tags=["Dashboard"])
-    def replay_resume(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-        verify_auth(authorization)
-        ctrl = app.state.replay_controller
-        if not ctrl:
-            raise HTTPException(503)
-        ctrl.resume()
-        return ctrl.get_status()
-
-    @app.post("/api/v1/replay/stop", tags=["Dashboard"])
-    def replay_stop(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-        verify_auth(authorization)
-        ctrl = app.state.replay_controller
-        if not ctrl:
-            raise HTTPException(503)
-        ctrl.stop()
-        return ctrl.get_status()
-
-    @app.post("/api/v1/replay/reset", tags=["Dashboard"])
-    def replay_reset(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-        verify_auth(authorization)
-        ctrl = app.state.replay_controller
-        if not ctrl:
-            raise HTTPException(503)
-        ctrl.reset()
-        return ctrl.get_status()
+    # Mount Modular Dashboard APIRouters
+    app.include_router(auth.router)
+    app.include_router(dashboard.router)
+    app.include_router(meta_alerts.router)
+    app.include_router(raw_alerts.router)
+    app.include_router(replay.router)
 
     # Mount Dashboard Static Files for production serving
-    from pathlib import Path
-    from fastapi.responses import FileResponse, RedirectResponse
-    from fastapi.staticfiles import StaticFiles
-
     dashboard_dist_env = os.getenv("RBTA_DASHBOARD_DIST", "dashboard/dist")
     dashboard_dist_path = Path(dashboard_dist_env).resolve()
     if not dashboard_dist_path.exists():

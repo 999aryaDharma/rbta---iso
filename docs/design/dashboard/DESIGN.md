@@ -1,10 +1,28 @@
 # RBTA + Isolation Forest Dashboard Design System
 
-**Project:** RBTA + Isolation Forest untuk Mitigasi Alert Fatigue pada Log Keamanan SIEM Wazuh  
-**Sprint:** S11 — Dashboard & Demonstration Layer  
-**Status:** Design System / UI Source of Truth  
-**Visual Direction:** Cloudflare-inspired operational dashboard, not a pixel-for-pixel clone  
-**Frontend Stack:** React + TypeScript + Vite + Tailwind CSS v4 + shadcn/ui
+**Project:** RBTA + Isolation Forest untuk Mitigasi Alert Fatigue pada Log Keamanan SIEM Wazuh
+**Sprint:** S11 — Dashboard & Demonstration Layer
+**Status:** Design System / UI Source of Truth
+**Visual Direction:** Cloudflare-inspired operational control plane (Kumo visual language alignment, task-oriented navigation, high-density technical console)
+**Frontend Stack:** React + TypeScript + Vite + Tailwind CSS v4 + TanStack Table + shadcn/ui
+
+---
+
+## Cloudflare 2026 Visual & Interaction Refresh
+
+### Conceptual Basis & Principles
+The 2026 visual and interaction refresh adopts key architectural patterns from modern Cloudflare control planes:
+1. **Kumo Visual Language**: Crisp neutral backgrounds (`#f7f7f8` light, `#121316` dark), 7px card radii, subtle 1px border lines (`#e2e5e9` / `#2d3139`), and purposeful accent usage without neon SOC clutter.
+2. **Task-Oriented Navigation**: Grouping operational workflows into logical user tasks rather than internal Python module names:
+   - `OVERVIEW` (System Overview & Needs Investigation)
+   - `INVESTIGATE` (MetaAlerts & RBTA Engine)
+   - `DEMONSTRATE` (Deterministic Replay Controller)
+   - `OPERATIONS` (Integrations & System Health)
+3. **Actionable Overview**: Immediate visual hierarchy prioritizing urgent escalations ("Needs Investigation") before long-term trend lines.
+4. **Context-Preserving Deep Links**: Clicking KPI metrics (e.g. Escalated MetaAlerts, Agent ID) transitions directly into prefiltered investigative views while preserving the `run_id` context parameter.
+5. **Multi-Mode Appearance**: Light, Dark, and System theme support persisted locally in `localStorage`.
+6. **Command Palette & Keyboard Shortcuts**: Quick search navigation (`/`), global shortcut modal (`?`), screen navigation (`g o`, `g m`, `g r`, `g p`, `g s`), and forensic paging (`[`, `]`).
+7. **Offline-First Typography**: Elimination of external Google Fonts network calls in favor of a robust system sans-serif font stack.
 
 ---
 

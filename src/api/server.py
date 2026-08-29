@@ -96,7 +96,6 @@ def create_production_app(
         replay_data_dir = Path(env_map.get("RBTA_REPLAY_DATA_DIR", "data/test_datasets")).resolve()
         replay_controller = ReplayController(
             scoring_pipeline=scoring_pipe,
-            raw_evidence_store=raw_evidence_store,
             replay_data_dir=replay_data_dir,
         )
 

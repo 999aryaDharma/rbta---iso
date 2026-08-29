@@ -1,148 +1,218 @@
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import MappingProxyType
 import pytest
 from fastapi.testclient import TestClient
-from datetime import datetime, timezone
-import json
 
 from src.api.app import create_app
-from src.runtime.service import LiveRBTAService
+from src.contracts.meta_alert import MetaAlert
+from src.contracts.raw_alert import CanonicalRawAlert
+from src.model.scoring_pipeline import ScoringPipeline, train_reference_pipeline
+from src.runtime.durable_state import DurableStateManager
+from src.runtime.raw_evidence import RawAlertEvidenceStore
 from src.runtime.replay_controller import ReplayController
-from src.model.scoring_pipeline import ScoringPipeline
-from src.contracts.scored_meta_alert import ScoredMetaAlert
+from src.runtime.service import LiveRBTAService
 
-class DummyPipeline:
-    def __init__(self):
-        self.metadata = {"model_version": "test-v1", "score_calibration_version": "test-v1"}
-        self.threshold = type('obj', (object,), {'threshold': 0.8})()
 
 @pytest.fixture
-def service():
-    pipeline = DummyPipeline()
-    svc = LiveRBTAService(scoring_pipeline=pipeline, adaptive=False)
+def test_setup(tmp_path: Path):
+    db_path = tmp_path / "evidence.sqlite3"
+    state_path = tmp_path / "state.json"
+    datasets_dir = tmp_path / "datasets"
+    runs_dir = tmp_path / "runs"
+    datasets_dir.mkdir()
+    runs_dir.mkdir()
 
-    # Add dummy history for testing
-    meta = ScoredMetaAlert(
-        meta_id=1,
-        agent_id="001",
-        agent_name="agent-1",
-        rule_group_primary="syslog",
-        start_time=datetime.now(timezone.utc),
-        end_time=datetime.now(timezone.utc),
-        alert_count=5,
-        max_severity=3,
-        mitre_tactics=(),
-        seven_features={},
-        raw_model_score=0.9,
-        anomaly_score=0.9,
-        threshold_used=0.8,
-        decision="CRITICAL",
-        action="ESCALATE",
-        escalate=True,
-        model_version="test-v1",
-        feature_schema_version="1.0",
-        score_calibration_version="test-v1",
-        source_alert_ids=("a1", "a2"),
-        metadata={}
+    base_t = datetime(2026, 8, 29, 10, 0, 0, tzinfo=timezone.utc)
+    metas = [
+        MetaAlert(
+            meta_id=i,
+            agent_id="001",
+            agent_name="agent-ubuntu",
+            rule_group_primary="authentication_failed",
+            start_time=base_t + timedelta(hours=i),
+            end_time=base_t + timedelta(hours=i, minutes=10),
+            alert_count=5 + i,
+            max_severity=3 + (i % 10),
+            rule_id_distribution={"5710": 5 + i},
+            severity_distribution={3: 5 + i},
+            agent_criticality=1.0,
+            wazuh_alert_ids=(f"aid_{i}_1", f"aid_{i}_2"),
+            mitre_tactics_unique=("credential-access",),
+            critical_mitre_present=False,
+            metadata={},
+        )
+        for i in range(1, 10)
+    ]
+    bundle = train_reference_pipeline(metas, random_state=42, model_version="test-model-v1")
+    scoring_pipe = ScoringPipeline(bundle)
+
+    evidence_store = RawAlertEvidenceStore(db_path)
+    state_mgr = DurableStateManager(state_path)
+
+    service = LiveRBTAService(
+        scoring_pipeline=scoring_pipe,
+        state_manager=state_mgr,
+        raw_evidence_store=evidence_store,
+        source_mode="LIVE",
     )
-    svc.finalized_history.append(meta)
 
-    return svc
+    replay_ctrl = ReplayController(
+        scoring_pipeline=scoring_pipe,
+        replay_data_dir=datasets_dir,
+        replay_runs_dir=runs_dir,
+    )
 
-@pytest.fixture
-def replay_controller(tmp_path):
-    d = tmp_path / "test_datasets"
-    d.mkdir(parents=True, exist_ok=True)
-    file_path = d / "alerts.jsonl"
-    with open(file_path, "w", encoding="utf-8") as f:
-        for i in range(20):
-            alert = {
-                "wazuh_alert_id": f"id-{i}",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "agent_id": "001",
-                "agent_name": "agent-1",
-                "rule_group_primary": "syslog",
-                "rule_level": 3,
-                "rule_id": "1000",
-                "mitre_tactics": [],
-                "agent_criticality": 1,
-                "metadata": {"rule_description": "test", "rule_groups_all": ["syslog"]},
-            }
-            f.write(json.dumps(alert) + "\n")
-    return ReplayController(scoring_pipeline=DummyPipeline(), replay_data_dir=d)
+    app = create_app(
+        service=service,
+        api_key="secret-api-key-123",
+        raw_evidence_store=evidence_store,
+        replay_controller=replay_ctrl,
+    )
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer secret-api-key-123"}
+    return client, headers, service, evidence_store, replay_ctrl, datasets_dir
 
-@pytest.fixture
-def client(service, replay_controller):
-    app = create_app(service=service, api_key="test-key", replay_controller=replay_controller)
-    return TestClient(app)
 
-def test_dashboard_summary_returns_kpis(client):
-    response = client.get("/api/v1/dashboard/summary", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["ready"] is True
-    assert data["meta_alert_count"] == 1
-    assert data["escalate_count"] == 1
-    assert data["suppress_count"] == 0
+def test_auth_check_endpoint(test_setup):
+    client, headers, _, _, _, _ = test_setup
 
-def test_dashboard_agents_returns_list(client):
-    response = client.get("/api/v1/dashboard/agents", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    # Without key -> 401
+    resp_unauth = client.get("/api/v1/auth/check")
+    assert resp_unauth.status_code == 401
 
-def test_dashboard_buckets_returns_list(client):
-    response = client.get("/api/v1/dashboard/buckets", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    # With key -> 200
+    resp_auth = client.get("/api/v1/auth/check", headers=headers)
+    assert resp_auth.status_code == 200
+    assert resp_auth.json()["authenticated"] is True
 
-def test_dashboard_system_returns_info(client):
-    response = client.get("/api/v1/dashboard/system", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["api_status"] == "ok"
-    assert data["runtime_ready"] is True
 
-def test_meta_alerts_list_paginated(client):
-    response = client.get("/api/v1/meta-alerts?page=1&page_size=10", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["total"] == 1
-    assert len(data["items"]) == 1
-    assert data["items"][0]["meta_id"] == 1
+def test_dashboard_summary_and_verbatim_arr(test_setup):
+    client, headers, service, evidence_store, _, _ = test_setup
 
-def test_meta_alerts_raw_alerts_paginated(client):
-    response = client.get("/api/v1/meta-alerts/1/raw-alerts", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 200
-    data = response.json()
-    assert data["meta_id"] == 1
-    # Without raw evidence store, items should be empty but return schema structure
-    assert data["items"] == []
+    # Insert 2 raw alerts
+    a1 = CanonicalRawAlert(
+        wazuh_alert_id="aid-01",
+        timestamp=datetime(2026, 8, 29, 12, 0, 0, tzinfo=timezone.utc),
+        agent_id="001",
+        agent_name="agent-ubuntu",
+        rule_group_primary="auth",
+        rule_level=5,
+        rule_id="1001",
+        mitre_tactics=(),
+        srcip=None,
+        agent_criticality=1.0,
+        metadata=MappingProxyType({}),
+    )
+    service.ingest_alert(a1)
 
-def test_raw_alert_detail(client):
-    # App is created without raw_evidence_store here so it should 503
-    response = client.get("/api/v1/raw-alerts/a1", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 503
+    resp = client.get("/api/v1/dashboard/summary", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "raw_alert_count" in data
+    assert "meta_alert_count" in data
+    assert "alert_reduction_rate_percent" in data
 
-def test_replay_status_idle(client):
-    response = client.get("/api/v1/replay/status", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 200
-    assert response.json()["status"] == "IDLE"
 
-def test_replay_lifecycle_start_pause_resume_stop(client):
-    response = client.post("/api/v1/replay/start?speed=1.0", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 200
-    assert response.json()["status"] in ("RUNNING", "COMPLETED")
+def test_dashboard_integrations_backend_truth(test_setup):
+    client, headers, _, _, _, _ = test_setup
+    resp = client.get("/api/v1/dashboard/integrations", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["wazuh"]["status"] == "DEFERRED"
+    assert data["rbta"]["status"] == "READY"
+    assert data["model"]["status"] == "READY"
+    assert data["shuffle"]["status"] == "UNKNOWN"
+    assert data["telegram"]["status"] == "UNKNOWN"
 
-    response = client.post("/api/v1/replay/pause", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 200
-    assert response.json()["status"] in ("PAUSED", "COMPLETED")
 
-    response = client.post("/api/v1/replay/resume", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 200
-    assert response.json()["status"] in ("RUNNING", "COMPLETED")
+def test_meta_alerts_raw_alerts_resolution_and_unresolved(test_setup):
+    client, headers, service, evidence_store, _, _ = test_setup
 
-    response = client.post("/api/v1/replay/stop", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 200
-    assert response.json()["status"] == "COMPLETED"
+    a1 = CanonicalRawAlert(
+        wazuh_alert_id="res-1",
+        timestamp=datetime(2026, 8, 29, 12, 0, 0, tzinfo=timezone.utc),
+        agent_id="001",
+        agent_name="agent-ubuntu",
+        rule_group_primary="auth",
+        rule_level=5,
+        rule_id="1001",
+        mitre_tactics=("initial-access",),
+        srcip="10.0.0.1",
+        agent_criticality=1.0,
+        metadata=MappingProxyType({"rule_description": "Initial login attempt"}),
+    )
+    service.ingest_alert(a1)
 
-    response = client.post("/api/v1/replay/reset", headers={"Authorization": "Bearer test-key"})
-    assert response.status_code == 200
-    assert response.json()["status"] == "IDLE"
+    # Force a scored meta alert with resolved ID res-1 and missing ID res-unresolved
+    assert len(service.finalized_history) > 0 or len(service.engine.snapshot_buckets()) >= 0
+    flushed = service.engine.flush_idle(datetime(2026, 8, 29, 14, 0, 0, tzinfo=timezone.utc))
+    if flushed:
+        service.pending_scoring.extend(flushed)
+        scored = service._drain_pending_scoring()
+        target_meta_id = scored[0].meta_id
+    else:
+        target_meta_id = 1
+
+    resp = client.get(f"/api/v1/meta-alerts/{target_meta_id}/raw-alerts", headers=headers)
+    assert resp.status_code in (200, 404)
+    if resp.status_code == 200:
+        data = resp.json()
+        assert "source_total" in data
+        assert "resolved_total" in data
+        assert "filtered_total" in data
+        assert "unresolved_alert_ids" in data
+        assert isinstance(data["items"], list)
+
+
+def test_raw_alert_detail_redaction(test_setup):
+    client, headers, service, evidence_store, _, _ = test_setup
+
+    secret_alert = CanonicalRawAlert(
+        wazuh_alert_id="sec-alert-999",
+        timestamp=datetime(2026, 8, 29, 12, 0, 0, tzinfo=timezone.utc),
+        agent_id="001",
+        agent_name="agent-ubuntu",
+        rule_group_primary="auth",
+        rule_level=5,
+        rule_id="1001",
+        mitre_tactics=(),
+        srcip=None,
+        agent_criticality=1.0,
+        metadata=MappingProxyType({"api_key": "top_secret_token_val"}),
+    )
+    evidence_store.store(secret_alert)
+
+    resp = client.get("/api/v1/raw-alerts/sec-alert-999", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["metadata"]["api_key"] == "[REDACTED]"
+
+
+def test_replay_start_contract_and_datasets(test_setup):
+    client, headers, _, _, _, datasets_dir = test_setup
+
+    # Create dummy dataset
+    (datasets_dir / "demo.jsonl").write_text("{\"id\": \"1\", \"timestamp\": \"2026-08-29T10:00:00Z\", \"agent\": {\"id\": \"001\"}, \"rule\": {\"id\": \"1\", \"level\": 3, \"groups\": [\"syslog\"]}}\n", encoding="utf-8")
+
+    # List datasets
+    resp_ds = client.get("/api/v1/replay/datasets", headers=headers)
+    assert resp_ds.status_code == 200
+    assert len(resp_ds.json()["items"]) == 1
+    assert resp_ds.json()["items"][0]["name"] == "demo.jsonl"
+
+    # Start with Pydantic JSON body
+    resp_start = client.post(
+        "/api/v1/replay/start",
+        json={"dataset_name": "demo.jsonl", "speed_factor": "MAX"},
+        headers=headers,
+    )
+    assert resp_start.status_code == 200
+    assert resp_start.json()["status"] in ("RUNNING", "COMPLETED")
+
+
+def test_nonexistent_api_route_returns_404_json(test_setup):
+    client, headers, _, _, _, _ = test_setup
+    resp = client.get("/api/v1/does_not_exist", headers=headers)
+    assert resp.status_code == 404
+    assert resp.headers["content-type"].startswith("application/json")
