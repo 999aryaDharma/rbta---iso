@@ -1,0 +1,37 @@
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { fileURLToPath, URL } from 'node:url';
+
+export default defineConfig({
+  base: '/dashboard/',
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8000',
+      '/health': 'http://localhost:8000',
+      '/ready': 'http://localhost:8000',
+    },
+  },
+  preview: {
+    host: '127.0.0.1',
+    port: 4173,
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+  },
+  // @ts-expect-error vitest config
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: [],
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    exclude: ['e2e/**', 'node_modules/**', 'dist/**'],
+  },
+});

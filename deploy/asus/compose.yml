@@ -1,0 +1,52 @@
+services:
+  rbta-service:
+    container_name: rbta-service
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${RBTA_CODE_SHA:-unknown}
+        BUILD_DATE: ${RBTA_BUILD_DATE:-}
+    image: rbta-service:${RBTA_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    read_only: false
+    ports:
+      - "127.0.0.1:${RBTA_HOST_PORT:?RBTA_HOST_PORT is required}:8000"
+    environment:
+      # Mandatory Fail-Closed Production Configuration
+      - RBTA_API_KEY=${RBTA_API_KEY:?RBTA_API_KEY is required for production deployment}
+      - RBTA_MODEL_VERSION=${RBTA_MODEL_VERSION:?RBTA_MODEL_VERSION is required for production deployment}
+      - RBTA_SOURCE_MODE=${RBTA_SOURCE_MODE:-DEFERRED}
+      - RBTA_MODEL_REGISTRY_DIR=/app/artifacts/models
+      - RBTA_STATE_FILE=/app/data/runtime/state.json
+      - RBTA_RAW_EVIDENCE_DB=/app/data/runtime/raw_alert_evidence.sqlite3
+      - RBTA_REPLAY_DATA_DIR=/app/data/replay
+      - RBTA_REPLAY_RUNS_DIR=/app/data/runtime/replay-runs
+      - RBTA_HOST=0.0.0.0
+      - RBTA_PORT=8000
+      - RBTA_LOG_LEVEL=${RBTA_LOG_LEVEL:-INFO}
+    volumes:
+      # Configurable host directory mounts
+      - ${RBTA_STATE_HOST_DIR:?RBTA_STATE_HOST_DIR is required}:/app/data/runtime:rw
+      - ${RBTA_MODEL_HOST_DIR:?RBTA_MODEL_HOST_DIR is required}:/app/artifacts/models:ro
+      - ${RBTA_REPLAY_HOST_DIR:?RBTA_REPLAY_HOST_DIR is required}:/app/data/replay:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "${RBTA_CPU_LIMIT:-2.00}"
+          memory: "${RBTA_MEMORY_LIMIT:-1024M}"
+          pids: ${RBTA_PIDS_LIMIT:-100}
+        reservations:
+          cpus: "${RBTA_CPU_RESERVATION:-0.25}"
+          memory: "${RBTA_MEMORY_RESERVATION:-256M}"

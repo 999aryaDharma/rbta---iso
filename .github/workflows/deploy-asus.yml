@@ -8,6 +8,7 @@ on:
       - completed
     branches:
       - prod/final-dashboard-demo
+      - main
 
 permissions:
   contents: read
@@ -109,7 +110,7 @@ jobs:
       contents: write
       actions: read
     env:
-      PROD_BRANCH: prod/final-dashboard-demo
+      PROD_BRANCH: ${{ github.event.workflow_run.head_branch }}
       RBTA_ENV_FILE: /srv/rbta-iso/deploy/asus/.env
       VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
       IMAGE_TAG: sha-${{ github.event.workflow_run.head_sha }}

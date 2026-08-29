@@ -1,0 +1,13 @@
+@source "../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+@import "@cloudflare/kumo/styles";
+@import "tailwindcss";
+
+body {
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', SFMono-Regular, Consolas, 'Liberation Mono', monospace;
+}

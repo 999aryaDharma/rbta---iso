@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rbta-wazuh-isolation-forest"
+version = "0.1.0"
+description = "Rule-Based Temporal Aggregation and Isolation Forest for Alert Fatigue Mitigation on Wazuh SIEM Security Logs"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Arya Dharma" }
+]
+dependencies = [
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "scikit-learn==1.7.2",
+    "joblib>=1.3.0",
+    "matplotlib>=3.7.0",
+    "scipy>=1.11.0",
+    "requests>=2.31.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "httpx>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-v --strict-markers"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]

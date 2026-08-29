@@ -36,86 +36,22 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ── Path default ──────────────────────────────────────────────────────────────
-BASE_DIR    = Path(r"D:\KAMPUS\SEMINAR\data")
-OUT_FULL    = BASE_DIR / "rbta_ready_v3.csv"
-OUT_MINIMAL = BASE_DIR / "rbta_raw_minimal.csv"
-OUT_REPORT  = BASE_DIR / "data_quality_report.txt"
+# ── Path default (relative project root) ──────────────────────────────────────
+DEFAULT_DATA_DIR = Path("data")
 
 # ── Dedup key ─────────────────────────────────────────────────────────────────
 DEDUP_KEY = "wazuh_alert_id"
 
-# ── Group priority: severity-weight berbasis data ─────────────────────────────
-# Dibuat dari rata-rata rule.level per group di dataset INSTIKI.
-# WAJIB didokumentasikan sebagai "Tabel Semantic Group Ordering" di Bab 3.
-GROUP_SEVERITY_WEIGHT: dict[str, int] = {
-    "attack":                  10,
-    "sql_injection":           10,
-    "authentication_failed":    9,
-    "access_control":           8,
-    "pam":                      7,
-    "web":                      7,
-    "virus":                    7,
-    "nginx":                    6,
-    "audit":                    6,
-    "clamd":                    6,
-    "accesslog":                5,
-    "system_error":             5,
-    "audit_selinux":            5,
-    "syscheck":                 5,
-    "syscheck_file":            5,
-    "syscheck_entry_modified":  5,
-    "syscheck_entry_added":     4,
-    "authentication_success":   3,
-    "freshclam":                3,
-    "syslog":                   3,
-    "rootcheck":                2,
-    "ossec":                    1,
-}
-
-
-def pick_primary_group(groups: list[str]) -> str:
-    """
-    Pilih grup dengan severity weight tertinggi dari list rule.groups.
-    Jika seri, pilih yang pertama muncul (urutan Wazuh).
-    """
-    if not groups:
-        return "unknown"
-    return max(groups, key=lambda g: GROUP_SEVERITY_WEIGHT.get(g, 0))
-
-
-# ── Agent criticality ─────────────────────────────────────────────────────────
-# DOMAIN ASSUMPTION — hanya valid di lingkungan UPT TIK INSTIKI.
-# Skala: 1=Low, 2=Medium, 3=High, 4=Critical
-# Sumber: fungsi server dalam infrastruktur produksi UPT TIK INSTIKI.
-AGENT_CRITICALITY: dict[str, str] = {
-    "soc-1":         "low",
-    "pusatkarir":    "high",
-    "dfir-iris":     "critical",
-    "siput":         "medium",
-    "proxy-manager": "high",
-    "e-kuesioner":   "medium",
-    "sads":          "high",
-    "DVWA":          "low",
-}
-
-CRITICALITY_SCORE: dict[str, int] = {
-    "critical": 4,
-    "high":     3,
-    "medium":   2,
-    "low":      1,
-    "unknown":  1,  # [FIX-2] default 1, bukan 0
-}
-
-# Taktik MITRE yang dianggap kritis — wajib justifikasi tabel di Bab 3
-CRITICAL_MITRE_TACTICS: frozenset[str] = frozenset({
-    "Execution",
-    "Lateral Movement",
-    "Credential Access",
-    "Exfiltration",
-    "Privilege Escalation",
-    "Defense Evasion",
-})
+# ── Group priority, Agent criticality, and MITRE tactics from centralized config ─────────────
+from src.config.domain import (
+    CRITICALITY_LABEL_TO_SCORE,
+    CRITICALITY_SCORE_TO_LABEL,
+    CRITICAL_MITRE_TACTICS,
+    GROUP_SEVERITY_WEIGHT,
+    get_agent_criticality,
+    has_critical_mitre_tactic,
+    resolve_primary_rule_group as pick_primary_group,
+)
 
 # ── srcip handling ────────────────────────────────────────────────────────────
 INTERNAL_PREFIXES: tuple[str, ...] = (
@@ -225,15 +161,13 @@ def parse_jsonl(
             srcip, srcip_type = classify_srcip(raw_srcip)
             wazuh_id   = str(rec.get("id", ""))
 
-            criticality_label = AGENT_CRITICALITY.get(agent_name, "unknown")
-            criticality_score = CRITICALITY_SCORE[criticality_label]
+            criticality_score = get_agent_criticality(agent_name)
+            criticality_label = CRITICALITY_SCORE_TO_LABEL.get(criticality_score, "unknown")
 
             # ── [FIX-1] MITRE ATT&CK dipindah ke Layer 1 ─────────────────
             mitre_tactics: list[str] = mitre.get("tactic", [])
             has_mitre          = 1 if len(mitre_tactics) > 0 else 0
-            has_critical_mitre = 1 if any(
-                t in CRITICAL_MITRE_TACTICS for t in mitre_tactics
-            ) else 0
+            has_critical_mitre = 1 if has_critical_mitre_tactic(mitre_tactics) else 0
             # ─────────────────────────────────────────────────────────────
 
             # ── Layer 1: minimal — RBTA core (9 kolom) ───────────────────
@@ -373,7 +307,7 @@ def data_quality_report(df: pd.DataFrame) -> str:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
-def main(base_dir: Path = BASE_DIR) -> None:
+def main(base_dir: Path = DEFAULT_DATA_DIR) -> None:
     log.info("=== JSON → PIPELINE (BATCH PER BULAN) ===")
 
     all_csv_files: list[Path] = []
@@ -452,5 +386,5 @@ def main(base_dir: Path = BASE_DIR) -> None:
 
 if __name__ == "__main__":
     import sys
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else BASE_DIR
+    root = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DATA_DIR
     main(base_dir=root)

@@ -1,0 +1,155 @@
+"""Production FastAPI server bootstrap with validated configuration and lifecycle management."""
+
+from contextlib import asynccontextmanager
+import logging
+import os
+from pathlib import Path
+from typing import Any, AsyncGenerator, Dict, Optional
+
+from fastapi import FastAPI
+import uvicorn
+
+from src.api.app import create_app
+from src.model.registry import ModelRegistry, ModelRegistryError
+from src.model.scoring_pipeline import ScoringPipeline
+from src.runtime.durable_state import DurableStateManager
+from src.runtime.service import LiveRBTAService
+
+logger = logging.getLogger("rbta.server")
+
+
+def create_production_app(
+    env: Optional[Dict[str, str]] = None,
+    strict: bool = False,
+) -> FastAPI:
+    """Create and configure the production FastAPI application with full dependency injection.
+
+    Parameters
+    ----------
+    env : Dict[str, str] | None
+        Optional environment override dictionary for testing or programmatic bootstrap.
+    strict : bool
+        When True, strictly requires non-empty RBTA_API_KEY and RBTA_MODEL_VERSION.
+
+    Returns
+    -------
+    FastAPI
+        Configured production application instance.
+
+    Raises
+    ------
+    RuntimeError
+        If strict=True and mandatory security/model environment variables are missing.
+    ValueError
+        If mandatory paths cannot be validated or written.
+    ModelRegistryError
+        If model artifacts are corrupted or invalid.
+    """
+    env_map = os.environ if env is None else env
+
+    api_key = env_map.get("RBTA_API_KEY")
+    registry_dir = Path(env_map.get("RBTA_MODEL_REGISTRY_DIR", "artifacts/models")).resolve()
+    model_version = env_map.get("RBTA_MODEL_VERSION")
+    state_file_path = Path(env_map.get("RBTA_STATE_FILE", "data/runtime/state.json")).resolve()
+
+    if strict:
+        if not api_key or not api_key.strip():
+            raise RuntimeError("RBTA_API_KEY environment variable is mandatory and must not be empty in production.")
+        if not model_version or not model_version.strip():
+            raise RuntimeError("RBTA_MODEL_VERSION environment variable is mandatory and must not be empty in production.")
+
+    # 1. State directory accessibility check
+    state_dir = state_file_path.parent
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        raise ValueError(f"Cannot create or access state directory '{state_dir}': {exc}") from exc
+
+    state_mgr = DurableStateManager(state_file_path)
+
+    # 2. Model registry initialization
+    registry = ModelRegistry(base_dir=registry_dir, explicit_version=model_version)
+
+    # 3. Model bundle resolution
+    active_version = registry.get_active_version()
+    scoring_pipe: Optional[ScoringPipeline] = None
+
+    if active_version:
+        logger.info("Loading active model artifact version: '%s'", active_version)
+        bundle = registry.load_bundle(active_version)
+        scoring_pipe = ScoringPipeline(bundle)
+    else:
+        logger.warning(
+            "No active model bundle found in '%s' for version '%s'. /ready will return 503.",
+            registry_dir,
+            model_version,
+        )
+
+    from src.runtime.raw_evidence import RawAlertEvidenceStore
+    from src.runtime.replay_controller import ReplayController
+
+    raw_evidence_db = env_map.get("RBTA_RAW_EVIDENCE_DB", "data/runtime/raw_alert_evidence.sqlite3")
+    raw_evidence_store = RawAlertEvidenceStore(raw_evidence_db)
+
+    # 4. Construct live stateful service
+    source_mode = env_map.get("RBTA_SOURCE_MODE", "DEFERRED").strip().upper()
+    if source_mode not in ("DEFERRED", "LIVE"):
+        raise ValueError(f"RBTA_SOURCE_MODE must be either 'DEFERRED' or 'LIVE', got '{source_mode}'")
+
+    service: Optional[LiveRBTAService] = None
+    if scoring_pipe is not None:
+        service = LiveRBTAService(
+            scoring_pipeline=scoring_pipe,
+            state_manager=state_mgr,
+            adaptive=True,
+            raw_evidence_store=raw_evidence_store,
+            source_mode=source_mode,
+        )
+
+    # 5. Construct demonstration replay controller
+    replay_controller: Optional[ReplayController] = None
+    if scoring_pipe is not None:
+        default_replay_dir = "/app/data/replay" if Path("/app/data/replay").exists() else "data/test_datasets"
+        replay_data_dir = Path(env_map.get("RBTA_REPLAY_DATA_DIR", default_replay_dir)).resolve()
+        replay_controller = ReplayController(
+            scoring_pipeline=scoring_pipe,
+            replay_data_dir=replay_data_dir,
+        )
+
+    # 6. Lifespan for graceful shutdown
+    @asynccontextmanager
+    async def lifespan(app_instance: FastAPI) -> AsyncGenerator[None, None]:
+        logger.info("Starting RBTA production service...")
+        yield
+        logger.info("Shutting down RBTA production service (preserving active buckets)...")
+        if replay_controller is not None:
+            replay_controller.stop()
+        if service is not None:
+            service.shutdown(drain=False)
+
+    app = create_app(
+        service=service,
+        model_registry=registry,
+        api_key=api_key,
+        raw_evidence_store=raw_evidence_store,
+        replay_controller=replay_controller,
+    )
+    app.router.lifespan_context = lifespan
+
+    return app
+
+
+def run() -> None:
+    """Production server entrypoint."""
+    log_level = os.getenv("RBTA_LOG_LEVEL", "info").lower()
+    logging.basicConfig(level=getattr(logging, log_level.upper(), logging.INFO))
+
+    host = os.getenv("RBTA_HOST", "0.0.0.0")
+    port = int(os.getenv("RBTA_PORT", "8000"))
+
+    app = create_production_app(strict=True)
+    uvicorn.run(app, host=host, port=port, log_level=log_level)
+
+
+if __name__ == "__main__":
+    run()

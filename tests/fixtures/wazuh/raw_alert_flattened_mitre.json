@@ -1,0 +1,32 @@
+{
+  "timestamp": "2026-08-28T07:15:30.123+0000",
+  "rule": {
+    "level": 10,
+    "description": "SQL Injection attempt detected in URI.",
+    "id": "31106",
+    "mitre_tactics": [
+      "Initial Access",
+      "Defense Evasion"
+    ],
+    "mitre_techniques": [
+      "Exploit Public-Facing Application"
+    ],
+    "groups": [
+      "web",
+      "accesslog",
+      "sql_injection",
+      "attack"
+    ]
+  },
+  "agent": {
+    "id": "003",
+    "name": "dfir-iris"
+  },
+  "manager": {
+    "name": "wazuh-soc"
+  },
+  "id": "1787901330.2002",
+  "data": {
+    "srcip": "203.0.113.19"
+  }
+}

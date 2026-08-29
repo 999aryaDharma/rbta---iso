@@ -384,67 +384,114 @@ Jangan port-forward `9200` langsung ke Internet.
 
 ---
 
-# 6. Live Indexer Polling Semantics
+---
 
-Historical mode menggunakan PIT karena dataset harus snapshot-consistent.
+# 6. Live Indexer Ingestion & Absolute No-Drop Semantics
 
-**Live mode tidak menggunakan long-lived PIT untuk tailing event baru**, karena PIT adalah snapshot dan tidak akan melihat dokumen yang masuk setelah PIT dibuat.
+## 6.1 Absolute No-Drop Principle
 
-Jika live source memakai Indexer API, gunakan incremental polling.
-
-## 6.1 Poll Window
-
-Recommended starting configuration:
+The live ingestion architecture enforces the invariant:
 
 ```text
-poll_interval = 5 seconds
-lookback_overlap = 5 minutes
-page_size = 500
+NO VALID ALERT MAY BE DROPPED BECAUSE IT IS OLD,
+LATE, OUT-OF-ORDER, OR OLDER THAN A WATERMARK.
+
+old != duplicate
+late != invalid
+out-of-order != drop
+timestamp < cursor != drop
 ```
 
-Query current/recent daily indices:
+The ONLY authoritative duplicate identity is:
 
 ```text
-@timestamp >= high_watermark - lookback_overlap
-sort = [@timestamp ASC, id ASC]
+wazuh_alert_id
 ```
 
-Overlap disengaja untuk menangkap indexing delay/out-of-order ingestion.
+Forbidden:
+- `if alert.timestamp < watermark: drop`
+- `if alert.timestamp < cutoff: skip permanently`
+- `max_lateness` or `late_drop` policies
+- watermark-based event rejection
+- warning + continue on canonicalization errors
+- malformed response interpreted as empty result
+- pagination truncation on full pages
 
-Semua duplicate dibuang berdasarkan `wazuh_alert_id` sebelum mutasi RBTA.
+## 6.2 Three Distinct Architectural Concepts
 
-## 6.2 Why Overlap + Dedup
+Pipeline components strictly distinguish:
 
-Tanpa overlap:
+1. **Event Time (`CanonicalRawAlert.timestamp`)**:
+   Original event generation timestamp recorded by Wazuh agent. Used strictly for RBTA time windows, per-agent EMA gap adaptation, reorder buffer sorting, and research evaluation.
+2. **Transport Cursor (`recent_poll_cursor`, file offset, `search_after`)**:
+   Operational performance hint used only to query new data efficiently without scanning historical eternity on every single second. It does **NOT** represent an event-completeness boundary.
+3. **Idempotency Identity (`wazuh_alert_id`)**:
+   Authoritative unique alert identifier owned by the Research Core durable state. Guarantees that the same `wazuh_alert_id` produces at most one committed RBTA mutation.
+
+## 6.3 Three-Tier Live Ingestion Architecture
+
+Live Indexer mode combines three complementary tiers coordinated by `LiveIngestionCoordinator`:
 
 ```text
-checkpoint timestamp -> query strictly greater
+Wazuh Indexer
+     |
+     +------ 1. FAST RECENT POLL (low-latency recent polling hint)
+     |
+     +------ 2. RECENT RECONCILIATION (common late arrival recovery)
+     |
+     +------ 3. FULL-RETENTION RECONCILIATION (all retained daily indices)
+                   |
+                   v
+        CanonicalRawAlert candidates
+                   |
+                   v
+        durable wazuh_alert_id dedup (Research Core)
+                   |
+                   v
+               RBTAEngine
 ```
 
-alert yang terlambat ter-index dengan timestamp lebih lama dapat terlewat.
+### 1. Fast Recent Poll
+- **Role**: Discovers newly indexed alerts with low latency (e.g. `fast_poll_interval = 5s`, `overlap_window = 5m`).
+- **Query Range**: `[recent_poll_cursor - overlap_window, current_time]`.
+- **Target Indices**: Exact daily indices derived via `derive_daily_indices(start_time, current_time)`.
+- **Constraint**: Optimization only; poller owns no permanent seen-ID cache and cannot prove completeness alone.
 
-Dengan overlap:
+### 2. Recent Reconciliation
+- **Role**: Protects completeness for recent late-indexed alerts spanning UTC day boundaries.
+- **Coverage**: Scans retained daily indices configured via `recent_reconciliation_days` (default 2: today + yesterday UTC).
+- **Pagination**: Deterministic `@timestamp ASC, id ASC` sort with `search_after` cursor.
 
-```text
-query sedikit mundur
--> baca ulang sebagian alert
--> dedup registry
--> process hanya alert baru
+### 3. Full-Retention Reconciliation (Lossless Recovery)
+- **Role**: Guarantees eventual completeness across every retained Wazuh daily alert index currently present in OpenSearch, regardless of age.
+- **Discovery**: Dynamically discovers all retained daily alert indices via `discover_retained_daily_alert_indices()` using pattern `wazuh-alerts-4.x-YYYY.MM.DD`.
+- **Scan**: Paginates all retained indices without any timestamp range filtering (`start_time=None, end_time=None`).
+- **Deduplication**: Every discovered candidate passes through durable `wazuh_alert_id` deduplication; previously processed alerts are recognized as duplicate no-ops with zero side-effects.
+
+## 6.4 Fail-Closed Integrity & Response Validation
+
+1. **Canonicalization Failure (`LiveCanonicalizationError`)**:
+   If a document cannot be canonicalized, the poller raises `LiveCanonicalizationError` immediately. The cycle fails closed, transport timestamps are NOT advanced, and the error is observable for retry/operator action. Silent `warning + continue` is strictly forbidden.
+2. **Response Shape Integrity (`LiveSourceIntegrityError`)**:
+   Responses must contain a valid `hits.hits` list. Empty/malformed dictionaries like `{}` or `{"hits": {}}` raise `LiveSourceIntegrityError` rather than silently converting to 0 alerts.
+3. **Pagination Cursor Integrity**:
+   Full pages (`len(hits) == page_size`) must contain a valid `sort` sequence in the final hit. Missing or corrupt `sort` raises `LiveSourceIntegrityError` to prevent silent page truncation.
+
+## 6.5 Daily Rollover & Index Derivation
+
+Live source derives exact UTC daily indices from timestamps rather than querying wildcards (`wazuh-alerts-*`):
+
+```python
+derive_daily_indices(start_time, end_time, prefix="wazuh-alerts-4.x-")
 ```
 
-Ini adalah reliability mechanism transport, bukan perubahan algoritma RBTA.
+For queries spanning UTC midnight (e.g. `2026-08-28T23:55Z` to `2026-08-29T00:05Z`), both `wazuh-alerts-4.x-2026.08.28` and `wazuh-alerts-4.x-2026.08.29` are targeted explicitly.
 
-## 6.3 Daily Rollover
+## 6.6 External Retention Limitation
 
-Live source harus menangani pergantian index UTC/date tanpa restart manual.
+The pipeline guarantees no intentional timestamp-based dropping for any alerts that remain obtainable from configured authoritative sources. It cannot recover an alert that external systems (e.g., OpenSearch retention lifecycle) have permanently deleted before the pipeline ever observed it.
 
-Pada rollover:
 
-```text
-poll index hari sebelumnya + hari sekarang selama overlap period
-```
-
-Setelah overlap aman berlalu, index lama tidak perlu dipoll lagi.
 
 ---
 

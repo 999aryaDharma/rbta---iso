@@ -70,18 +70,18 @@ def load_and_prepare(csv_path: str | Path) -> pd.DataFrame:
     missing_req   = set(REQUIRED_COLS) - set(available_req)
     if missing_req:
         log.warning("Kolom wajib tidak ditemukan: %s", missing_req)
-    
+
     # Ensure timestamp_utc exists (renaming check)
     if "timestamp_utc" not in available_req:
         raise KeyError("Kolom 'timestamp_utc' WAJIB ada di CSV untuk RBTA pipeline")
-    
+
     available_opt = {k: v for k, v in OPTIONAL_COLS.items() if k in df_raw.columns}
     all_available = {**available_req, **available_opt}
-    
+
     # Select columns and rename
     selected_cols = [col for col in all_available.keys() if col in df_raw.columns]
     df = df_raw[selected_cols].rename(columns=all_available).copy()
-    
+
     # Verify timestamp column exists after rename
     if "timestamp" not in df.columns:
         raise KeyError(
@@ -198,7 +198,7 @@ def load_and_prepare(csv_path: str | Path) -> pd.DataFrame:
 
     df = df.reset_index(drop=True)
     log.info("[LOAD] Arrival order CSV dipertahankan — tidak ada global sort [O(n)]")
-    
+
     # Final validation: ensure all critical columns exist
     critical_cols = ["timestamp", "agent_id", "agent_name", "rule_groups", "rule_level"]
     missing_critical = [col for col in critical_cols if col not in df.columns]
@@ -206,7 +206,7 @@ def load_and_prepare(csv_path: str | Path) -> pd.DataFrame:
         log.error("KOLOM KRITIS HILANG SETELAH PREPROCESSING: %s", missing_critical)
         log.error("Available columns: %s", df.columns.tolist())
         raise KeyError(f"Kolom kritis hilang: {missing_critical}")
-    
+
     _print_summary(df, n_corrupt)
     return df
 

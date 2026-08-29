@@ -1,0 +1,19 @@
+{
+  "timestamp": "2026-08-28T06:10:12.000Z",
+  "rule": {
+    "level": 2,
+    "description": "Log rotation completed.",
+    "id": "502",
+    "groups": ["ossec", "syslog"]
+  },
+  "agent": {
+    "id": "002",
+    "name": "pusatkarir"
+  },
+  "manager": {
+    "name": "wazuh-soc"
+  },
+  "id": "1787897412.1001",
+  "full_log": "Log rotation completed successfully",
+  "location": "ossec-logcollector"
+}
