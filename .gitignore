@@ -146,3 +146,7 @@ docs/*
 data/*
 !data/.gitkeep
 artifacts/research-runs/
+
+# ASUS production runtime artifacts
+state/
+models/
