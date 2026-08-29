@@ -54,3 +54,17 @@ def test_noise_robustness_evaluates_exact_five_noise_rates():
     row_0 = result.summary_df.iloc[0]
     assert row_0["n_noise"] == 0
     assert row_0["arr_degradation"] == 0.0
+
+
+def test_noise_absorption_traceability():
+    """Verify that noise absorption is computed via actual MetaAlert.wazuh_alert_ids."""
+    base_t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    alerts = [make_alert(i, base_t + timedelta(seconds=i * 10)) for i in range(50)]
+
+    result = run_noise_robustness_evaluation(alerts, noise_rates=(0.0, 0.20), delta_t=timedelta(minutes=15), random_seed=42)
+    row_20 = result.summary_df.iloc[1]
+    assert row_20["noise_rate"] == 0.20
+    assert row_20["n_noise"] == 10
+    assert 0 <= row_20["noise_absorption_count"] <= 10
+    assert 0.0 <= row_20["noise_absorption_rate"] <= 100.0
+

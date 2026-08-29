@@ -118,9 +118,13 @@ def run_noise_robustness_evaluation(
         else:
             base = baseline_arr if baseline_arr is not None else arr
             degradation = float(base - arr)
-            # Theoretical max meta if each noise became its own meta-alert
-            extra_meta = max(0, n_meta - baseline_n_meta)
-            absorption_count = max(0, n_noise - extra_meta)
+            # Traceable absorption via MetaAlert.wazuh_alert_ids
+            absorbed_count = 0
+            for meta in res.meta_alerts:
+                has_clean = any(not wid.startswith("noise_") for wid in meta.wazuh_alert_ids)
+                if has_clean:
+                    absorbed_count += sum(1 for wid in meta.wazuh_alert_ids if wid.startswith("noise_"))
+            absorption_count = absorbed_count
             absorption_rate = (absorption_count / n_noise * 100.0) if n_noise > 0 else 100.0
 
         records.append({

@@ -70,7 +70,7 @@ def run_structural_silhouette_evaluation(
     x_scaled = model_bundle.scaler.transform(df_feats)
 
     # 2. Binary Evaluation Partition: ESCALATE (1) vs non-ESCALATE (0)
-    observed_partition = np.array([1 if s.decision == "ESCALATE" else 0 for s in scored_metas], dtype=int)
+    observed_partition = np.array([1 if s.action == "ESCALATE" else 0 for s in scored_metas], dtype=int)
     unique_classes = np.unique(observed_partition)
 
     if len(unique_classes) < 2:

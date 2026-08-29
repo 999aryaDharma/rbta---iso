@@ -45,12 +45,10 @@ def run_fixed_window_baseline(
         return FixedWindowResult(n_raw=0, n_meta=0, arr=0.0, meta_alerts=[])
 
     window_sec = window_duration.total_seconds()
-    first_ts = sorted_alerts[0].timestamp
     windows: Dict[int, List[CanonicalRawAlert]] = {}
 
     for a in sorted_alerts:
-        offset_sec = (a.timestamp - first_ts).total_seconds()
-        bucket_idx = int(offset_sec // window_sec)
+        bucket_idx = int(a.timestamp.timestamp() // window_sec)
         if bucket_idx not in windows:
             windows[bucket_idx] = []
         windows[bucket_idx].append(a)
