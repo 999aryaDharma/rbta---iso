@@ -1,15 +1,28 @@
-# Python
+# =============================================================================
+# Python Ecosystem
+# =============================================================================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 *.egg
 *.egg-info/
-dist/
-build/
 *.whl
+build/
+dist/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
 
-# Virtual Environment
+# Python Virtual Environments
 venv/
 env/
 ENV/
@@ -17,27 +30,78 @@ ENV/
 .venv*/
 .venv-gate/
 
-# Testing & Coverage
+# Python Testing, Profiling & Typechecking
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 .tox/
+.nox/
+.hypothesis/
+.mypy_cache/
+.pytype/
+.ruff_cache/
 
-# IDE & Editor
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# =============================================================================
+# JavaScript / TypeScript / React (JS, TS, JSX, TSX)
+# =============================================================================
+node_modules/
+*/node_modules/
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.vite/
+.npm/
+.yarn/
+.pnpm-store/
+*.tsbuildinfo
+
+# JS/TS Build & Output
+out/
+.next/
+.nuxt/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+
+# JS/TS Testing & Coverage
+coverage/
+.nyc_output/
+playwright-report/
+blob-report/
+playwright/.cache/
+test-results/
+
+# Package Manager Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# =============================================================================
+# IDE & System Files
+# =============================================================================
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# Jupyter Notebook
-.ipynb_checkpoints/
-
-# OS
+*.sublime-project
+*.sublime-workspace
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Secrets and Environment Configs
+# =============================================================================
+# Secrets & Environment Configurations
+# =============================================================================
 .env
 .env.*
 !.env.example
@@ -47,37 +111,37 @@ Thumbs.db
 *.crt
 secrets/
 
-# Model staging & local storage
+# =============================================================================
+# Model Staging, Local SQLite Databases & Runtime Storage
+# =============================================================================
 artifacts/models/.staging/
 *.staging/
 *.db
 *.sqlite
 *.sqlite3
+data/runtime/*.sqlite3*
+data/runtime/replay-runs/
 
-# Logs
+# Logs & Temporary Files
 *.log
 logs/
-
-# Temporary files & reports
 *.tmp
 *.bak
 notebooks/*.png
 output/
 reports/
 
-# Documentation
+# =============================================================================
+# Documentation Whitelist
+# =============================================================================
 docs/*
 !docs/research-spec/
 !docs/deployment/
 !docs/design/
 
-# Frontend
-node_modules/
-dashboard/node_modules/
-dashboard/dist/
-*.tsbuildinfo
-
-# Data files (large)
+# =============================================================================
+# Large Data Files & Research Run Outputs
+# =============================================================================
 data/*
 !data/.gitkeep
 artifacts/research-runs/
