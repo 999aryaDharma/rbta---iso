@@ -2,6 +2,8 @@
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 import pytest
+import requests
+from requests.exceptions import ReadTimeout
 
 from src.contracts.scored_meta_alert import ScoredMetaAlert
 from src.api.shuffle_adapter import ShuffleForwarderError, ShuffleWebhookForwarder
@@ -82,7 +84,7 @@ def test_shuffle_forwarder_idempotent_retry_on_lost_response():
         business_executions += 1
 
         # Simulate connection drop / timeout right after business action
-        raise requests.exceptions.ReadTimeout("Connection dropped before response")
+        raise ReadTimeout("Connection dropped before response")
 
     with patch("requests.Session.post", side_effect=fake_receiver_post):
         result = forwarder.forward(meta)

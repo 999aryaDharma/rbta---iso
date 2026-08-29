@@ -270,6 +270,19 @@ class LiveRBTAService:
                 return item
         return None
 
+    def is_seen(self, wazuh_alert_id: str) -> bool:
+        """Check if an alert ID has already been committed in RBTAEngine."""
+        return wazuh_alert_id in self.engine._seen_alert_ids
+
+    def get_live_source_state(self) -> Dict[str, Any]:
+        """Retrieve copy of durable live source transport state."""
+        return dict(self.source_checkpoint)
+
+    def update_live_source_state(self, state: Dict[str, Any]) -> None:
+        """Update and atomically persist live source transport state."""
+        self.source_checkpoint.update(state)
+        self._persist_to_disk()
+
     def shutdown(self, drain: bool = False) -> List[ScoredMetaAlert]:
         """Perform a controlled shutdown, optionally draining active buckets.
 
