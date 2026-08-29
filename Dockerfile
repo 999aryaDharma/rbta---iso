@@ -3,8 +3,8 @@
 FROM node:20-alpine AS dashboard-build
 
 WORKDIR /build
-COPY dashboard/package*.json dashboard/.npmrc* /build/
-RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+COPY dashboard/package*.json /build/
+RUN npm ci
 COPY dashboard/ /build/
 RUN npm run build
 
@@ -66,4 +66,4 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
     CMD python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=2)' || exit 1
 
 # Start production server
-CMD ["python", "-m", "uvicorn", "src.api.server:create_production_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "src.api.server"]

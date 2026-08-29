@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig({
+  base: '/dashboard/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -16,6 +17,10 @@ export default defineConfig({
       '/health': 'http://localhost:8000',
       '/ready': 'http://localhost:8000',
     },
+  },
+  preview: {
+    host: '127.0.0.1',
+    port: 4173,
   },
   build: {
     outDir: 'dist',

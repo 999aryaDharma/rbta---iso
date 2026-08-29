@@ -134,3 +134,36 @@ def test_bootstrap_inference_only_no_model_fitting(tmp_path: Path):
         client = TestClient(app)
         assert client.get("/health").status_code == 200
         assert mock_train.call_count == 0
+
+
+def test_strict_bootstrap_missing_api_key_raises_runtime_error(tmp_path: Path):
+    """Strict bootstrap fails closed when RBTA_API_KEY is missing or empty."""
+    reg_dir = tmp_path / "models"
+    state_file = tmp_path / "runtime" / "state.json"
+    publish_test_model(reg_dir, "boot-v1")
+
+    env = {
+        "RBTA_MODEL_REGISTRY_DIR": str(reg_dir),
+        "RBTA_MODEL_VERSION": "boot-v1",
+        "RBTA_STATE_FILE": str(state_file),
+        "RBTA_API_KEY": "",
+    }
+
+    with pytest.raises(RuntimeError, match="RBTA_API_KEY"):
+        create_production_app(env=env, strict=True)
+
+
+def test_strict_bootstrap_missing_model_version_raises_runtime_error(tmp_path: Path):
+    """Strict bootstrap fails closed when RBTA_MODEL_VERSION is missing or empty."""
+    reg_dir = tmp_path / "models"
+    state_file = tmp_path / "runtime" / "state.json"
+
+    env = {
+        "RBTA_MODEL_REGISTRY_DIR": str(reg_dir),
+        "RBTA_MODEL_VERSION": "   ",
+        "RBTA_STATE_FILE": str(state_file),
+        "RBTA_API_KEY": "test-key",
+    }
+
+    with pytest.raises(RuntimeError, match="RBTA_MODEL_VERSION"):
+        create_production_app(env=env, strict=True)

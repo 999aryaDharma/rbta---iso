@@ -1,4 +1,4 @@
-import React from 'react';
+import { useCallback, useEffect } from 'react';
 import { NavLink, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel,
@@ -43,10 +43,13 @@ export function AppSidebar() {
   const [searchParams] = useSearchParams();
   const runId = searchParams.get('run_id');
 
-  const withRunId = (path: string) =>
-    runId ? `${path}${path.includes('?') ? '&' : '?'}run_id=${encodeURIComponent(runId)}` : path;
+  const withRunId = useCallback(
+    (path: string) =>
+      runId ? `${path}${path.includes('?') ? '&' : '?'}run_id=${encodeURIComponent(runId)}` : path,
+    [runId]
+  );
 
-  React.useEffect(() => {
+  useEffect(() => {
     let lastKey = '';
     let lastKeyTime = 0;
 
@@ -79,7 +82,7 @@ export function AppSidebar() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [runId, navigate]);
+  }, [withRunId, navigate]);
 
   return (
     <Sidebar className="border-r border-kumo-hairline">

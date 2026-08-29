@@ -184,7 +184,7 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=str(exc),
             )
-        is_dup = hasattr(service.engine, "_seen_alert_ids") and (canonical_alert.wazuh_alert_id in service.engine._seen_alert_ids)
+        is_dup = service.engine.has_seen_alert(canonical_alert.wazuh_alert_id) if hasattr(service.engine, "has_seen_alert") else False
         service.ingest_alert(canonical_alert)
         return {
             "status": "accepted",
@@ -254,21 +254,27 @@ def create_app(
 
     if dashboard_dist_path.exists() and (dashboard_dist_path / "index.html").exists():
         index_file = dashboard_dist_path / "index.html"
-
-        app.mount(
-            "/dashboard",
-            StaticFiles(directory=str(dashboard_dist_path), html=True),
-            name="dashboard",
-        )
+        assets_dir = dashboard_dist_path / "assets"
+        if assets_dir.exists():
+            app.mount(
+                "/dashboard/assets",
+                StaticFiles(directory=str(assets_dir)),
+                name="dashboard-assets",
+            )
 
         @app.get("/", include_in_schema=False)
         def root_redirect() -> RedirectResponse:
             return RedirectResponse(url="/dashboard/")
 
-        @app.get("/dashboard/{full_path:path}", include_in_schema=False)
-        def dashboard_spa_fallback(full_path: str) -> FileResponse:
-            target_path = dashboard_dist_path / full_path
-            if target_path.is_file():
+        @app.get("/dashboard", include_in_schema=False)
+        @app.get("/dashboard/", include_in_schema=False)
+        def dashboard_index() -> FileResponse:
+            return FileResponse(index_file)
+
+        @app.get("/dashboard/{client_path:path}", include_in_schema=False)
+        def dashboard_spa_fallback(client_path: str) -> FileResponse:
+            target_path = (dashboard_dist_path / client_path).resolve()
+            if target_path.is_relative_to(dashboard_dist_path) and target_path.is_file():
                 return FileResponse(target_path)
             return FileResponse(index_file)
 

@@ -147,6 +147,15 @@ class RBTAEngine:
         self._seen_alert_ids: Set[str] = set()
         self._meta_id_counter: int = 1
 
+    @property
+    def seen_alert_count(self) -> int:
+        """Return count of uniquely committed raw alerts seen by engine."""
+        return len(self._seen_alert_ids)
+
+    def has_seen_alert(self, wazuh_alert_id: str) -> bool:
+        """Return True if raw alert has already been successfully committed."""
+        return wazuh_alert_id in self._seen_alert_ids
+
     def _get_agent_state(self, agent_id: str) -> AgentTemporalState:
         if agent_id not in self._temporal_states:
             self._temporal_states[agent_id] = AgentTemporalState(

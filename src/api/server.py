@@ -20,6 +20,7 @@ logger = logging.getLogger("rbta.server")
 
 def create_production_app(
     env: Optional[Dict[str, str]] = None,
+    strict: bool = False,
 ) -> FastAPI:
     """Create and configure the production FastAPI application with full dependency injection.
 
@@ -27,6 +28,8 @@ def create_production_app(
     ----------
     env : Dict[str, str] | None
         Optional environment override dictionary for testing or programmatic bootstrap.
+    strict : bool
+        When True, strictly requires non-empty RBTA_API_KEY and RBTA_MODEL_VERSION.
 
     Returns
     -------
@@ -35,6 +38,8 @@ def create_production_app(
 
     Raises
     ------
+    RuntimeError
+        If strict=True and mandatory security/model environment variables are missing.
     ValueError
         If mandatory paths cannot be validated or written.
     ModelRegistryError
@@ -46,6 +51,12 @@ def create_production_app(
     registry_dir = Path(env_map.get("RBTA_MODEL_REGISTRY_DIR", "artifacts/models")).resolve()
     model_version = env_map.get("RBTA_MODEL_VERSION")
     state_file_path = Path(env_map.get("RBTA_STATE_FILE", "data/runtime/state.json")).resolve()
+
+    if strict:
+        if not api_key or not api_key.strip():
+            raise RuntimeError("RBTA_API_KEY environment variable is mandatory and must not be empty in production.")
+        if not model_version or not model_version.strip():
+            raise RuntimeError("RBTA_MODEL_VERSION environment variable is mandatory and must not be empty in production.")
 
     # 1. State directory accessibility check
     state_dir = state_file_path.parent
@@ -127,10 +138,10 @@ def run() -> None:
     log_level = os.getenv("RBTA_LOG_LEVEL", "info").lower()
     logging.basicConfig(level=getattr(logging, log_level.upper(), logging.INFO))
 
-    host = os.getenv("RBTA_HOST", "127.0.0.1")
+    host = os.getenv("RBTA_HOST", "0.0.0.0")
     port = int(os.getenv("RBTA_PORT", "8000"))
 
-    app = create_production_app()
+    app = create_production_app(strict=True)
     uvicorn.run(app, host=host, port=port, log_level=log_level)
 
 

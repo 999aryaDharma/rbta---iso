@@ -352,3 +352,51 @@ def test_validate_model_script_cli(tmp_path: Path):
     )
     assert res_missing.returncode != 0
     assert "FAIL" in res_missing.stderr
+
+
+def test_production_spa_static_serving(tmp_path: Path):
+    """Verify production static SPA serving with assets mounting and client-route fallback."""
+    from fastapi.testclient import TestClient
+    from src.api.app import create_app
+
+    dist_dir = tmp_path / "dist"
+    assets_dir = dist_dir / "assets"
+    assets_dir.mkdir(parents=True)
+
+    index_html = dist_dir / "index.html"
+    index_html.write_text("<!DOCTYPE html><html><body><div id='root'>RBTA Dashboard</div></body></html>", encoding="utf-8")
+
+    bundle_js = assets_dir / "index-test.js"
+    bundle_js.write_text("console.log('rbta dashboard bundle');", encoding="utf-8")
+
+    os.environ["RBTA_DASHBOARD_DIST"] = str(dist_dir)
+    try:
+        app = create_app()
+        client = TestClient(app)
+
+        # 1. Root redirect to /dashboard/
+        root_resp = client.get("/", follow_redirects=False)
+        assert root_resp.status_code == 307
+        assert root_resp.headers["location"] == "/dashboard/"
+
+        # 2. /dashboard/ serves index.html
+        dash_resp = client.get("/dashboard/")
+        assert dash_resp.status_code == 200
+        assert "RBTA Dashboard" in dash_resp.text
+
+        # 3. /dashboard/assets/index-test.js serves JS asset
+        asset_resp = client.get("/dashboard/assets/index-test.js")
+        assert asset_resp.status_code == 200
+        assert "console.log('rbta dashboard bundle');" in asset_resp.text
+
+        # 4. Nested SPA client routes fallback to index.html
+        spa_resp = client.get("/dashboard/meta-alerts/101/raw-alerts/wazuh-alt-001")
+        assert spa_resp.status_code == 200
+        assert "RBTA Dashboard" in spa_resp.text
+
+        # 5. Missing API route does NOT fallback to index.html, returns JSON 404
+        api_resp = client.get("/api/v1/nonexistent-endpoint")
+        assert api_resp.status_code == 404
+        assert api_resp.headers.get("content-type") == "application/json"
+    finally:
+        os.environ.pop("RBTA_DASHBOARD_DIST", None)

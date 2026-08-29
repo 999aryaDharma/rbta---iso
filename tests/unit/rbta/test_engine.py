@@ -412,3 +412,25 @@ def test_deterministic_meta_ids_and_repeated_runs():
         assert m1.rule_group_primary == m2.rule_group_primary
         assert m1.alert_count == m2.alert_count
         assert m1.wazuh_alert_ids == m2.wazuh_alert_ids
+
+
+def test_engine_public_seen_accessors():
+    """Verify seen_alert_count property and has_seen_alert accessor operate cleanly."""
+    engine = RBTAEngine(base_delta_t=timedelta(minutes=15))
+    base_t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+
+    assert engine.seen_alert_count == 0
+    assert not engine.has_seen_alert("alt-1")
+
+    engine.process(make_alert("alt-1", base_t, group="pam"))
+    assert engine.seen_alert_count == 1
+    assert engine.has_seen_alert("alt-1")
+    assert not engine.has_seen_alert("alt-2")
+
+    # Duplicate alert is idempotent and does not increment seen count
+    engine.process(make_alert("alt-1", base_t + timedelta(minutes=1), group="pam"))
+    assert engine.seen_alert_count == 1
+
+    engine.process(make_alert("alt-2", base_t + timedelta(minutes=2), group="syslog"))
+    assert engine.seen_alert_count == 2
+    assert engine.has_seen_alert("alt-2")

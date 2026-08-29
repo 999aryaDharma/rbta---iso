@@ -16,7 +16,10 @@ export function RawAlertDetailPage() {
   const runId = searchParams.get('run_id');
   const [copied, setCopied] = useState(false);
 
-  const withRunId = (path: string) => (runId ? `${path}${path.includes('?') ? '&' : '?'}run_id=${encodeURIComponent(runId)}` : path);
+  const withRunId = React.useCallback(
+    (path: string) => (runId ? `${path}${path.includes('?') ? '&' : '?'}run_id=${encodeURIComponent(runId)}` : path),
+    [runId]
+  );
 
   const numericMetaId = metaId ? Number(metaId) : null;
 
@@ -55,7 +58,7 @@ export function RawAlertDetailPage() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [prevId, nextId, metaId, runId, navigate]);
+  }, [prevId, nextId, metaId, withRunId, navigate]);
 
   const handleCopy = () => {
     if (!data) return;
