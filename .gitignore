@@ -138,6 +138,7 @@ docs/*
 !docs/research-spec/
 !docs/deployment/
 !docs/design/
+!docs/evidence/
 
 # =============================================================================
 # Large Data Files & Research Run Outputs
