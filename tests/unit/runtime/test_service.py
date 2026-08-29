@@ -70,6 +70,8 @@ def test_live_service_ingestion_scoring_and_idle_flush(tmp_path: Path):
     # 6. Acknowledge outbox item
     service.acknowledge_outbox(outbox[0].meta_id)
     assert len(service.get_outbox()) == 0
+    assert len(service.get_history()) == 1  # History survives ACK
+    assert service.get_meta_detail(1) is not None
 
 
 def test_live_service_controlled_shutdown_and_restart_recovery(tmp_path: Path):
@@ -93,8 +95,10 @@ def test_live_service_controlled_shutdown_and_restart_recovery(tmp_path: Path):
 
     # Ingest alert 1 into active bucket
     service1.ingest_alert(make_alert(1, base_t))
+    # Flush so there's one in history
+    service1.check_idle_flush(base_t + timedelta(minutes=20))
 
-    # Controlled shutdown (without draining, preserving active bucket)
+    # Controlled shutdown (without draining, preserving active bucket and history)
     service1.shutdown(drain=False)
 
     # Start fresh service2 with same state manager
@@ -105,12 +109,15 @@ def test_live_service_controlled_shutdown_and_restart_recovery(tmp_path: Path):
         adaptive=False,
     )
 
-    # Ingest alert 2 at 10:05 -> merges into restored bucket from service1
-    a2 = make_alert(2, base_t + timedelta(minutes=5))
+    assert len(service2.get_history()) == 1  # History survives restart
+
+    # Ingest alert 2 at 10:25 -> new active bucket
+    a2 = make_alert(2, base_t + timedelta(minutes=25))
     service2.ingest_alert(a2)
 
-    # Shutdown with drain -> produces finalized meta-alert with 2 alerts
+    # Shutdown with drain -> produces another finalized meta-alert
     drained = service2.shutdown(drain=True)
     assert len(drained) == 1
-    assert drained[0].alert_count == 2
-    assert drained[0].source_alert_ids == ("alert_1", "alert_2")
+    assert drained[0].alert_count == 1
+    assert drained[0].source_alert_ids == ("alert_2",)
+    assert len(service2.get_history()) == 2

@@ -27,11 +27,11 @@ def test_ingress_boundary_accepts_valid_payload_and_detects_duplicates():
     assert isinstance(res1.canonical_alert, CanonicalRawAlert)
     assert res1.canonical_alert.wazuh_alert_id == "alert_100"
 
-    # Same alert sent again -> accepted as duplicate
+    # Same alert sent again -> accepted, still not duplicate from boundary's perspective
     res2 = ingress.process_incoming(event, auth_header="Bearer secret-key")
     assert res2.status == "accepted"
-    assert res2.is_duplicate is True
-    assert res2.canonical_alert is None
+    assert res2.is_duplicate is False
+    assert res2.canonical_alert is not None
 
 
 def test_ingress_boundary_rejects_unauthorized():

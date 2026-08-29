@@ -71,56 +71,70 @@ class LiveRBTAService:
 
         self.engine: RBTAEngine = RBTAEngine(base_delta_t=self.base_delta_t, adaptive=self.adaptive)
         self.outbox: List[ScoredMetaAlert] = []
+        self.finalized_history: List[ScoredMetaAlert] = []
         self.source_checkpoint: Dict[str, Any] = {}
 
         # Restore from durable state on startup
         self._restore_from_disk()
+
+    def _parse_scored_alert(self, item: Any) -> Optional[ScoredMetaAlert]:
+        if isinstance(item, ScoredMetaAlert):
+            return item
+        if isinstance(item, dict) and "meta_id" in item and "anomaly_score" in item:
+            try:
+                return ScoredMetaAlert(
+                    meta_id=item["meta_id"],
+                    agent_id=item.get("agent_id", "001"),
+                    agent_name=item.get("agent_name", "unknown"),
+                    rule_group_primary=item.get("rule_group_primary", "unknown"),
+                    start_time=datetime.fromisoformat(item["start_time"]) if "start_time" in item else datetime.now(timezone.utc),
+                    end_time=datetime.fromisoformat(item["end_time"]) if "end_time" in item else datetime.now(timezone.utc),
+                    alert_count=item.get("alert_count", 1),
+                    max_severity=item.get("max_severity", 3),
+                    mitre_tactics=tuple(item.get("mitre_tactics", ())),
+                    seven_features=item.get("seven_features", {}),
+                    raw_model_score=item.get("raw_model_score", 0.0),
+                    anomaly_score=item.get("anomaly_score", 0.0),
+                    threshold_used=item.get("threshold_used", 0.0),
+                    decision=item.get("decision", "NOISE"),
+                    action=item.get("action", "SUPPRESS"),
+                    escalate=item.get("escalate", False),
+                    model_version=item.get("model_version", "v1"),
+                    feature_schema_version=item.get("feature_schema_version", "1.0"),
+                    score_calibration_version=item.get("score_calibration_version", "minmax-v1"),
+                    source_alert_ids=tuple(item.get("source_alert_ids", ())),
+                    metadata=item.get("metadata", {}),
+                )
+            except Exception as exc:
+                logger.warning("Error parsing scored alert: %s", exc)
+        return None
 
     def _restore_from_disk(self) -> None:
         """Attempt to restore engine state and outbox from disk."""
         restored = self.state_manager.restore_state(self.engine)
         self.source_checkpoint = restored.get("source_checkpoint", {})
         raw_outbox = restored.get("outbox", [])
+        raw_history = restored.get("finalized_history", [])
 
         for item in raw_outbox:
-            if isinstance(item, ScoredMetaAlert):
-                self.outbox.append(item)
-            elif isinstance(item, dict) and "meta_id" in item and "anomaly_score" in item:
-                try:
-                    meta = ScoredMetaAlert(
-                        meta_id=item["meta_id"],
-                        agent_id=item.get("agent_id", "001"),
-                        agent_name=item.get("agent_name", "unknown"),
-                        rule_group_primary=item.get("rule_group_primary", "unknown"),
-                        start_time=datetime.fromisoformat(item["start_time"]) if "start_time" in item else datetime.now(timezone.utc),
-                        end_time=datetime.fromisoformat(item["end_time"]) if "end_time" in item else datetime.now(timezone.utc),
-                        alert_count=item.get("alert_count", 1),
-                        max_severity=item.get("max_severity", 3),
-                        mitre_tactics=tuple(item.get("mitre_tactics", ())),
-                        seven_features=item.get("seven_features", {}),
-                        raw_model_score=item.get("raw_model_score", 0.0),
-                        anomaly_score=item.get("anomaly_score", 0.0),
-                        threshold_used=item.get("threshold_used", 0.0),
-                        decision=item.get("decision", "NOISE"),
-                        action=item.get("action", "SUPPRESS"),
-                        escalate=item.get("escalate", False),
-                        model_version=item.get("model_version", "v1"),
-                        feature_schema_version=item.get("feature_schema_version", "1.0"),
-                        score_calibration_version=item.get("score_calibration_version", "minmax-v1"),
-                        source_alert_ids=tuple(item.get("source_alert_ids", ())),
-                        metadata=item.get("metadata", {}),
-                    )
-                    self.outbox.append(meta)
-                except Exception as exc:
-                    logger.warning("Error restoring outbox item: %s", exc)
+            meta = self._parse_scored_alert(item)
+            if meta:
+                self.outbox.append(meta)
+                
+        for item in raw_history:
+            meta = self._parse_scored_alert(item)
+            if meta:
+                self.finalized_history.append(meta)
 
     def _persist_to_disk(self) -> None:
         """Persist current state and outbox to disk."""
         outbox_payload = [_serialize_scored_alert(item) for item in self.outbox]
+        history_payload = [_serialize_scored_alert(item) for item in self.finalized_history]
         self.state_manager.save_state(
             engine=self.engine,
             outbox=outbox_payload,
             source_checkpoint=self.source_checkpoint,
+            finalized_history=history_payload,
         )
 
     def ingest_alert(self, alert: CanonicalRawAlert) -> List[ScoredMetaAlert]:
@@ -142,6 +156,7 @@ class LiveRBTAService:
         for meta in finalized_metas:
             scored = self.scoring_pipeline.score_single(meta)
             self.outbox.append(scored)
+            self.finalized_history.append(scored)
             new_scored.append(scored)
 
         self._persist_to_disk()
@@ -166,6 +181,7 @@ class LiveRBTAService:
         for meta in finalized_metas:
             scored = self.scoring_pipeline.score_single(meta)
             self.outbox.append(scored)
+            self.finalized_history.append(scored)
             new_scored.append(scored)
 
         if new_scored:
@@ -181,6 +197,15 @@ class LiveRBTAService:
         """Acknowledge and remove a scored meta-alert from the outbox."""
         self.outbox = [item for item in self.outbox if item.meta_id != meta_id]
         self._persist_to_disk()
+
+    def get_history(self) -> List[ScoredMetaAlert]:
+        return list(self.finalized_history)
+
+    def get_meta_detail(self, meta_id: int) -> Optional[ScoredMetaAlert]:
+        for item in self.finalized_history:
+            if item.meta_id == meta_id:
+                return item
+        return None
 
     def shutdown(self, drain: bool = False) -> List[ScoredMetaAlert]:
         """Perform a controlled shutdown, optionally draining active buckets.
@@ -201,6 +226,7 @@ class LiveRBTAService:
             for meta in drained_metas:
                 scored = self.scoring_pipeline.score_single(meta)
                 self.outbox.append(scored)
+                self.finalized_history.append(scored)
                 drained_scored.append(scored)
 
         self._persist_to_disk()

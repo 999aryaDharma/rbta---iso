@@ -33,7 +33,6 @@ class CollectorIngressBoundary:
 
     def __init__(self, api_key: Optional[str] = None) -> None:
         self.api_key: Optional[str] = api_key
-        self._seen_ids: Set[str] = set()
 
     def process_incoming(
         self,
@@ -71,17 +70,8 @@ class CollectorIngressBoundary:
         except (CanonicalizationError, Exception) as exc:
             raise IngressPayloadError(f"Malformed raw alert payload: {exc}") from exc
 
-        # 3. Idempotency Check
+        # 3. Return Canonical Alert
         alert_id = canonical_alert.wazuh_alert_id
-        if alert_id in self._seen_ids:
-            return IngressResult(
-                status="accepted",
-                alert_id=alert_id,
-                is_duplicate=True,
-                canonical_alert=None,
-            )
-
-        self._seen_ids.add(alert_id)
         return IngressResult(
             status="accepted",
             alert_id=alert_id,

@@ -55,35 +55,44 @@ class WazuhIndexerLivePoller:
         now = current_time or datetime.now(timezone.utc)
         start_time = now - self.overlap_window
 
-        query_body = {
-            "size": self.page_size,
-            "sort": [{"@timestamp": "asc"}, {"id": "asc"}],
-            "query": {
-                "range": {
-                    "@timestamp": {
-                        "gte": start_time.isoformat(),
-                        "lte": now.isoformat(),
-                    }
-                }
-            },
-        }
+        new_alerts: List[CanonicalRawAlert] = []
+        search_after_cursor = None
+        sort_spec = [{"@timestamp": "asc"}, {"id": "asc"}]
 
-        try:
+        while True:
+            query_body = {
+                "size": self.page_size,
+                "sort": sort_spec,
+                "query": {
+                    "range": {
+                        "@timestamp": {
+                            "gte": start_time.isoformat(),
+                            "lte": now.isoformat(),
+                        }
+                    }
+                },
+            }
+            if search_after_cursor is not None:
+                query_body["search_after"] = search_after_cursor
+
             resp = self.client._request("POST", "/wazuh-alerts-*/_search", json_data=query_body)
             data = resp.json()
             hits = data.get("hits", {}).get("hits", [])
-        except Exception as exc:
-            logger.warning("Error polling Wazuh Indexer: %s", exc)
-            return []
 
-        new_alerts: List[CanonicalRawAlert] = []
-        for hit in hits:
-            try:
-                alert = canonicalize_wazuh_alert(hit)
-                if alert.wazuh_alert_id not in self._seen_alert_ids:
-                    self._seen_alert_ids.add(alert.wazuh_alert_id)
-                    new_alerts.append(alert)
-            except Exception as exc:
-                logger.warning("Failed to canonicalize hit in live poller: %s", exc)
+            for hit in hits:
+                try:
+                    alert = canonicalize_wazuh_alert(hit)
+                    if alert.wazuh_alert_id not in self._seen_alert_ids:
+                        self._seen_alert_ids.add(alert.wazuh_alert_id)
+                        new_alerts.append(alert)
+                except Exception as exc:
+                    logger.warning("Failed to canonicalize hit in live poller: %s", exc)
+
+            if len(hits) < self.page_size:
+                break
+
+            search_after_cursor = hits[-1].get("sort")
+            if search_after_cursor is None:
+                break
 
         return new_alerts

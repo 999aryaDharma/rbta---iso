@@ -50,3 +50,36 @@ def test_live_poller_queries_overlap_range_and_deduplicates():
     alerts2 = poller.poll_once()
     assert len(alerts2) == 1
     assert [a.wazuh_alert_id for a in alerts2] == ["alert_3"]
+
+
+def test_live_poller_pagination():
+    """Live poller requests pages until result length < page_size."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    
+    # 5 alerts total, page_size = 2 -> 3 pages needed
+    client._request.side_effect = [
+        MagicMock(status_code=200, json=lambda: {"hits": {"hits": [make_hit(1), make_hit(2)]}}),
+        MagicMock(status_code=200, json=lambda: {"hits": {"hits": [make_hit(3), make_hit(4)]}}),
+        MagicMock(status_code=200, json=lambda: {"hits": {"hits": [make_hit(5)]}}),
+    ]
+
+    poller = WazuhIndexerLivePoller(
+        client=client,
+        page_size=2,
+    )
+
+    alerts = poller.poll_once()
+    assert len(alerts) == 5
+    assert [a.wazuh_alert_id for a in alerts] == ["alert_1", "alert_2", "alert_3", "alert_4", "alert_5"]
+    assert client._request.call_count == 3
+
+
+def test_live_poller_propagates_transport_error():
+    """Live poller does not silently swallow network exceptions."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    client._request.side_effect = Exception("Connection Refused")
+
+    poller = WazuhIndexerLivePoller(client=client)
+
+    with pytest.raises(Exception, match="Connection Refused"):
+        poller.poll_once()

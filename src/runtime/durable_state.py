@@ -22,6 +22,7 @@ class DurableStateManager:
         engine: RBTAEngine,
         outbox: Optional[List[Dict[str, Any]]] = None,
         source_checkpoint: Optional[Dict[str, Any]] = None,
+        finalized_history: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         """Atomically persist engine state, active buckets, seen alert IDs, and outbox to disk."""
         self.filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -78,6 +79,7 @@ class DurableStateManager:
             "active_buckets": active_buckets_data,
             "source_checkpoint": source_checkpoint or {},
             "outbox": outbox or [],
+            "finalized_history": finalized_history or [],
         }
 
         with tmp_file.open("w", encoding="utf-8") as f:
@@ -99,7 +101,7 @@ class DurableStateManager:
             Restored metadata dictionary containing 'outbox' and 'source_checkpoint'.
         """
         if not self.filepath.exists():
-            return {"outbox": [], "source_checkpoint": {}}
+            return {"outbox": [], "source_checkpoint": {}, "finalized_history": []}
 
         with self.filepath.open("r", encoding="utf-8") as f:
             data = json.load(f)
@@ -154,4 +156,5 @@ class DurableStateManager:
         return {
             "source_checkpoint": data.get("source_checkpoint", {}),
             "outbox": data.get("outbox", []),
+            "finalized_history": data.get("finalized_history", []),
         }
