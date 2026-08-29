@@ -153,6 +153,7 @@ jobs:
       - name: Generate Sanitized CI Model & Replay Fixtures
         run: |
           mkdir -p /tmp/rbta-ci/models /tmp/rbta-ci/replay /tmp/rbta-ci/state
+          chmod 0777 /tmp/rbta-ci/state
           python -c "
           from datetime import datetime, timedelta, timezone
           from pathlib import Path
