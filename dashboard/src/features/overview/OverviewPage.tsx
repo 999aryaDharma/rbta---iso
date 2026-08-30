@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/shared/PageHeader';
 import { DecisionBadge } from '@/components/shared/DecisionBadge';
 import { formatNumber, formatDateTime, formatScore } from '@/lib/formatters';
 import { Button } from '@cloudflare/kumo/components/button';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { Table } from '@cloudflare/kumo/components/table';
 import { WarningCircle, ArrowRight } from '@phosphor-icons/react';
 import {
@@ -77,7 +78,7 @@ export function OverviewPage() {
                     </div>
                     <div className="flex justify-between items-center">
                       <span>Rule Group:</span>
-                      <span className="font-mono text-kumo-default bg-kumo-recessed px-2 py-0.5 rounded text-[11px] border border-kumo-hairline">{m.rule_group_primary}</span>
+                      <Badge variant="secondary">{m.rule_group_primary}</Badge>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>Score / Thresh:</span>

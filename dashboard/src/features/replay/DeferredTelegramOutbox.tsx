@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchTelegramPayloads } from '@/api/replay';
 import { Table } from '@cloudflare/kumo/components/table';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { PaperPlaneRight, Copy, Check, ArrowClockwise } from '@phosphor-icons/react';
 
 export function DeferredTelegramOutbox() {
@@ -31,9 +32,9 @@ export function DeferredTelegramOutbox() {
           <span className="text-xs font-semibold uppercase tracking-wider text-kumo-strong">
             Deferred Telegram Payload Outbox
           </span>
-          <span className="font-mono text-xs font-semibold px-2.5 py-0.5 rounded bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+          <Badge variant="error">
             {totalCount} ESCALATE Payloads
-          </span>
+          </Badge>
         </div>
 
         <div className="flex items-center gap-3">
@@ -82,9 +83,9 @@ export function DeferredTelegramOutbox() {
                       <div className="text-[10px] text-kumo-subtle font-normal">{p.idempotency_key}</div>
                     </Table.Cell>
                     <Table.Cell>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                      <Badge variant="error">
                         {p.decision}
-                      </span>
+                      </Badge>
                     </Table.Cell>
                     <Table.Cell className="text-[11px]">
                       <div className="font-medium text-kumo-strong">{p.rule_group_primary}</div>

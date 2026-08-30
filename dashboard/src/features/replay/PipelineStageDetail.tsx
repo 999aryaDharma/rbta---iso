@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { PipelineStageId } from './ReplayPipelineVisualizer';
 import type { PipelineTelemetry, ReplayStatus } from '@/api/schemas';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { formatNumber } from '@/lib/formatters';
 import { Copy, Check, Info } from '@phosphor-icons/react';
 
@@ -35,9 +36,9 @@ export function PipelineStageDetail({
             Stage Inspection: {activeStage.replace('_', ' ')}
           </span>
         </div>
-        <span className="text-[11px] font-mono text-kumo-subtle px-2 py-0.5 rounded border border-kumo-hairline bg-kumo-recessed">
+        <Badge variant="secondary">
           Authoritative Backend Telemetry
-        </span>
+        </Badge>
       </div>
 
       {/* STAGE: FEATURES */}

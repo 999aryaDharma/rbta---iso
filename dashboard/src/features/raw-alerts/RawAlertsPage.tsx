@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/shared/PageHeader';
 import { formatDateTime } from '@/lib/formatters';
 import { Banner } from '@cloudflare/kumo/components/banner';
 import { Button } from '@cloudflare/kumo/components/button';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { InputGroup } from '@cloudflare/kumo/components/input-group';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Pagination } from '@cloudflare/kumo/components/pagination';
@@ -154,9 +155,7 @@ export function RawAlertsPage() {
                   <Table.Cell className="font-mono text-xs text-kumo-subtle">{a.srcip || '—'}</Table.Cell>
                   <Table.Cell className="text-xs">
                     {a.mitre_tactics && a.mitre_tactics.length > 0 ? (
-                      <span className="px-2 py-0.5 rounded text-[11px] font-mono border border-kumo-hairline bg-kumo-recessed text-kumo-strong">
-                        {a.mitre_tactics.join(', ')}
-                      </span>
+                      <Badge variant="secondary">{a.mitre_tactics.join(', ')}</Badge>
                     ) : (
                       <span className="text-kumo-subtle text-[11px]">None</span>
                     )}

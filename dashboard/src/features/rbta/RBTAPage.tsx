@@ -5,6 +5,7 @@ import { MetricCard } from '@/components/shared/MetricCard';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { formatNumber, formatSeconds, formatDateTime } from '@/lib/formatters';
 import { Table } from '@cloudflare/kumo/components/table';
+import { Badge } from '@cloudflare/kumo/components/badge';
 
 export function RBTAPage() {
   const [searchParams] = useSearchParams();
@@ -77,13 +78,9 @@ export function RBTAPage() {
                   </Table.Cell>
                   <Table.Cell className="text-right font-mono font-semibold text-kumo-strong">{a.active_bucket_count}</Table.Cell>
                   <Table.Cell className="text-center">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded text-[11px] font-mono font-medium border ${
-                      a.is_warmed_up
-                        ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                        : 'bg-kumo-recessed text-kumo-subtle border-kumo-hairline'
-                    }`}>
+                    <Badge variant={a.is_warmed_up ? 'success' : 'secondary'}>
                       {a.status}
-                    </span>
+                    </Badge>
                   </Table.Cell>
                 </Table.Row>
               ))}

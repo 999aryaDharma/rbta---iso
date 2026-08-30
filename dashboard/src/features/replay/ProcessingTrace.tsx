@@ -1,4 +1,5 @@
 import type { PipelineTraceItem } from '@/api/schemas';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { TerminalWindow } from '@phosphor-icons/react';
 
 interface ProcessingTraceProps {
@@ -19,9 +20,9 @@ export function ProcessingTrace({ trace }: ProcessingTraceProps) {
             Live Runtime Processing Trace
           </span>
         </div>
-        <span className="text-[11px] font-mono text-kumo-subtle px-2 py-0.5 rounded border border-kumo-hairline bg-kumo-recessed">
+        <Badge variant="secondary">
           Showing latest {items.length} pipeline events (ring buffer)
-        </span>
+        </Badge>
       </div>
 
       <div className="h-52 overflow-y-auto rounded-lg bg-kumo-recessed/30 border border-kumo-hairline p-3 space-y-1.5 font-mono text-[11px]">
@@ -29,9 +30,9 @@ export function ProcessingTrace({ trace }: ProcessingTraceProps) {
           items.map((item, idx) => (
             <div key={`${item.timestamp}-${idx}`} className="flex items-start gap-2.5 py-0.5 leading-relaxed">
               <span className="text-kumo-subtle shrink-0 font-mono">{item.timestamp}</span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase shrink-0 border border-kumo-hairline bg-kumo-canvas text-kumo-strong">
+              <Badge variant="secondary">
                 {item.stage}
-              </span>
+              </Badge>
               <span className="text-kumo-strong font-medium truncate">{item.message}</span>
               {item.detail && (
                 <span className="text-kumo-subtle truncate max-w-lg">({item.detail})</span>

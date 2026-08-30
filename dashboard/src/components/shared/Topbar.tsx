@@ -72,19 +72,13 @@ export function Topbar() {
             {runId ? (
               <Badge variant="warning">REPLAY: {runId.slice(0, 8)}</Badge>
             ) : (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-kumo-recessed text-kumo-strong border border-kumo-hairline">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                LIVE RUNTIME
-              </span>
+              <Badge variant="success">LIVE RUNTIME</Badge>
             )}
 
-            <span className="hidden lg:flex items-center gap-1.5 font-mono text-[11px] text-kumo-subtle bg-kumo-recessed/40 px-2.5 py-0.5 rounded border border-kumo-hairline">
-              <span
-                className={`inline-block w-1.5 h-1.5 rounded-full ${
-                  data?.system_status === 'READY' ? 'bg-emerald-500' : 'bg-rose-500'
-                }`}
-              />
-              {data?.system_status === 'READY' ? 'SYSTEM READY' : 'DEGRADED'}
+            <span className="hidden lg:inline-flex">
+              <Badge variant={data?.system_status === 'READY' ? 'secondary' : 'error'}>
+                {data?.system_status === 'READY' ? 'SYSTEM READY' : 'DEGRADED'}
+              </Badge>
             </span>
           </div>
         </div>

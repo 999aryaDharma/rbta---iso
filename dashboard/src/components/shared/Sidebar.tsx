@@ -6,7 +6,7 @@ import {
   SidebarRail,
 } from '@cloudflare/kumo/components/sidebar';
 import {
-  ChartBar, Bucket, Cpu, Play, Plugs, GearSix,
+  ChartBar, PaintBucket, Cpu, Play, Plugs, GearSix,
 } from '@phosphor-icons/react';
 
 const navGroups = [
@@ -19,7 +19,7 @@ const navGroups = [
   {
     label: 'INVESTIGATE',
     items: [
-      { to: '/meta-alerts', icon: Bucket, label: 'MetaAlerts' },
+      { to: '/meta-alerts', icon: PaintBucket, label: 'MetaAlerts' },
       { to: '/rbta', icon: Cpu, label: 'RBTA Engine' },
     ],
   },

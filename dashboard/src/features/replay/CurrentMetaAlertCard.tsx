@@ -1,5 +1,6 @@
 import type { PipelineLatestMetaAlert } from '@/api/schemas';
 import { DecisionBadge } from '@/components/shared/DecisionBadge';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import { formatNumber } from '@/lib/formatters';
 import { Warning } from '@phosphor-icons/react';
 
@@ -33,9 +34,9 @@ export function CurrentMetaAlertCard({
             Current Scored MetaAlert
           </div>
           {latestMeta ? (
-            <span className="font-mono text-xs font-semibold px-2.5 py-0.5 rounded bg-kumo-recessed text-kumo-strong border border-kumo-hairline">
+            <Badge variant="secondary">
               #{latestMeta.meta_id}
-            </span>
+            </Badge>
           ) : (
             <span className="text-xs text-kumo-subtle italic">Awaiting first finalized bucket...</span>
           )}
@@ -121,15 +122,9 @@ export function CurrentMetaAlertCard({
               {latestMeta.decision && (
                 <DecisionBadge decision={latestMeta.decision} action={latestMeta.action || 'SUPPRESS'} />
               )}
-              <span
-                className={`px-2.5 py-0.5 rounded text-[11px] font-mono font-semibold border ${
-                  isEscalate
-                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                    : 'bg-kumo-recessed text-kumo-subtle border-kumo-hairline'
-                }`}
-              >
+              <Badge variant={isEscalate ? 'error' : 'secondary'}>
                 {latestMeta.action || 'SUPPRESS'}
-              </span>
+              </Badge>
             </div>
           </div>
         </div>
