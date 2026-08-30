@@ -10,7 +10,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <Topbar />
 
       {/* Main layout below topbar: Sidebar + Page content */}
-      <SidebarProvider defaultOpen>
+      <SidebarProvider defaultOpen collapsible="icon" peekable>
         <div className="flex flex-1 min-h-[calc(100vh-3.5rem)] overflow-hidden">
           <AppSidebar />
           <main className="flex-1 overflow-y-auto bg-kumo-base/30 min-w-0">

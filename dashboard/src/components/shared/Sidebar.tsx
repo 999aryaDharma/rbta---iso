@@ -1,10 +1,11 @@
 import { useCallback, useEffect } from 'react';
-import { NavLink, useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
-  SidebarMenu, SidebarMenuButton, SidebarMenuItem,
+  SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarTrigger,
   SidebarRail,
 } from '@cloudflare/kumo/components/sidebar';
+import { Badge } from '@cloudflare/kumo/components/badge';
 import {
   ChartBar, PaintBucket, Cpu, Play, Plugs, GearSix,
 } from '@phosphor-icons/react';
@@ -40,6 +41,7 @@ const navGroups = [
 
 export function AppSidebar() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const runId = searchParams.get('run_id');
 
@@ -85,48 +87,42 @@ export function AppSidebar() {
   }, [withRunId, navigate]);
 
   return (
-    <Sidebar className="border-r border-kumo-hairline bg-kumo-canvas select-none shrink-0 w-64">
-      <SidebarContent className="py-4 space-y-3">
+    <Sidebar>
+      <SidebarContent>
         {navGroups.map((group) => (
-          <SidebarGroup key={group.label} className="px-3">
-            <SidebarGroupLabel className="text-[10px] font-semibold text-kumo-subtle tracking-wider uppercase px-3 py-1.5">
+          <SidebarGroup key={group.label}>
+            <SidebarGroupLabel>
               {group.label}
             </SidebarGroupLabel>
-            <SidebarMenu className="space-y-1 mt-1">
-              {group.items.map((item) => (
-                <SidebarMenuItem key={item.to}>
-                  <NavLink to={withRunId(item.to)} className="block">
-                    {({ isActive }) => (
-                      <SidebarMenuButton
-                        active={isActive}
-                        tooltip={item.label}
-                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-all ${
-                          isActive
-                            ? 'bg-kumo-recessed text-kumo-strong font-semibold shadow-2xs border border-kumo-hairline'
-                            : 'text-kumo-subtle hover:bg-kumo-recessed/50 hover:text-kumo-strong'
-                        }`}
-                      >
-                        <item.icon
-                          size={17}
-                          weight={isActive ? 'duotone' : 'regular'}
-                          className={isActive ? 'text-kumo-strong' : 'text-kumo-subtle'}
-                        />
-                        <span className="truncate">{item.label}</span>
-                      </SidebarMenuButton>
-                    )}
-                  </NavLink>
-                </SidebarMenuItem>
-              ))}
+            <SidebarMenu>
+              {group.items.map((item) => {
+                const isActive =
+                  location.pathname === item.to ||
+                  (item.to !== '/overview' && location.pathname.startsWith(item.to));
+                return (
+                  <SidebarMenuItem key={item.to}>
+                    <SidebarMenuButton
+                      icon={item.icon}
+                      active={isActive}
+                      tooltip={item.label}
+                      onClick={() => navigate(withRunId(item.to))}
+                    >
+                      {item.label}
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarGroup>
         ))}
       </SidebarContent>
 
-      <SidebarFooter className="p-4 border-t border-kumo-hairline bg-kumo-canvas text-[11px] text-kumo-subtle flex items-center justify-between">
-        <span className="font-mono">RBTA Engine</span>
-        <span className="text-[10px] bg-kumo-recessed px-2 py-0.5 rounded border border-kumo-hairline font-mono text-kumo-strong">
-          v1.0.0
-        </span>
+      <SidebarFooter className="flex items-center justify-between">
+        <SidebarTrigger />
+        <div className="flex items-center gap-2 group-data-[state=collapsed]/sidebar:hidden">
+          <span className="font-mono text-xs text-kumo-subtle">RBTA Engine</span>
+          <Badge variant="secondary">v1.0.0</Badge>
+        </div>
       </SidebarFooter>
 
       <SidebarRail />
