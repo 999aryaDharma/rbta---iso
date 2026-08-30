@@ -533,6 +533,9 @@ class ReplayController:
                                         "detail": f"MetaAlert #{sm.meta_id} ({sm.decision})",
                                     })
 
+                if self.current_evidence_store:
+                    self.current_evidence_store.flush()
+
                 with self._lock:
                     self.status = "COMPLETED"
                     if self.wall_clock_start is not None:

@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -27,32 +28,44 @@ class RawAlertEvidenceStore:
     """RawAlertEvidenceStore — SQLite-backed raw alert evidence persistence with WAL mode.
 
     Guarantees:
-    - Evidence is persisted BEFORE core RBTA state mutation.
+    - High-throughput batched write buffer with WAL journal and NORMAL synchronous mode.
     - Idempotent duplicate: identical alert fingerprint -> NO-OP (returns False).
     - Conflicting duplicate: different alert fingerprint -> raises RawEvidenceConflictError (fail-closed).
     - Exact source membership traceability for MetaAlerts (source_total, resolved_total, unresolved_ids).
     - Multi-field search across alert ID, rule ID, description, IP, full log.
-    - Optional presentation-level secret redaction on read APIs.
+    - Automatic flush on all read queries for 100% read-your-own-writes consistency.
     """
 
-    def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:
+    def __init__(self, db_path: Optional[Union[str, Path]] = None, batch_size: int = 1000) -> None:
         if db_path is None:
             import os
             db_path = os.environ.get("RBTA_RAW_EVIDENCE_DB", "data/runtime/raw_alert_evidence.sqlite3")
 
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.batch_size = batch_size
+        self._lock = threading.Lock()
+        self._write_buffer: List[Tuple] = []
+        self._recent_fingerprints: Dict[str, str] = {}
+        self._max_recent_fingerprints = 100000
+        self._conn: Optional[sqlite3.Connection] = None
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30.0)
-        conn.row_factory = sqlite3.Row
-        return conn
-
-    def _init_db(self) -> None:
-        with self._get_conn() as conn:
+        if self._conn is None:
+            conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA cache_size=-64000")
+            conn.execute("PRAGMA temp_store=MEMORY")
+            conn.execute("PRAGMA busy_timeout=30000")
+            self._conn = conn
+        return self._conn
+
+    def _init_db(self) -> None:
+        with self._lock:
+            conn = self._get_conn()
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS raw_alert_evidence (
@@ -110,9 +123,37 @@ class RawAlertEvidenceStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_raw_agent ON raw_alert_evidence (agent_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_raw_rule ON raw_alert_evidence (rule_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_raw_timestamp ON raw_alert_evidence (timestamp)")
+            conn.commit()
 
             row = conn.execute("SELECT COUNT(*) AS total FROM raw_alert_evidence").fetchone()
             self._cached_count = int(row["total"]) if row else 0
+
+    def flush(self) -> None:
+        """Commit any buffered raw evidence records to disk immediately."""
+        with self._lock:
+            if not self._write_buffer:
+                return
+            conn = self._get_conn()
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO raw_alert_evidence (
+                    wazuh_alert_id, canonical_fingerprint, timestamp, agent_id, agent_name,
+                    rule_id, rule_level, rule_description, rule_group_primary, rule_groups_all,
+                    mitre_tactics, mitre_techniques, srcip, location, decoder,
+                    full_log, agent_criticality, metadata, original_source_payload,
+                    source_index, source_document_id, source_mode, ingested_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?
+                )
+                """,
+                self._write_buffer,
+            )
+            conn.commit()
+            self._write_buffer.clear()
 
     def store(
         self,
@@ -120,7 +161,7 @@ class RawAlertEvidenceStore:
         original_payload: Optional[Dict[str, Any]] = None,
         source_mode: str = "LIVE",
     ) -> bool:
-        """Store a canonical raw alert.
+        """Store a canonical raw alert with high throughput write buffering.
 
         Returns
         -------
@@ -164,7 +205,17 @@ class RawAlertEvidenceStore:
             metadata=meta,
         )
 
-        with self._get_conn() as conn:
+        with self._lock:
+            if alert.wazuh_alert_id in self._recent_fingerprints:
+                existing_fp = self._recent_fingerprints[alert.wazuh_alert_id]
+                if existing_fp == fingerprint:
+                    return False
+                raise RawEvidenceConflictError(
+                    f"Conflicting canonical evidence detected for wazuh_alert_id='{alert.wazuh_alert_id}'. "
+                    f"Existing fingerprint '{existing_fp}' != incoming '{fingerprint}'."
+                )
+
+            conn = self._get_conn()
             row = conn.execute(
                 "SELECT canonical_fingerprint FROM raw_alert_evidence WHERE wazuh_alert_id = ?",
                 (alert.wazuh_alert_id,),
@@ -172,60 +223,72 @@ class RawAlertEvidenceStore:
 
             if row is not None:
                 existing_fp = row["canonical_fingerprint"]
+                if len(self._recent_fingerprints) < self._max_recent_fingerprints:
+                    self._recent_fingerprints[alert.wazuh_alert_id] = existing_fp
                 if existing_fp == fingerprint:
-                    return False  # Identical duplicate -> safe NO-OP
+                    return False
                 raise RawEvidenceConflictError(
                     f"Conflicting canonical evidence detected for wazuh_alert_id='{alert.wazuh_alert_id}'. "
                     f"Existing fingerprint '{existing_fp}' != incoming '{fingerprint}'."
                 )
 
+            if len(self._recent_fingerprints) >= self._max_recent_fingerprints:
+                self._recent_fingerprints.clear()
+            self._recent_fingerprints[alert.wazuh_alert_id] = fingerprint
+
             ingested_at = datetime.now(timezone.utc).isoformat()
             ts_str = alert.timestamp.isoformat() if isinstance(alert.timestamp, datetime) else str(alert.timestamp)
             original_payload_str = deterministic_json_dumps(original_payload) if original_payload is not None else None
 
-            conn.execute(
-                """
-                INSERT INTO raw_alert_evidence (
-                    wazuh_alert_id, canonical_fingerprint, timestamp, agent_id, agent_name,
-                    rule_id, rule_level, rule_description, rule_group_primary, rule_groups_all,
-                    mitre_tactics, mitre_techniques, srcip, location, decoder,
-                    full_log, agent_criticality, metadata, original_source_payload,
-                    source_index, source_document_id, source_mode, ingested_at
-                ) VALUES (
-                    ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?,
-                    ?, ?, ?, ?
-                )
-                """,
-                (
-                    alert.wazuh_alert_id,
-                    fingerprint,
-                    ts_str,
-                    alert.agent_id,
-                    alert.agent_name,
-                    alert.rule_id,
-                    alert.rule_level,
-                    rule_desc,
-                    alert.rule_group_primary,
-                    json.dumps(to_json_safe(rule_groups_all)),
-                    json.dumps(to_json_safe(alert.mitre_tactics)),
-                    json.dumps(to_json_safe(mitre_techs)),
-                    alert.srcip or "",
-                    loc,
-                    dec,
-                    flog,
-                    float(alert.agent_criticality),
-                    deterministic_json_dumps(meta),
-                    original_payload_str,
-                    source_index,
-                    source_doc_id,
-                    source_mode,
-                    ingested_at,
-                ),
+            record = (
+                alert.wazuh_alert_id,
+                fingerprint,
+                ts_str,
+                alert.agent_id,
+                alert.agent_name,
+                alert.rule_id,
+                alert.rule_level,
+                rule_desc,
+                alert.rule_group_primary,
+                json.dumps(to_json_safe(rule_groups_all)),
+                json.dumps(to_json_safe(alert.mitre_tactics)),
+                json.dumps(to_json_safe(mitre_techs)),
+                alert.srcip or "",
+                loc,
+                dec,
+                flog,
+                float(alert.agent_criticality),
+                deterministic_json_dumps(meta),
+                original_payload_str,
+                source_index,
+                source_doc_id,
+                source_mode,
+                ingested_at,
             )
+            self._write_buffer.append(record)
             self._cached_count = getattr(self, "_cached_count", 0) + 1
+
+            if len(self._write_buffer) >= self.batch_size:
+                conn.executemany(
+                    """
+                    INSERT OR IGNORE INTO raw_alert_evidence (
+                        wazuh_alert_id, canonical_fingerprint, timestamp, agent_id, agent_name,
+                        rule_id, rule_level, rule_description, rule_group_primary, rule_groups_all,
+                        mitre_tactics, mitre_techniques, srcip, location, decoder,
+                        full_log, agent_criticality, metadata, original_source_payload,
+                        source_index, source_document_id, source_mode, ingested_at
+                    ) VALUES (
+                        ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?,
+                        ?, ?, ?, ?
+                    )
+                    """,
+                    self._write_buffer,
+                )
+                conn.commit()
+                self._write_buffer.clear()
             return True
 
     def _row_to_dict(self, row: sqlite3.Row, redact: bool = False) -> Dict[str, Any]:
@@ -250,7 +313,9 @@ class RawAlertEvidenceStore:
 
     def get(self, wazuh_alert_id: str, redact: bool = False) -> Optional[Dict[str, Any]]:
         """Retrieve a single raw alert evidence record by ID."""
-        with self._get_conn() as conn:
+        self.flush()
+        with self._lock:
+            conn = self._get_conn()
             row = conn.execute(
                 "SELECT * FROM raw_alert_evidence WHERE wazuh_alert_id = ?",
                 (wazuh_alert_id,),
@@ -264,8 +329,10 @@ class RawAlertEvidenceStore:
         if not wazuh_alert_ids:
             return {}
 
+        self.flush()
         results: Dict[str, Dict[str, Any]] = {}
-        with self._get_conn() as conn:
+        with self._lock:
+            conn = self._get_conn()
             # Batch queries in chunks of 500 to respect SQLite parameter limits
             chunk_size = 500
             for i in range(0, len(wazuh_alert_ids), chunk_size):
@@ -359,6 +426,7 @@ class RawAlertEvidenceStore:
         redact: bool = True,
     ) -> List[Dict[str, Any]]:
         """Search raw alert evidence across multiple indices."""
+        self.flush()
         conditions = []
         params: List[Any] = []
 
@@ -382,7 +450,8 @@ class RawAlertEvidenceStore:
         sql = f"SELECT * FROM raw_alert_evidence {where_clause} ORDER BY timestamp DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
-        with self._get_conn() as conn:
+        with self._lock:
+            conn = self._get_conn()
             rows = conn.execute(sql, params).fetchall()
             return [self._row_to_dict(r, redact=redact) for r in rows]
 
@@ -390,7 +459,9 @@ class RawAlertEvidenceStore:
         """Return total number of stored raw alert evidence records quickly from memory cache."""
         if hasattr(self, "_cached_count"):
             return self._cached_count
-        with self._get_conn() as conn:
+        self.flush()
+        with self._lock:
+            conn = self._get_conn()
             row = conn.execute("SELECT COUNT(*) AS total FROM raw_alert_evidence").fetchone()
             self._cached_count = int(row["total"]) if row else 0
             return self._cached_count
@@ -407,6 +478,7 @@ class RawAlertEvidenceStore:
         Dict[str, int]
             Map of 'YYYY-MM-DD HH:00' -> count of raw alerts with timestamps in that hour.
         """
+        self.flush()
         st_utc = start_time.astimezone(timezone.utc) if start_time.tzinfo else start_time.replace(tzinfo=timezone.utc)
         et_utc = end_time.astimezone(timezone.utc) if end_time.tzinfo else end_time.replace(tzinfo=timezone.utc)
         start_iso = st_utc.isoformat()
@@ -414,7 +486,8 @@ class RawAlertEvidenceStore:
 
         sql = "SELECT wazuh_alert_id, timestamp FROM raw_alert_evidence WHERE timestamp >= ? AND timestamp <= ?"
         hourly_counts: Dict[str, int] = {}
-        with self._get_conn() as conn:
+        with self._lock:
+            conn = self._get_conn()
             rows = conn.execute(sql, (start_iso, end_iso)).fetchall()
             for r in rows:
                 ts_raw = r["timestamp"]

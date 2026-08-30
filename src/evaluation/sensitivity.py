@@ -36,9 +36,12 @@ def _find_elbow_point(x_vals: Sequence[float], y_vals: Sequence[float]) -> int:
         return int(x_vals[0])
 
     distances = []
+    v1 = p2 - p1
     for x, y in zip(x_vals, y_vals):
-        p = np.array([x, y])
-        d = np.abs(np.cross(p2 - p1, p1 - p)) / line_len
+        v2 = p1 - np.array([x, y])
+        # 2D cross product: x1*y2 - y1*x2
+        cross_2d = float(v1[0] * v2[1] - v1[1] * v2[0])
+        d = abs(cross_2d) / line_len
         distances.append(d)
 
     best_idx = int(np.argmax(distances))

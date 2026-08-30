@@ -211,6 +211,8 @@ class LiveRBTAService:
 
     def checkpoint(self) -> None:
         """Explicitly persist current durable state to disk."""
+        if self.raw_evidence_store is not None and hasattr(self.raw_evidence_store, "flush"):
+            self.raw_evidence_store.flush()
         self._persist_to_disk()
 
     def _drain_pending_scoring(self, auto_persist: Optional[bool] = None) -> List[ScoredMetaAlert]:
