@@ -72,14 +72,14 @@ export function AppSidebar() {
       {/* 1. Header with Company/Platform switcher */}
       <SidebarHeader className="p-3 border-b border-kumo-line flex items-center justify-between">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="size-6 rounded-md bg-kumo-brand/10 border border-kumo-brand/20 text-kumo-brand flex items-center justify-center shrink-0">
-            <ShieldCheck size={16} weight="duotone" />
+          <div className="size-7 rounded-md bg-kumo-brand/10 border border-kumo-brand/20 text-kumo-brand flex items-center justify-center shrink-0">
+            <ShieldCheck size={18} weight="duotone" />
           </div>
-          <span className="font-semibold text-sm text-kumo-strong truncate group-data-[state=collapsed]/sidebar:hidden">
+          <span className="font-semibold text-base text-kumo-strong truncate group-data-[state=collapsed]/sidebar:hidden">
             RBTA Platform
           </span>
         </div>
-        <CaretUpDown size={14} className="text-kumo-subtle shrink-0 group-data-[state=collapsed]/sidebar:hidden" />
+        <CaretUpDown size={16} className="text-kumo-subtle shrink-0 group-data-[state=collapsed]/sidebar:hidden" />
       </SidebarHeader>
 
       {/* 2. Scrollable Navigation Content */}
@@ -89,14 +89,14 @@ export function AppSidebar() {
           <button
             type="button"
             onClick={openSearch}
-            className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border border-kumo-line bg-kumo-recessed/40 text-kumo-subtle hover:text-kumo-default hover:bg-kumo-recessed text-xs transition-colors cursor-pointer group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0"
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-kumo-line bg-kumo-recessed/40 text-kumo-subtle hover:text-kumo-default hover:bg-kumo-recessed text-sm transition-colors cursor-pointer group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0"
             title="Quick search (Press / or ⌘K)"
           >
-            <div className="flex items-center gap-2 truncate">
-              <MagnifyingGlass size={15} className="shrink-0" />
+            <div className="flex items-center gap-2.5 truncate">
+              <MagnifyingGlass size={16} className="shrink-0" />
               <span className="truncate group-data-[state=collapsed]/sidebar:hidden">Quick search...</span>
             </div>
-            <kbd className="hidden sm:inline-flex rounded border border-kumo-line bg-kumo-canvas px-1.5 py-0.5 text-[10px] font-mono text-kumo-subtle group-data-[state=collapsed]/sidebar:hidden">
+            <kbd className="hidden sm:inline-flex rounded border border-kumo-line bg-kumo-canvas px-1.5 py-0.5 text-xs font-mono text-kumo-subtle group-data-[state=collapsed]/sidebar:hidden">
               ⌘K
             </kbd>
           </button>

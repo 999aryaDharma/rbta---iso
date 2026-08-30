@@ -49,7 +49,7 @@ export function Topbar() {
       <header className="w-full h-14 min-h-[3.5rem] flex items-center justify-between px-6 lg:px-8 border-b border-kumo-line bg-kumo-canvas shrink-0 z-20 sticky top-0">
         {/* Left: Context Breadcrumb & Runtime Status Badges */}
         <div className="flex items-center gap-3 min-w-0">
-          <div className="flex items-center gap-2 text-xs font-medium text-kumo-subtle">
+          <div className="flex items-center gap-2 text-sm font-medium text-kumo-subtle">
             <span>Security Operations</span>
             <span>/</span>
             <span className="text-kumo-strong font-semibold">Production SOC</span>
@@ -74,19 +74,19 @@ export function Topbar() {
         </div>
 
         {/* Right: Quick Search, Theme Cycler, Shortcuts Help, User Info */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           {/* Quick Search Button */}
           <button
             type="button"
             onClick={() => setShowPalette(true)}
-            className="flex items-center justify-between gap-3 px-3 py-1.5 rounded-lg border border-kumo-line bg-kumo-recessed/40 hover:bg-kumo-recessed text-kumo-subtle hover:text-kumo-default text-xs transition-colors cursor-pointer w-36 sm:w-52"
+            className="flex items-center justify-between gap-3 px-3 py-1.5 rounded-lg border border-kumo-line bg-kumo-recessed/40 hover:bg-kumo-recessed text-kumo-subtle hover:text-kumo-default text-sm transition-colors cursor-pointer w-40 sm:w-56"
             title="Search RBTA (Press / or ⌘K)"
           >
             <div className="flex items-center gap-2 truncate">
-              <MagnifyingGlass size={14} className="shrink-0 text-kumo-subtle" />
+              <MagnifyingGlass size={15} className="shrink-0 text-kumo-subtle" />
               <span className="truncate">Search RBTA...</span>
             </div>
-            <kbd className="rounded border border-kumo-line bg-kumo-canvas px-1.5 py-0.5 text-[10px] font-mono text-kumo-subtle">
+            <kbd className="rounded border border-kumo-line bg-kumo-canvas px-1.5 py-0.5 text-xs font-mono text-kumo-subtle">
               /
             </kbd>
           </button>
@@ -99,9 +99,9 @@ export function Topbar() {
             aria-label={`Theme: ${theme}`}
             className="text-kumo-subtle hover:text-kumo-default"
           >
-            {theme === 'light' && <Sun size={16} />}
-            {theme === 'dark' && <Moon size={16} />}
-            {theme === 'system' && <Desktop size={16} />}
+            {theme === 'light' && <Sun size={17} />}
+            {theme === 'dark' && <Moon size={17} />}
+            {theme === 'system' && <Desktop size={17} />}
           </Button>
 
           {/* Keyboard Shortcuts Help */}
@@ -112,17 +112,17 @@ export function Topbar() {
             aria-label="Keyboard shortcuts"
             className="text-kumo-subtle hover:text-kumo-default"
           >
-            <Question size={16} />
+            <Question size={17} />
           </Button>
 
           {/* User Profile Pill */}
           <div className="hidden sm:flex items-center gap-2.5 pl-3 ml-1 border-l border-kumo-line">
-            <div className="size-7 rounded-full bg-kumo-recessed border border-kumo-line flex items-center justify-center text-kumo-strong">
-              <User size={14} />
+            <div className="size-8 rounded-full bg-kumo-recessed border border-kumo-line flex items-center justify-center text-kumo-strong">
+              <User size={15} />
             </div>
             <div className="hidden xl:flex flex-col text-left">
-              <span className="text-[12px] font-medium text-kumo-strong leading-none">SOC Analyst</span>
-              <span className="text-[10px] font-mono text-kumo-subtle mt-0.5">UID 10001</span>
+              <span className="text-xs font-semibold text-kumo-strong leading-none">SOC Analyst</span>
+              <span className="text-[11px] font-mono text-kumo-subtle mt-0.5">UID 10001</span>
             </div>
           </div>
         </div>

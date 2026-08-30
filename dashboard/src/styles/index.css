@@ -2,8 +2,14 @@
 @import "@cloudflare/kumo/styles";
 @import "tailwindcss";
 
+html {
+  font-size: 15.5px;
+}
+
 body {
   margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
