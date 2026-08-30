@@ -8,7 +8,7 @@
   "status": "READY",
   "active_branch": "prod/final-dashboard-demo",
   "final_remediation_gate": "PASS",
-  "code_sha_tested": "d195ba30dfbfe3214c2acce300f0b3b541af9a1e",
+  "code_sha_tested": "8cde765b8ec476598b3bfd750f9682100131f426",
   "evidence_sha": "63c112f40009a40370d491d0766174209536b0ec",
   "last_completed_sprint": 9,
   "blocked_reason": null,
