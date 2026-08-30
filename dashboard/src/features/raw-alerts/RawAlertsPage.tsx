@@ -47,7 +47,7 @@ export function RawAlertsPage() {
     queryFn: () =>
       fetchMetaAlertRawAlerts(id, {
         page,
-        page_size: 20,
+        page_size: 10,
         search: urlSearch || undefined,
         run_id: runId || undefined,
       }),
@@ -181,7 +181,7 @@ export function RawAlertsPage() {
                 params.set('page', String(p));
                 setSearchParams(params);
               }}
-              perPage={20}
+              perPage={10}
               totalCount={data?.filtered_total ?? 0}
             >
               <Pagination.Info />

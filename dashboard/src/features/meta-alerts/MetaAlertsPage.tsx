@@ -49,7 +49,7 @@ export function MetaAlertsPage() {
     queryFn: () =>
       fetchMetaAlerts({
         page,
-        page_size: 20,
+        page_size: 10,
         decision: decision || undefined,
         action: action || undefined,
         search: urlSearch || undefined,
@@ -200,7 +200,7 @@ export function MetaAlertsPage() {
                 params.set('page', String(p));
                 setSearchParams(params);
               }}
-              perPage={20}
+              perPage={10}
               totalCount={data?.total ?? 0}
             >
               <Pagination.Info />

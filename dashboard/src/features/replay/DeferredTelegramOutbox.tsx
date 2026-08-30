@@ -3,10 +3,14 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchTelegramPayloads } from '@/api/replay';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Badge } from '@cloudflare/kumo/components/badge';
+import { Pagination } from '@cloudflare/kumo/components/pagination';
 import { PaperPlaneRight, Copy, Check, ArrowClockwise } from '@phosphor-icons/react';
+
+const PAGE_SIZE = 10;
 
 export function DeferredTelegramOutbox() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['telegram-payloads'],
     queryFn: () => fetchTelegramPayloads(50),
@@ -21,6 +25,7 @@ export function DeferredTelegramOutbox() {
 
   const payloads = data?.items || [];
   const totalCount = data?.total_count || 0;
+  const paginatedPayloads = payloads.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="rounded-xl border border-kumo-hairline bg-kumo-canvas p-6 shadow-xs space-y-4">
@@ -71,7 +76,7 @@ export function DeferredTelegramOutbox() {
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {payloads.map((p) => {
+              {paginatedPayloads.map((p) => {
                 const isCopied = copiedId === p.idempotency_key;
                 return (
                   <Table.Row key={p.idempotency_key} className="font-mono text-xs hover:bg-kumo-recessed/40 transition-colors">
@@ -114,6 +119,21 @@ export function DeferredTelegramOutbox() {
               })}
             </Table.Body>
           </Table>
+
+          {payloads.length > PAGE_SIZE && (
+            <div className="px-6 py-4 border-t border-kumo-hairline bg-kumo-recessed/20">
+              <Pagination
+                page={page}
+                setPage={setPage}
+                perPage={PAGE_SIZE}
+                totalCount={payloads.length}
+              >
+                <Pagination.Info />
+                <Pagination.Separator />
+                <Pagination.Controls />
+              </Pagination>
+            </div>
+          )}
         </div>
       ) : (
         <div className="py-8 text-center text-xs text-kumo-subtle font-mono">

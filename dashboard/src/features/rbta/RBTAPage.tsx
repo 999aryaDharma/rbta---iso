@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { usePollingQuery } from '@/hooks/usePolling';
 import { fetchAgents, fetchBuckets } from '@/api/dashboard';
@@ -6,10 +7,15 @@ import { PageHeader } from '@/components/shared/PageHeader';
 import { formatNumber, formatSeconds, formatDateTime } from '@/lib/formatters';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Badge } from '@cloudflare/kumo/components/badge';
+import { Pagination } from '@cloudflare/kumo/components/pagination';
+
+const PAGE_SIZE = 10;
 
 export function RBTAPage() {
   const [searchParams] = useSearchParams();
   const runId = searchParams.get('run_id');
+  const [agentPage, setAgentPage] = useState(1);
+  const [bucketPage, setBucketPage] = useState(1);
 
   const { data: agents = [] } = usePollingQuery(['agents', runId || 'live'], () => fetchAgents(runId || undefined), 3000);
   const { data: buckets = [] } = usePollingQuery(['buckets', runId || 'live'], () => fetchBuckets(runId || undefined), 3000);
@@ -18,6 +24,9 @@ export function RBTAPage() {
   const warmedUp = agents.filter((a) => a.is_warmed_up).length;
   const seenAlerts = agents.reduce((acc, a) => acc + a.event_count, 0);
   const activeBuckets = buckets.length;
+
+  const paginatedAgents = agents.slice((agentPage - 1) * PAGE_SIZE, agentPage * PAGE_SIZE);
+  const paginatedBuckets = buckets.slice((bucketPage - 1) * PAGE_SIZE, bucketPage * PAGE_SIZE);
 
   return (
     <>
@@ -35,6 +44,7 @@ export function RBTAPage() {
           <MetricCard label="Open Active Buckets" value={formatNumber(activeBuckets)} sub="In-flight aggregation windows" />
         </div>
 
+        {/* Agent States Table */}
         <div className="rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden">
           <div className="px-6 py-4 border-b border-kumo-hairline flex items-center justify-between">
             <div>
@@ -62,7 +72,7 @@ export function RBTAPage() {
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {agents.map((a) => (
+              {paginatedAgents.map((a) => (
                 <Table.Row key={a.agent_id} className="hover:bg-kumo-recessed/40 transition-colors text-xs">
                   <Table.Cell className="font-mono font-semibold text-kumo-strong">{a.agent_id}</Table.Cell>
                   <Table.Cell className="font-medium text-kumo-default">{a.agent_name}</Table.Cell>
@@ -93,8 +103,24 @@ export function RBTAPage() {
               )}
             </Table.Body>
           </Table>
+
+          {agents.length > PAGE_SIZE && (
+            <div className="px-6 py-4 border-t border-kumo-hairline bg-kumo-recessed/20">
+              <Pagination
+                page={agentPage}
+                setPage={setAgentPage}
+                perPage={PAGE_SIZE}
+                totalCount={agents.length}
+              >
+                <Pagination.Info />
+                <Pagination.Separator />
+                <Pagination.Controls />
+              </Pagination>
+            </div>
+          )}
         </div>
 
+        {/* Active Buckets Table */}
         <div className="rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden">
           <div className="px-6 py-4 border-b border-kumo-hairline flex items-center justify-between">
             <div>
@@ -118,7 +144,7 @@ export function RBTAPage() {
               </Table.Row>
             </Table.Header>
             <Table.Body>
-              {buckets.map((b, idx) => (
+              {paginatedBuckets.map((b, idx) => (
                 <Table.Row key={`${b.agent_id}-${b.rule_group_primary}-${idx}`} className="hover:bg-kumo-recessed/40 transition-colors text-xs">
                   <Table.Cell className="font-mono text-kumo-default">{b.agent_name ? `${b.agent_name} (${b.agent_id})` : b.agent_id}</Table.Cell>
                   <Table.Cell className="font-mono font-medium text-kumo-strong">{b.rule_group_primary}</Table.Cell>
@@ -137,6 +163,21 @@ export function RBTAPage() {
               )}
             </Table.Body>
           </Table>
+
+          {buckets.length > PAGE_SIZE && (
+            <div className="px-6 py-4 border-t border-kumo-hairline bg-kumo-recessed/20">
+              <Pagination
+                page={bucketPage}
+                setPage={setBucketPage}
+                perPage={PAGE_SIZE}
+                totalCount={buckets.length}
+              >
+                <Pagination.Info />
+                <Pagination.Separator />
+                <Pagination.Controls />
+              </Pagination>
+            </div>
+          )}
         </div>
       </div>
     </>
