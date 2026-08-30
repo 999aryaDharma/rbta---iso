@@ -52,7 +52,7 @@ def get_dashboard_summary(
     meta_count = len(history)
 
     arr_val = compute_arr(raw_count, meta_count) if raw_count > 0 and meta_count <= raw_count else None
-    arr_percent = round(arr_val * 100.0, 2) if arr_val is not None else None
+    arr_percent = round(arr_val, 2) if arr_val is not None else None
 
     escalate_count = sum(1 for m in history if m.action == "ESCALATE")
     digest_count = sum(1 for m in history if m.action == "DAILY_DIGEST")

@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Sidebar, SidebarHeader, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
-  SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSub, SidebarMenuSubButton,
+  SidebarMenu, SidebarMenuButton, SidebarMenuItem,
   SidebarTrigger, SidebarRail,
 } from '@cloudflare/kumo/components/sidebar';
 import { Badge } from '@cloudflare/kumo/components/badge';
@@ -153,14 +153,6 @@ export function AppSidebar() {
               >
                 Replay Pipeline
               </SidebarMenuButton>
-              <SidebarMenuSub>
-                <SidebarMenuSubButton
-                  active={isPathActive('/replay')}
-                  onClick={() => navigate(withRunId('/replay'))}
-                >
-                  Visual Flowchart
-                </SidebarMenuSubButton>
-              </SidebarMenuSub>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
