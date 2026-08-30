@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DialogRoot, Dialog, DialogClose } from '@cloudflare/kumo/components/dialog';
 import { Button } from '@cloudflare/kumo/components/button';
 import {
-  ChartBar, Shield, Cpu, Play, Plugs, GearSix, ArrowRight, MagnifyingGlass, Hash,
+  ChartBar, Bucket, Cpu, Play, Plugs, GearSix, ArrowRight, MagnifyingGlass, Hash,
 } from '@phosphor-icons/react';
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -18,7 +18,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
   const navItems = [
     { label: 'Overview Dashboard', category: 'Pages', desc: 'Real-time security analytics and live timeseries', path: withRunId('/overview'), icon: ChartBar },
-    { label: 'MetaAlerts Explorer', category: 'Pages', desc: 'Investigate clustered alerts and anomaly scores', path: withRunId('/meta-alerts'), icon: Shield },
+    { label: 'MetaAlerts Explorer', category: 'Pages', desc: 'Investigate clustered alerts and anomaly scores', path: withRunId('/meta-alerts'), icon: Bucket },
     { label: 'RBTA Engine State', category: 'Pages', desc: 'Inspect active windows and temporal reduction', path: withRunId('/rbta'), icon: Cpu },
     { label: 'Demonstration Replay', category: 'Pages', desc: 'Step through historical attack validation datasets', path: withRunId('/replay'), icon: Play },
     { label: 'Integrations & Shuffle SOAR', category: 'Operations', desc: 'Manage Shuffle webhook and deferred Telegram sink', path: withRunId('/integrations'), icon: Plugs },

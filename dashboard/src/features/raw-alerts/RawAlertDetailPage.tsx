@@ -168,7 +168,7 @@ export function RawAlertDetailPage() {
               <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs">
                 <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong mb-4 pb-3 border-b border-kumo-hairline">Rule & Signature Detection</h3>
                 <dl className="space-y-3 text-xs">
-                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Rule ID:</dt> <dd className="font-mono font-semibold text-kumo-default">{data.rule_id}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Rule Name:</dt> <dd className="font-mono font-semibold text-kumo-default">{data.rule_id}</dd></div>
                   <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Severity Level:</dt> <dd className="font-mono font-bold text-kumo-strong">{data.rule_level} / 15</dd></div>
                   <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Primary Group:</dt> <dd className="font-mono text-kumo-default">{data.rule_group_primary}</dd></div>
                   <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Rule Groups:</dt> <dd className="font-mono text-kumo-default">{data.rule_groups_all.join(', ') || data.rule_group_primary}</dd></div>

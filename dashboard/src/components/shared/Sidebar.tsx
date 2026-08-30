@@ -1,12 +1,12 @@
 import { useCallback, useEffect } from 'react';
 import { NavLink, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Sidebar, SidebarContent, SidebarGroup, SidebarGroupLabel,
+  Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem,
   SidebarRail,
 } from '@cloudflare/kumo/components/sidebar';
 import {
-  ChartBar, Shield, Cpu, Play, Plugs, GearSix,
+  ChartBar, Bucket, Cpu, Play, Plugs, GearSix,
 } from '@phosphor-icons/react';
 
 const navGroups = [
@@ -19,7 +19,7 @@ const navGroups = [
   {
     label: 'INVESTIGATE',
     items: [
-      { to: '/meta-alerts', icon: Shield, label: 'MetaAlerts' },
+      { to: '/meta-alerts', icon: Bucket, label: 'MetaAlerts' },
       { to: '/rbta', icon: Cpu, label: 'RBTA Engine' },
     ],
   },
@@ -122,13 +122,12 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
 
-      {/* Subtle Sidebar Footer */}
-      <div className="p-4 border-t border-kumo-hairline bg-kumo-canvas text-[11px] text-kumo-subtle flex items-center justify-between">
+      <SidebarFooter className="p-4 border-t border-kumo-hairline bg-kumo-canvas text-[11px] text-kumo-subtle flex items-center justify-between">
         <span className="font-mono">RBTA Engine</span>
         <span className="text-[10px] bg-kumo-recessed px-2 py-0.5 rounded border border-kumo-hairline font-mono text-kumo-strong">
           v1.0.0
         </span>
-      </div>
+      </SidebarFooter>
 
       <SidebarRail />
     </Sidebar>

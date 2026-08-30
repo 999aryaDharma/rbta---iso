@@ -106,7 +106,7 @@ export function RawAlertsPage() {
             <InputGroup>
               <InputGroup.Addon align="start"><MagnifyingGlass size={14} className="text-kumo-subtle" /></InputGroup.Addon>
               <InputGroup.Input
-                placeholder="Search Alert ID, Rule ID, IP, Desc..."
+                placeholder="Search Alert ID, Rule Name, IP, Desc..."
                 value={localSearch}
                 onChange={(e) => setLocalSearch(e.target.value)}
               />
@@ -128,7 +128,7 @@ export function RawAlertsPage() {
               <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
                 <Table.Head>Timestamp</Table.Head>
                 <Table.Head>Wazuh Alert ID</Table.Head>
-                <Table.Head>Rule ID</Table.Head>
+                <Table.Head>Rule Name</Table.Head>
                 <Table.Head className="text-right">Level</Table.Head>
                 <Table.Head>Description</Table.Head>
                 <Table.Head>Source IP</Table.Head>
