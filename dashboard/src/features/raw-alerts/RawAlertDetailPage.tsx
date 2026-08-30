@@ -152,7 +152,7 @@ export function RawAlertDetailPage() {
                 <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong mb-4 pb-3 border-b border-kumo-hairline">Identity & Source Origin</h3>
                 <dl className="space-y-3 text-xs">
                   <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Wazuh Alert ID:</dt> <dd className="font-mono font-semibold text-kumo-strong">{data.wazuh_alert_id}</dd></div>
-                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Timestamp (UTC):</dt> <dd className="font-mono text-kumo-default">{formatDateTime(data.timestamp)}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Timestamp (WITA):</dt> <dd className="font-mono text-kumo-default">{formatDateTime(data.timestamp)}</dd></div>
                   <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Source Mode:</dt> <dd className="font-mono text-kumo-default">{data.source_mode || 'LIVE'}</dd></div>
                   <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Agent:</dt> <dd className="text-kumo-default font-medium">{data.agent_name} ({data.agent_id}) · Crit: {data.agent_criticality}</dd></div>
                   {data.source_index && (

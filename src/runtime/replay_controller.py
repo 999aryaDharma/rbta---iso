@@ -19,6 +19,8 @@ from src.runtime.service import LiveRBTAService
 
 logger = logging.getLogger(__name__)
 
+WITA_TIMEZONE = timezone(timedelta(hours=8))
+
 SpeedFactor = Literal["1", "10", "100", "MAX"]
 ReplayStatus = Literal["IDLE", "RUNNING", "PAUSED", "STOPPED", "COMPLETED", "ERROR"]
 
@@ -418,7 +420,7 @@ class ReplayController:
                         # Ingest alert into isolated run service
                         assert self.current_service is not None
                         scored_metas = self.current_service.ingest_alert(canonical_alert)
-                        now_ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+                        now_ts = datetime.now(WITA_TIMEZONE).strftime("%H:%M:%S.%f")[:-3]
 
                         with self._lock:
                             self.processed_count += 1
@@ -508,7 +510,7 @@ class ReplayController:
                     drained_metas = self.current_service.shutdown(drain=True)
                     if drained_metas:
                         with self._lock:
-                            now_ts = datetime.now(timezone.utc).strftime("%H:%M:%S.%f")[:-3]
+                            now_ts = datetime.now(WITA_TIMEZONE).strftime("%H:%M:%S.%f")[:-3]
                             for sm in drained_metas:
                                 self._latest_scored_meta = sm
                                 action = sm.action if sm.action in self.decision_counts else "SUPPRESS"

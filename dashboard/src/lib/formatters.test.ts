@@ -10,8 +10,8 @@ describe('Formatters Utilities', () => {
     expect(formatNumber(undefined)).toBe('0');
   });
 
-  it('formats datetime strings into UTC format', () => {
-    expect(formatDateTime('2026-08-29T10:00:00Z')).toContain('2026-08-29 10:00:00 UTC');
+  it('formats datetime strings into WITA format', () => {
+    expect(formatDateTime('2026-08-29T10:00:00Z')).toContain('2026-08-29 18:00:00 WITA');
     expect(formatDateTime(null)).toBe('—');
     expect(formatDateTime(undefined)).toBe('—');
   });

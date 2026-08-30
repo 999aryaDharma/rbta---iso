@@ -7,7 +7,18 @@ export function formatDateTime(isoString: string | null | undefined): string {
   if (!isoString) return '—';
   try {
     const d = new Date(isoString);
-    return d.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+    if (isNaN(d.getTime())) return String(isoString);
+    const formatter = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Makassar',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    return `${formatter.format(d)} WITA`;
   } catch {
     return String(isoString);
   }
