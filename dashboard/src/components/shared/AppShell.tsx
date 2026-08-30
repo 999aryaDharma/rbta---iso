@@ -5,19 +5,19 @@ import { Topbar } from './Topbar';
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen flex flex-col bg-kumo-canvas text-kumo-default antialiased">
-      {/* Full-width Topbar spanning edge to edge */}
-      <Topbar />
+    <SidebarProvider defaultOpen collapsible="icon" peekable>
+      <div className="h-screen w-full flex bg-kumo-canvas text-kumo-default antialiased overflow-hidden">
+        {/* Sticky full-height left sidebar */}
+        <AppSidebar />
 
-      {/* Main layout below topbar: Sidebar + Page content */}
-      <SidebarProvider defaultOpen collapsible="icon" peekable>
-        <div className="flex flex-1 min-h-[calc(100vh-3.5rem)] overflow-hidden">
-          <AppSidebar />
-          <main className="flex-1 overflow-y-auto bg-kumo-base/30 min-w-0">
+        {/* Right content column: Sticky topbar + Scrollable Main */}
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+          <Topbar />
+          <main className="flex-1 overflow-y-auto bg-kumo-base/20 min-w-0">
             {children}
           </main>
         </div>
-      </SidebarProvider>
-    </div>
+      </div>
+    </SidebarProvider>
   );
 }
