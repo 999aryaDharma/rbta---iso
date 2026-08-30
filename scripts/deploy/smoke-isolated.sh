@@ -34,7 +34,6 @@ API_KEY="isolated-engineering-smoke-token-42"
 TEST_CONTAINER="rbta-isolated-smoke-$(date +%s)"
 TEMP_STATE_DIR=$(mktemp -d -t rbta_isolated_state_XXXXXX)
 chmod 0777 "${TEMP_STATE_DIR}"
-TEMP_PORT=18088
 
 cleanup() {
   echo "Cleaning up isolated smoke test container and temporary state..."
@@ -47,7 +46,7 @@ trap cleanup EXIT
 
 echo "=== [1/5] Starting Disposable Container with Real Model and Isolated State ==="
 docker run -d --name "${TEST_CONTAINER}" \
-  -p "${TEMP_PORT}:8000" \
+  -p "127.0.0.1::8000" \
   -e RBTA_API_KEY="${API_KEY}" \
   -e RBTA_MODEL_VERSION="${MODEL_VERSION}" \
   -e RBTA_SOURCE_MODE="DEFERRED" \
@@ -56,6 +55,10 @@ docker run -d --name "${TEST_CONTAINER}" \
   -v "${REPLAY_DIR}:/app/data/replay:ro" \
   -v "${TEMP_STATE_DIR}:/app/data/runtime:rw" \
   "${IMAGE_NAME}"
+
+# Resolve dynamically allocated ephemeral host port
+TEMP_PORT="$(docker port "${TEST_CONTAINER}" 8000/tcp | head -n1 | sed -E 's/.*:([0-9]+)$/\1/')"
+echo "✓ Dynamic isolated smoke port bound: ${TEMP_PORT}"
 
 echo "=== [2/5] Verifying Mount Destinations and Production State Isolation ==="
 docker inspect "${TEST_CONTAINER}" | python3 -c "
