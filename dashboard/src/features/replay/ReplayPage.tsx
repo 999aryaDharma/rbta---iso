@@ -29,7 +29,7 @@ export function ReplayPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: datasetsData } = useQuery({ queryKey: ['replay-datasets'], queryFn: fetchReplayDatasets });
-  const { data: status } = usePollingQuery(['replay'], fetchReplayStatus, 500);
+  const { data: status } = usePollingQuery(['replay'], fetchReplayStatus, 1000);
 
   const [selectedDataset, setSelectedDataset] = useState<string>('');
   const [speed, setSpeed] = useState<'1' | '10' | '100' | 'MAX'>('MAX');

@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
+from collections import deque
 import json
 import logging
 from pathlib import Path
@@ -44,10 +45,11 @@ class DeferredTelegramFileSink(EscalationSink):
         self.file_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._seen_idempotency_keys: Set[str] = set()
+        self._recent_payloads: deque = deque(maxlen=100)
         self._load_existing_keys()
 
     def _load_existing_keys(self) -> None:
-        """Scan existing file if present to populate seen idempotency keys."""
+        """Scan existing file if present to populate seen idempotency keys and recent payloads."""
         if not self.file_path.exists():
             return
         try:
@@ -61,6 +63,7 @@ class DeferredTelegramFileSink(EscalationSink):
                         key = obj.get("idempotency_key")
                         if key:
                             self._seen_idempotency_keys.add(key)
+                        self._recent_payloads.append(obj)
                     except Exception:
                         pass
         except Exception as e:
@@ -113,6 +116,7 @@ class DeferredTelegramFileSink(EscalationSink):
                     f.write(line)
                     f.flush()
                 self._seen_idempotency_keys.add(idempotency_key)
+                self._recent_payloads.append(payload)
                 logger.info("Emitted deferred Telegram payload for %s", idempotency_key)
                 return True
             except Exception as e:
@@ -120,26 +124,12 @@ class DeferredTelegramFileSink(EscalationSink):
                 raise RuntimeError(f"Deferred Telegram sink write error: {e}") from e
 
     def get_latest_payloads(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Retrieve the latest N payloads from the file."""
-        if not self.file_path.exists():
-            return []
-
-        payloads: List[Dict[str, Any]] = []
+        """Retrieve the latest N payloads quickly from memory cache."""
         with self._lock:
-            try:
-                with open(self.file_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line_str = line.strip()
-                        if line_str:
-                            try:
-                                payloads.append(json.loads(line_str))
-                            except Exception:
-                                pass
-            except Exception as e:
-                logger.warning("Error reading deferred Telegram payloads: %s", e)
-                return []
-
-        return payloads[-limit:]
+            if not self._recent_payloads and self.file_path.exists():
+                self._load_existing_keys()
+            items = list(self._recent_payloads)
+            return items[-limit:] if limit < len(items) else items
 
     def get_total_count(self) -> int:
         """Return total number of recorded escalation payloads."""

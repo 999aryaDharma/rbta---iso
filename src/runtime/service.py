@@ -117,6 +117,7 @@ class LiveRBTAService:
         source_mode: str = 'LIVE',
         escalation_sink: Optional[Any] = None,
         run_id: Optional[str] = None,
+        auto_persist: bool = True,
     ) -> None:
         self.scoring_pipeline: ScoringPipeline = scoring_pipeline
         self.state_manager: DurableStateManager = state_manager or DurableStateManager()
@@ -126,6 +127,7 @@ class LiveRBTAService:
         self.source_mode = source_mode
         self.escalation_sink = escalation_sink
         self.run_id = run_id
+        self.auto_persist = auto_persist
 
         self.engine: RBTAEngine = RBTAEngine(base_delta_t=self.base_delta_t, adaptive=self.adaptive)
         self.pending_scoring: List[MetaAlert] = []
@@ -207,8 +209,13 @@ class LiveRBTAService:
             pending_scoring=pending_payload,
         )
 
-    def _drain_pending_scoring(self) -> List[ScoredMetaAlert]:
+    def checkpoint(self) -> None:
+        """Explicitly persist current durable state to disk."""
+        self._persist_to_disk()
+
+    def _drain_pending_scoring(self, auto_persist: Optional[bool] = None) -> List[ScoredMetaAlert]:
         """Score pending meta-alerts and safely commit them to outbox and history."""
+        should_persist = self.auto_persist if auto_persist is None else auto_persist
         new_scored: List[ScoredMetaAlert] = []
         while self.pending_scoring:
             meta = self.pending_scoring[0]
@@ -222,22 +229,26 @@ class LiveRBTAService:
                     logger.error("Failed to emit escalation to sink: %s", exc)
             new_scored.append(scored)
             self.pending_scoring.pop(0)
-            self._persist_to_disk()
+            if should_persist:
+                self._persist_to_disk()
         return new_scored
 
-    def ingest_alert(self, alert: CanonicalRawAlert) -> List[ScoredMetaAlert]:
+    def ingest_alert(self, alert: CanonicalRawAlert, auto_persist: Optional[bool] = None) -> List[ScoredMetaAlert]:
         """Process an incoming canonical raw alert through RBTA and scoring.
 
         Parameters
         ----------
         alert : CanonicalRawAlert
             Incoming normalized alert.
+        auto_persist : bool | None
+            Whether to trigger synchronous state file flush on this alert.
 
         Returns
         -------
         List[ScoredMetaAlert]
             Any newly finalized and scored meta-alerts produced during this step.
         """
+        should_persist = self.auto_persist if auto_persist is None else auto_persist
         if self.raw_evidence_store is not None:
             # We don't have original payload here directly, pass None
             self.raw_evidence_store.store(alert, source_mode=self.source_mode)
@@ -246,28 +257,33 @@ class LiveRBTAService:
         if finalized_metas:
             self.pending_scoring.extend(finalized_metas)
 
-        self._persist_to_disk()
-        return self._drain_pending_scoring()
+        if should_persist:
+            self._persist_to_disk()
+        return self._drain_pending_scoring(auto_persist=should_persist)
 
-    def check_idle_flush(self, current_event_time: datetime) -> List[ScoredMetaAlert]:
+    def check_idle_flush(self, current_event_time: datetime, auto_persist: Optional[bool] = None) -> List[ScoredMetaAlert]:
         """Flush and score active buckets whose idle duration strictly exceeds delta_t.
 
         Parameters
         ----------
         current_event_time : datetime
             Reference event timestamp.
+        auto_persist : bool | None
+            Whether to trigger synchronous state file flush.
 
         Returns
         -------
         List[ScoredMetaAlert]
             Any newly finalized and scored meta-alerts.
         """
+        should_persist = self.auto_persist if auto_persist is None else auto_persist
         finalized_metas = self.engine.flush_idle(current_event_time)
         if finalized_metas:
             self.pending_scoring.extend(finalized_metas)
-            self._persist_to_disk()
+            if should_persist:
+                self._persist_to_disk()
 
-        return self._drain_pending_scoring()
+        return self._drain_pending_scoring(auto_persist=should_persist)
 
     def get_outbox(self) -> List[ScoredMetaAlert]:
         """Retrieve unacknowledged scored meta-alerts in the outbox."""

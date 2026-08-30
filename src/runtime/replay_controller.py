@@ -151,6 +151,7 @@ class ReplayController:
             source_mode="REPLAY",
             escalation_sink=escalation_sink,
             run_id=new_run_id,
+            auto_persist=False,
         )
 
         self.run_id = new_run_id
@@ -279,6 +280,8 @@ class ReplayController:
                 return self.get_status()
             self._pause_event.clear()
             self.status = "PAUSED"
+            if self.current_service:
+                self.current_service.checkpoint()
             self._persist_run_meta()
             return self.get_status()
 
@@ -301,6 +304,8 @@ class ReplayController:
             self._stop_event.set()
             self._pause_event.set()  # Unblock if paused
             self.status = "STOPPED"
+            if self.current_service:
+                self.current_service.checkpoint()
             self._persist_run_meta()
 
         if self._thread and self._thread.is_alive():
@@ -347,6 +352,8 @@ class ReplayController:
         """Internal replay worker thread processing canonical alerts strictly."""
         last_event_ts: Optional[float] = None
         speed_multiplier = float(self.speed_factor) if self.speed_factor != "MAX" else None
+        last_checkpoint_count = 0
+        last_checkpoint_time = time.time()
 
         try:
             for idx, dataset_path in enumerate(dataset_paths):
@@ -480,6 +487,16 @@ class ReplayController:
 
                             if self.wall_clock_start is not None:
                                 self.wall_clock_elapsed = max(0.0, time.time() - self.wall_clock_start)
+
+                        # Periodic durable checkpoint (every 500 events or every 1.0s)
+                        now_wall = time.time()
+                        if (self.processed_count - last_checkpoint_count >= 500) or (now_wall - last_checkpoint_time >= 1.0):
+                            if self.current_service:
+                                self.current_service.checkpoint()
+                            with self._lock:
+                                self._persist_run_meta()
+                            last_checkpoint_count = self.processed_count
+                            last_checkpoint_time = now_wall
                 
                 if self._stop_event.is_set():
                     break
@@ -524,6 +541,11 @@ class ReplayController:
 
         except Exception as e:
             logger.exception("Replay failed on dataset '%s', line %d", self.current_dataset, line_no)
+            if self.current_service:
+                try:
+                    self.current_service.checkpoint()
+                except Exception:
+                    pass
             with self._lock:
                 self.status = "ERROR"
                 self.last_error = {

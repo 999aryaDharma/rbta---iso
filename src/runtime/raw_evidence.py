@@ -109,13 +109,16 @@ class RawAlertEvidenceStore:
 
             conn.execute("CREATE INDEX IF NOT EXISTS idx_raw_agent ON raw_alert_evidence (agent_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_raw_rule ON raw_alert_evidence (rule_id)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_raw_ts ON raw_alert_evidence (timestamp)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_raw_timestamp ON raw_alert_evidence (timestamp)")
+
+            row = conn.execute("SELECT COUNT(*) AS total FROM raw_alert_evidence").fetchone()
+            self._cached_count = int(row["total"]) if row else 0
 
     def store(
         self,
         alert: CanonicalRawAlert,
-        source_mode: str = "LIVE",
         original_payload: Optional[Dict[str, Any]] = None,
+        source_mode: str = "LIVE",
     ) -> bool:
         """Store a canonical raw alert.
 
@@ -218,10 +221,11 @@ class RawAlertEvidenceStore:
                     original_payload_str,
                     source_index,
                     source_doc_id,
-                    source_mode or "LIVE",
+                    source_mode,
                     ingested_at,
                 ),
             )
+            self._cached_count = getattr(self, "_cached_count", 0) + 1
             return True
 
     def _row_to_dict(self, row: sqlite3.Row, redact: bool = False) -> Dict[str, Any]:
@@ -383,10 +387,13 @@ class RawAlertEvidenceStore:
             return [self._row_to_dict(r, redact=redact) for r in rows]
 
     def count(self) -> int:
-        """Return total number of stored raw alert evidence records."""
+        """Return total number of stored raw alert evidence records quickly from memory cache."""
+        if hasattr(self, "_cached_count"):
+            return self._cached_count
         with self._get_conn() as conn:
             row = conn.execute("SELECT COUNT(*) AS total FROM raw_alert_evidence").fetchone()
-            return row["total"] if row else 0
+            self._cached_count = int(row["total"]) if row else 0
+            return self._cached_count
 
     def count_by_hour(
         self,
