@@ -160,6 +160,7 @@ class RawAlertEvidenceStore:
         alert: CanonicalRawAlert,
         original_payload: Optional[Dict[str, Any]] = None,
         source_mode: str = "LIVE",
+        skip_conflict_check: bool = False,
     ) -> bool:
         """Store a canonical raw alert with high throughput write buffering.
 
@@ -184,61 +185,73 @@ class RawAlertEvidenceStore:
         if dec is None:
             dec = ""
         elif not isinstance(dec, str):
-            dec = deterministic_json_dumps(dec)
+            dec = str(dec) if skip_conflict_check else deterministic_json_dumps(dec)
         flog = meta.get("full_log", "")
 
         # Unify source index / doc id
         source_index = meta.get("source_index", meta.get("opensearch_index", ""))
         source_doc_id = meta.get("source_document_id", meta.get("opensearch_document_id", ""))
 
-        fingerprint = compute_canonical_fingerprint(
-            wazuh_alert_id=alert.wazuh_alert_id,
-            timestamp=alert.timestamp,
-            agent_id=alert.agent_id,
-            agent_name=alert.agent_name,
-            rule_id=alert.rule_id,
-            rule_level=alert.rule_level,
-            rule_group_primary=alert.rule_group_primary,
-            srcip=alert.srcip or "",
-            agent_criticality=alert.agent_criticality,
-            mitre_tactics=alert.mitre_tactics,
-            metadata=meta,
-        )
+        if skip_conflict_check:
+            import hashlib
+            fast_str = f"{alert.wazuh_alert_id}|{alert.timestamp}|{alert.agent_id}"
+            fingerprint = hashlib.sha256(fast_str.encode("utf-8")).hexdigest()
+        else:
+            fingerprint = compute_canonical_fingerprint(
+                wazuh_alert_id=alert.wazuh_alert_id,
+                timestamp=alert.timestamp,
+                agent_id=alert.agent_id,
+                agent_name=alert.agent_name,
+                rule_id=alert.rule_id,
+                rule_level=alert.rule_level,
+                rule_group_primary=alert.rule_group_primary,
+                srcip=alert.srcip or "",
+                agent_criticality=alert.agent_criticality,
+                mitre_tactics=alert.mitre_tactics,
+                metadata=meta,
+            )
 
         with self._lock:
-            if alert.wazuh_alert_id in self._recent_fingerprints:
-                existing_fp = self._recent_fingerprints[alert.wazuh_alert_id]
-                if existing_fp == fingerprint:
-                    return False
-                raise RawEvidenceConflictError(
-                    f"Conflicting canonical evidence detected for wazuh_alert_id='{alert.wazuh_alert_id}'. "
-                    f"Existing fingerprint '{existing_fp}' != incoming '{fingerprint}'."
-                )
+            if not skip_conflict_check:
+                if alert.wazuh_alert_id in self._recent_fingerprints:
+                    existing_fp = self._recent_fingerprints[alert.wazuh_alert_id]
+                    if existing_fp == fingerprint:
+                        return False
+                    raise RawEvidenceConflictError(
+                        f"Conflicting canonical evidence detected for wazuh_alert_id='{alert.wazuh_alert_id}'. "
+                        f"Existing fingerprint '{existing_fp}' != incoming '{fingerprint}'."
+                    )
 
-            conn = self._get_conn()
-            row = conn.execute(
-                "SELECT canonical_fingerprint FROM raw_alert_evidence WHERE wazuh_alert_id = ?",
-                (alert.wazuh_alert_id,),
-            ).fetchone()
+                conn = self._get_conn()
+                row = conn.execute(
+                    "SELECT canonical_fingerprint FROM raw_alert_evidence WHERE wazuh_alert_id = ?",
+                    (alert.wazuh_alert_id,),
+                ).fetchone()
 
-            if row is not None:
-                existing_fp = row["canonical_fingerprint"]
-                if len(self._recent_fingerprints) < self._max_recent_fingerprints:
-                    self._recent_fingerprints[alert.wazuh_alert_id] = existing_fp
-                if existing_fp == fingerprint:
-                    return False
-                raise RawEvidenceConflictError(
-                    f"Conflicting canonical evidence detected for wazuh_alert_id='{alert.wazuh_alert_id}'. "
-                    f"Existing fingerprint '{existing_fp}' != incoming '{fingerprint}'."
-                )
+                if row is not None:
+                    existing_fp = row["canonical_fingerprint"]
+                    if len(self._recent_fingerprints) < self._max_recent_fingerprints:
+                        self._recent_fingerprints[alert.wazuh_alert_id] = existing_fp
+                    if existing_fp == fingerprint:
+                        return False
+                    raise RawEvidenceConflictError(
+                        f"Conflicting canonical evidence detected for wazuh_alert_id='{alert.wazuh_alert_id}'. "
+                        f"Existing fingerprint '{existing_fp}' != incoming '{fingerprint}'."
+                    )
 
-            if len(self._recent_fingerprints) >= self._max_recent_fingerprints:
-                self._recent_fingerprints.clear()
-            self._recent_fingerprints[alert.wazuh_alert_id] = fingerprint
+                if len(self._recent_fingerprints) >= self._max_recent_fingerprints:
+                    self._recent_fingerprints.clear()
+                self._recent_fingerprints[alert.wazuh_alert_id] = fingerprint
 
             ingested_at = datetime.now(timezone.utc).isoformat()
             ts_str = alert.timestamp.isoformat() if isinstance(alert.timestamp, datetime) else str(alert.timestamp)
-            original_payload_str = deterministic_json_dumps(original_payload) if original_payload is not None else None
+            
+            if skip_conflict_check:
+                original_payload_str = None
+                meta_str = json.dumps(to_json_safe(meta))
+            else:
+                original_payload_str = deterministic_json_dumps(original_payload) if original_payload is not None else None
+                meta_str = deterministic_json_dumps(meta)
 
             record = (
                 alert.wazuh_alert_id,
@@ -258,7 +271,7 @@ class RawAlertEvidenceStore:
                 dec,
                 flog,
                 float(alert.agent_criticality),
-                deterministic_json_dumps(meta),
+                meta_str,
                 original_payload_str,
                 source_index,
                 source_doc_id,

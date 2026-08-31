@@ -173,7 +173,7 @@ def test_timeseries_counts_active_buckets_as_raw_evidence(tmp_path: Path, test_s
         raw_evidence_store=evidence_store,
     )
 
-    base_t = datetime(2026, 8, 29, 10, 5, 0, tzinfo=timezone.utc)
+    base_t = datetime.now(timezone.utc).replace(minute=5, second=0, microsecond=0) - timedelta(hours=2)
     a1 = CanonicalRawAlert(
         wazuh_alert_id="raw-1",
         timestamp=base_t,
@@ -204,9 +204,9 @@ def test_timeseries_counts_active_buckets_as_raw_evidence(tmp_path: Path, test_s
     service.ingest_alert(a2)
     assert len(service.finalized_history) == 0
 
-    # Query timeseries for window including 10:00 UTC
+    # Query timeseries for window including current hour UTC
     ts_bins = get_dashboard_timeseries(service, evidence_store, window_hours=24)
-    hour_key = "2026-08-29 10:00"
+    hour_key = base_t.strftime("%Y-%m-%d %H:00")
     target_bin = next((b for b in ts_bins if b["timestamp"] == hour_key), None)
     assert target_bin is not None, f"Hour bin {hour_key} not found in {ts_bins}"
     assert target_bin["raw_alerts"] == 2

@@ -3,6 +3,7 @@
 from collections import Counter
 from datetime import datetime, timezone
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -14,7 +15,53 @@ from src.rbta.temporal_state import AgentTemporalState
 class DurableStateManager:
     """Manages durable state serialization and crash-recovery for RBTAEngine and runtime."""
 
-    def __init__(self, filepath: Union[str, Path] = "state/runtime_state.json") -> None:
+    def __init__(self, filepath: Union[str, Path] = "state/runtime_state.json", finalized_history_db_path: Optional[Union[str, Path]] = None) -> None:
+        self.filepath: Path = Path(filepath).resolve()
+        self.history_db_path: Path = Path(finalized_history_db_path).resolve() if finalized_history_db_path else self.filepath.with_name("finalized_history.sqlite3")
+        self._init_db()
+
+    def _init_db(self):
+        self.history_db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.history_db_path) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS finalized_history (
+                    meta_id INTEGER PRIMARY KEY,
+                    scored_data TEXT NOT NULL,
+                    inserted_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+
+    def append_finalized(self, scored_items: List[Dict[str, Any]]) -> None:
+        if not scored_items:
+            return
+        
+        batch = [
+            (item["meta_id"], json.dumps(item))
+            for item in scored_items
+        ]
+        
+        with sqlite3.connect(self.history_db_path) as conn:
+            conn.executemany(
+                """
+                INSERT OR IGNORE INTO finalized_history (meta_id, scored_data)
+                VALUES (?, ?)
+                """,
+                batch
+            )
+
+    def load_finalized_history(self) -> List[Dict[str, Any]]:
+        if not self.history_db_path.exists():
+            return []
+            
+        with sqlite3.connect(self.history_db_path) as conn:
+            cursor = conn.execute("SELECT scored_data FROM finalized_history ORDER BY meta_id ASC")
+            rows = cursor.fetchall()
+            
+        return [json.loads(row[0]) for row in rows]
         self.filepath: Path = Path(filepath).resolve()
 
     @property
@@ -27,11 +74,15 @@ class DurableStateManager:
         engine: RBTAEngine,
         outbox: Optional[List[Dict[str, Any]]] = None,
         source_checkpoint: Optional[Dict[str, Any]] = None,
-        finalized_history: Optional[List[Dict[str, Any]]] = None,
+        new_finalized_history: Optional[List[Dict[str, Any]]] = None,
         pending_scoring: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         """Atomically persist engine state, active buckets, seen alert IDs, pending scoring, and outbox to disk."""
         self.filepath.parent.mkdir(parents=True, exist_ok=True)
+        
+        if new_finalized_history:
+            self.append_finalized(new_finalized_history)
+
         tmp_file = self.filepath.with_suffix(".tmp")
 
         # 1. Serialize Seen IDs and Meta Counter
@@ -86,7 +137,6 @@ class DurableStateManager:
             "source_checkpoint": source_checkpoint or {},
             "pending_scoring": pending_scoring or [],
             "outbox": outbox or [],
-            "finalized_history": finalized_history or [],
         }
 
         with tmp_file.open("w", encoding="utf-8") as f:
@@ -108,7 +158,7 @@ class DurableStateManager:
             Restored metadata dictionary containing 'outbox' and 'source_checkpoint'.
         """
         if not self.filepath.exists():
-            return {"outbox": [], "source_checkpoint": {}, "finalized_history": []}
+            return {"outbox": [], "source_checkpoint": {}, "finalized_history": self.load_finalized_history()}
 
         with self.filepath.open("r", encoding="utf-8") as f:
             data = json.load(f)
@@ -160,9 +210,13 @@ class DurableStateManager:
             key = (bucket.agent_id, bucket.rule_group_primary)
             engine._active_buckets[key] = bucket
 
+        legacy_history = data.get("finalized_history", [])
+        if legacy_history:
+            self.append_finalized(legacy_history)
+
         return {
             "source_checkpoint": data.get("source_checkpoint", {}),
             "pending_scoring": data.get("pending_scoring", []),
             "outbox": data.get("outbox", []),
-            "finalized_history": data.get("finalized_history", []),
+            "finalized_history": self.load_finalized_history(),
         }

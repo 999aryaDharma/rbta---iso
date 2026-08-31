@@ -134,6 +134,7 @@ class LiveRBTAService:
         self.outbox: List[ScoredMetaAlert] = []
         self.finalized_history: List[ScoredMetaAlert] = []
         self.source_checkpoint: Dict[str, Any] = {}
+        self._last_persisted_history_idx = 0
 
         # Restore from durable state on startup
         self._restore_from_disk()
@@ -192,6 +193,8 @@ class LiveRBTAService:
             meta = self._parse_scored_alert(item)
             if meta:
                 self.finalized_history.append(meta)
+                
+        self._last_persisted_history_idx = len(self.finalized_history)
 
         if self.scoring_pipeline and self.pending_scoring:
             self._drain_pending_scoring()
@@ -200,14 +203,18 @@ class LiveRBTAService:
         """Persist current state, pending scoring, and outbox to disk."""
         pending_payload = [_serialize_meta_alert(item) for item in self.pending_scoring]
         outbox_payload = [_serialize_scored_alert(item) for item in self.outbox]
-        history_payload = [_serialize_scored_alert(item) for item in self.finalized_history]
+        
+        new_items = self.finalized_history[self._last_persisted_history_idx:]
+        history_payload = [_serialize_scored_alert(item) for item in new_items]
+        
         self.state_manager.save_state(
             engine=self.engine,
             outbox=outbox_payload,
             source_checkpoint=self.source_checkpoint,
-            finalized_history=history_payload,
+            new_finalized_history=history_payload,
             pending_scoring=pending_payload,
         )
+        self._last_persisted_history_idx = len(self.finalized_history)
 
     def checkpoint(self) -> None:
         """Explicitly persist current durable state to disk."""
@@ -253,7 +260,11 @@ class LiveRBTAService:
         should_persist = self.auto_persist if auto_persist is None else auto_persist
         if self.raw_evidence_store is not None:
             # We don't have original payload here directly, pass None
-            self.raw_evidence_store.store(alert, source_mode=self.source_mode)
+            self.raw_evidence_store.store(
+                alert, 
+                source_mode=self.source_mode, 
+                skip_conflict_check=(self.source_mode == "REPLAY")
+            )
 
         finalized_metas = self.engine.process(alert)
         if finalized_metas:

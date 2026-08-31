@@ -223,6 +223,69 @@ class ScoringPipeline:
             source_alert_ids=meta.wazuh_alert_ids,
         )
 
+    def score_batch(self, metas: Sequence[MetaAlert]) -> List[ScoredMetaAlert]:
+        """Score a batch of MetaAlert events efficiently.
+
+        Parameters
+        ----------
+        metas : Sequence[MetaAlert]
+            Batch of MetaAlert DTOs.
+
+        Returns
+        -------
+        List[ScoredMetaAlert]
+            List of immutable scored result DTOs in the same order.
+        """
+        if not metas:
+            return []
+            
+        features_dicts = [SevenFeatureExtractor.extract_features_dict(m) for m in metas]
+        X_batch_df = pd.DataFrame(features_dicts, columns=list(FEATURE_COLUMNS))
+        
+        # Batch transform and score
+        X_scaled = self.scaler.transform(X_batch_df)
+        raw_scores = -self.model.score_samples(X_scaled)
+        
+        results = []
+        for i, meta in enumerate(metas):
+            raw_score = float(raw_scores[i])
+            anomaly_score = float(self.calibration.calibrate(raw_score))
+            
+            decision, action, escalate = evaluate_decision(
+                anomaly_score=anomaly_score,
+                threshold=self.threshold.threshold,
+                max_severity=meta.max_severity,
+                alert_count=meta.alert_count,
+                mitre_tactic_count=len(meta.mitre_tactics_unique),
+            )
+            
+            results.append(
+                ScoredMetaAlert(
+                    meta_id=meta.meta_id,
+                    agent_id=meta.agent_id,
+                    agent_name=meta.agent_name,
+                    rule_group_primary=meta.rule_group_primary,
+                    start_time=meta.start_time,
+                    end_time=meta.end_time,
+                    alert_count=meta.alert_count,
+                    max_severity=meta.max_severity,
+                    mitre_tactics=meta.mitre_tactics_unique,
+                    seven_features=features_dicts[i],
+                    raw_model_score=raw_score,
+                    anomaly_score=anomaly_score,
+                    threshold_used=self.threshold.threshold,
+                    decision=decision,
+                    action=action,
+                    escalate=escalate,
+                    model_version=str(self.metadata.get("model_version", "unknown")),
+                    feature_schema_version=str(self.schema.get("schema_version", "1.0")),
+                    score_calibration_version=str(self.calibration.version),
+                    source_alert_ids=meta.wazuh_alert_ids,
+                )
+            )
+            
+        return results
+
     def score_meta_alerts(
         self,
         metas: Sequence[MetaAlert],
@@ -239,7 +302,7 @@ class ScoringPipeline:
         Tuple[pd.DataFrame, List[ScoredMetaAlert]]
             DataFrame of scored results and corresponding list of ScoredMetaAlert objects.
         """
-        scored_list = [self.score_single(m) for m in metas]
+        scored_list = self.score_batch(metas)
         rows = [
             {
                 "meta_id": s.meta_id,

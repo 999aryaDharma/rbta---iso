@@ -209,47 +209,78 @@ class RBTAEngine:
             candidate_meta_id_increment = 1
             candidate_bucket_update = (bucket_key, new_bucket)
         else:
-            # ── Case A: Normal Forward / Equal Arrival ────────────────────────
-            if alert.timestamp >= active_bucket.end_time:
-                gap = alert.timestamp - active_bucket.end_time
-                prospective_duration = alert.timestamp - active_bucket.start_time
+            rollback_scalars = (
+                active_bucket.start_time,
+                active_bucket.end_time,
+                active_bucket.alert_count,
+                active_bucket.max_severity,
+                active_bucket.critical_mitre_present,
+                len(active_bucket.wazuh_alert_ids),
+                len(active_bucket.mitre_tactics_order),
+                list(active_bucket._mitre_seen)
+            )
 
-                if gap <= current_delta_t and prospective_duration <= MAX_BUCKET_DURATION:
-                    merged = active_bucket.copy()
-                    merged.end_time = alert.timestamp
-                    merged.add(alert)
-                    candidate_bucket_update = (bucket_key, merged)
+            try:
+                # ── Case A: Normal Forward / Equal Arrival ────────────────────────
+                if alert.timestamp >= active_bucket.end_time:
+                    gap = alert.timestamp - active_bucket.end_time
+                    prospective_duration = alert.timestamp - active_bucket.start_time
+
+                    if gap <= current_delta_t and prospective_duration <= MAX_BUCKET_DURATION:
+                        active_bucket.end_time = alert.timestamp
+                        active_bucket.add(alert)
+                    else:
+                        # Split: finalize existing bucket, start new active bucket
+                        finalized_meta = active_bucket.finalize()
+                        new_bucket = _ActiveBucket(alert, meta_id=self._meta_id_counter)
+                        candidate_meta_id_increment = 1
+                        candidate_bucket_update = (bucket_key, new_bucket)
+                        finalized_list.append(finalized_meta)
+
+                # ── Case B: In-Window Arrival (start <= timestamp < end) ───────────
+                elif alert.timestamp >= active_bucket.start_time:
+                    active_bucket.add(alert)
+
+                # ── Case C: Earlier Residual Arrival (timestamp < start) ──────────
                 else:
-                    # Split: finalize existing bucket, start new active bucket
-                    finalized_meta = active_bucket.finalize()
-                    new_bucket = _ActiveBucket(alert, meta_id=self._meta_id_counter)
-                    candidate_meta_id_increment = 1
-                    candidate_bucket_update = (bucket_key, new_bucket)
-                    finalized_list.append(finalized_meta)
+                    boundary_gap = active_bucket.start_time - alert.timestamp
+                    prospective_duration = active_bucket.end_time - alert.timestamp
 
-            # ── Case B: In-Window Arrival (start <= timestamp < end) ───────────
-            elif alert.timestamp >= active_bucket.start_time:
-                merged = active_bucket.copy()
-                merged.add(alert)
-                candidate_bucket_update = (bucket_key, merged)
-
-            # ── Case C: Earlier Residual Arrival (timestamp < start) ──────────
-            else:
-                boundary_gap = active_bucket.start_time - alert.timestamp
-                prospective_duration = active_bucket.end_time - alert.timestamp
-
-                if boundary_gap <= current_delta_t and prospective_duration <= MAX_BUCKET_DURATION:
-                    merged = active_bucket.copy()
-                    merged.start_time = alert.timestamp
-                    merged.add(alert)
-                    candidate_bucket_update = (bucket_key, merged)
-                else:
-                    # Extremely late non-mergeable event -> create immediate singleton
-                    singleton = _ActiveBucket(alert, meta_id=self._meta_id_counter)
-                    finalized_singleton = singleton.finalize()
-                    candidate_meta_id_increment = 1
-                    finalized_list.append(finalized_singleton)
-                    # Existing active bucket is untouched
+                    if boundary_gap <= current_delta_t and prospective_duration <= MAX_BUCKET_DURATION:
+                        active_bucket.start_time = alert.timestamp
+                        active_bucket.add(alert)
+                    else:
+                        # Extremely late non-mergeable event -> create immediate singleton
+                        singleton = _ActiveBucket(alert, meta_id=self._meta_id_counter)
+                        finalized_singleton = singleton.finalize()
+                        candidate_meta_id_increment = 1
+                        finalized_list.append(finalized_singleton)
+                        # Existing active bucket is untouched
+            except Exception:
+                if active_bucket.alert_count > rollback_scalars[2]:
+                    active_bucket.rule_id_distribution[alert.rule_id] -= 1
+                    if active_bucket.rule_id_distribution[alert.rule_id] == 0:
+                        del active_bucket.rule_id_distribution[alert.rule_id]
+                    
+                    active_bucket.severity_distribution[alert.rule_level] -= 1
+                    if active_bucket.severity_distribution[alert.rule_level] == 0:
+                        del active_bucket.severity_distribution[alert.rule_level]
+                
+                (
+                    active_bucket.start_time,
+                    active_bucket.end_time,
+                    active_bucket.alert_count,
+                    active_bucket.max_severity,
+                    active_bucket.critical_mitre_present,
+                    wazuh_len,
+                    mitre_len,
+                    mitre_seen_list
+                ) = rollback_scalars
+                
+                active_bucket.wazuh_alert_ids = active_bucket.wazuh_alert_ids[:wazuh_len]
+                active_bucket.mitre_tactics_order = active_bucket.mitre_tactics_order[:mitre_len]
+                active_bucket._mitre_seen = set(mitre_seen_list)
+                raise
 
         # ── 4. Atomic Commit Phase ────────────────────────────────────────────
         self._temporal_states[alert.agent_id] = candidate_state
