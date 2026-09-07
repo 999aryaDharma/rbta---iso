@@ -98,7 +98,7 @@ Masalah:
 -> normalized score degenerates
 ```
 
-Calibration harus dibuat pada explicit training/reference run dan disimpan sebagai model artifact.
+Calibration harus dibuat pada explicit chronological calibration split yang terpisah dari reference fit dan test evaluation, lalu disimpan sebagai model artifact.
 
 Policy v1 yang direkomendasikan:
 
@@ -115,7 +115,7 @@ Detail serialization ada pada `12-MODEL-ARTIFACT-LIFECYCLE-SPEC.md`.
 
 ## Tukey IQR Threshold
 
-Threshold dihitung terhadap score calibration/reference yang sama:
+Threshold dihitung hanya terhadap score calibration split:
 
 ```text
 Q1 = percentile 25

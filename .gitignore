@@ -68,6 +68,7 @@ out/
 
 # JS/TS Testing & Coverage
 coverage/
+coverage.json
 .nyc_output/
 playwright-report/
 blob-report/
@@ -139,6 +140,12 @@ docs/*
 !docs/deployment/
 !docs/design/
 !docs/evidence/
+!docs/superpowers/
+!docs/superpowers/**
+!docs/thesis/
+!docs/thesis/**
+!docs/demo/
+!docs/demo/**
 
 # =============================================================================
 # Large Data Files & Research Run Outputs

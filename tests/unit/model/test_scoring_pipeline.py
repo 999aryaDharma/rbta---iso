@@ -6,6 +6,7 @@ from sklearn.preprocessing import RobustScaler
 
 from src.contracts.meta_alert import MetaAlert
 from src.contracts.scored_meta_alert import ScoredMetaAlert
+from src.features.extractor import SevenFeatureExtractor
 from src.model.calibration import ScoreCalibration
 from src.model.scoring_pipeline import ModelArtifactBundle, ScoringPipeline, train_reference_pipeline
 from src.model.threshold import TukeyThreshold
@@ -68,6 +69,39 @@ def test_single_event_inference_parity_with_batch():
         assert b.action == s.action
         assert b.escalate == s.escalate
         assert b.model_version == s.model_version
+
+
+def test_training_and_calibration_populations_are_separate():
+    """Scaler/IF fit reference rows while calibration and Tukey use later rows."""
+    reference = [
+        make_meta(i, count=(i % 6) + 1, max_sev=(i % 8) + 1, crit=(i % 4) + 1)
+        for i in range(1, 31)
+    ]
+    calibration = [
+        make_meta(
+            100 + i,
+            count=(i % 10) + 1,
+            max_sev=(i % 12) + 1,
+            mitre=("Execution",) if i % 3 == 0 else (),
+            crit=(i % 4) + 1,
+        )
+        for i in range(1, 13)
+    ]
+
+    bundle = train_reference_pipeline(
+        reference,
+        calibration_metas=calibration,
+        random_state=42,
+        model_version="temporal-v1",
+    )
+
+    calibration_features = SevenFeatureExtractor.extract_features_df(calibration)
+    calibration_raw = -bundle.model.score_samples(bundle.scaler.transform(calibration_features))
+    assert bundle.metadata["training_row_count"] == len(reference)
+    assert bundle.metadata["calibration_row_count"] == len(calibration)
+    assert bundle.metadata["validation_strategy"] == "chronological_reference_calibration_test"
+    assert bundle.calibration.raw_min == pytest.approx(float(calibration_raw.min()))
+    assert bundle.calibration.raw_max == pytest.approx(float(calibration_raw.max()))
 
 
 def test_single_event_inference_does_not_collapse():

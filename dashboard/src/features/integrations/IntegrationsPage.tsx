@@ -26,8 +26,8 @@ export function IntegrationsPage() {
     <>
       <PageHeader
         breadcrumbs={['Operations', 'Integrations']}
-        title="Pipeline Integrations & Dispatch Sinks"
-        description="End-to-end telemetry from raw event canonicalization through RBTA, Isolation Forest scoring, and downstream dispatch sinks"
+        title="Status Integrasi dan Output"
+        description="Pisahkan komponen yang aktif pada demo dari koneksi eksternal yang masih deferred."
       />
 
       <div className="px-6 py-8 lg:px-10 space-y-8">
@@ -41,7 +41,7 @@ export function IntegrationsPage() {
                 ? `${summary.alert_reduction_rate_percent}%`
                 : '—'
             }
-            sub="Noise elimination"
+            sub="Pengurangan unit triase, bukan eliminasi noise"
           />
           <MetricCard label="Active In-Memory Buckets" value={summary ? formatNumber(summary.active_buckets_count) : '—'} sub="Open buffer windows" />
         </div>
@@ -74,9 +74,10 @@ export function IntegrationsPage() {
                           {item.status}
                         </span>
                       </div>
-                      <p className="text-xs text-kumo-subtle">
+                      <p className="text-xs text-kumo-subtle max-w-3xl">
                         {item.detail || 'Operational service integration component'}
                       </p>
+                      {item.status === 'DEFERRED' && <p className="mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-300">Tidak didemonstrasikan sebagai integrasi live.</p>}
                     </div>
                   </div>
                   {idx < arr.length - 1 && (

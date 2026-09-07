@@ -107,6 +107,8 @@ class LiveRBTAService:
         Whether to enable per-agent EMA adaptation after 100-event warmup.
     """
 
+    RECENT_HISTORY_LIMIT = 1000
+
     def __init__(
         self,
         scoring_pipeline: ScoringPipeline,
@@ -173,7 +175,7 @@ class LiveRBTAService:
 
     def _restore_from_disk(self) -> None:
         """Attempt to restore engine state, pending scoring, and outbox from disk."""
-        restored = self.state_manager.restore_state(self.engine)
+        restored = self.state_manager.restore_state(self.engine, hydrate_seen_ids=False)
         self.source_checkpoint = restored.get("source_checkpoint", {})
         raw_pending = restored.get("pending_scoring", [])
         raw_outbox = restored.get("outbox", [])
@@ -214,6 +216,12 @@ class LiveRBTAService:
             new_finalized_history=history_payload,
             pending_scoring=pending_payload,
         )
+        # SQLite is the authoritative duplicate index. Keep only a bounded hot
+        # set for fast repeated requests in the current process.
+        if len(self.engine._seen_alert_ids) > 10_000:
+            self.engine._seen_alert_ids = set(list(self.engine._seen_alert_ids)[-10_000:])
+        if len(self.finalized_history) > self.RECENT_HISTORY_LIMIT:
+            self.finalized_history = self.finalized_history[-self.RECENT_HISTORY_LIMIT:]
         self._last_persisted_history_idx = len(self.finalized_history)
 
     def checkpoint(self) -> None:
@@ -229,7 +237,8 @@ class LiveRBTAService:
         while self.pending_scoring:
             meta = self.pending_scoring[0]
             scored = self.scoring_pipeline.score_single(meta)
-            self.outbox.append(scored)
+            if scored.action == "ESCALATE":
+                self.outbox.append(scored)
             self.finalized_history.append(scored)
             if self.escalation_sink is not None and scored.action == "ESCALATE":
                 try:
@@ -242,7 +251,12 @@ class LiveRBTAService:
                 self._persist_to_disk()
         return new_scored
 
-    def ingest_alert(self, alert: CanonicalRawAlert, auto_persist: Optional[bool] = None) -> List[ScoredMetaAlert]:
+    def ingest_alert(
+        self,
+        alert: CanonicalRawAlert,
+        auto_persist: Optional[bool] = None,
+        original_payload: Optional[Dict[str, Any]] = None,
+    ) -> List[ScoredMetaAlert]:
         """Process an incoming canonical raw alert through RBTA and scoring.
 
         Parameters
@@ -261,10 +275,14 @@ class LiveRBTAService:
         if self.raw_evidence_store is not None:
             # We don't have original payload here directly, pass None
             self.raw_evidence_store.store(
-                alert, 
-                source_mode=self.source_mode, 
+                alert,
+                original_payload=original_payload,
+                source_mode=self.source_mode,
                 skip_conflict_check=(self.source_mode == "REPLAY")
             )
+
+        if self.state_manager.has_seen_alert_id(alert.wazuh_alert_id):
+            return []
 
         finalized_metas = self.engine.process(alert)
         if finalized_metas:
@@ -317,15 +335,22 @@ class LiveRBTAService:
     def get_history(self) -> List[ScoredMetaAlert]:
         return list(self.finalized_history)
 
+    def query_history(self, **filters: Any) -> tuple[List[ScoredMetaAlert], int]:
+        raw_items, total = self.state_manager.query_finalized(**filters)
+        items = [parsed for raw in raw_items if (parsed := self._parse_scored_alert(raw)) is not None]
+        return items, total
+
     def get_meta_detail(self, meta_id: int) -> Optional[ScoredMetaAlert]:
         for item in self.finalized_history:
             if item.meta_id == meta_id:
                 return item
-        return None
+        raw = self.state_manager.get_finalized(meta_id)
+        return self._parse_scored_alert(raw) if raw else None
 
     def is_seen(self, wazuh_alert_id: str) -> bool:
         """Check if an alert ID has already been committed in RBTAEngine."""
-        return self.engine.has_seen_alert(wazuh_alert_id) if hasattr(self.engine, "has_seen_alert") else (wazuh_alert_id in self.engine._seen_alert_ids)
+        in_memory = self.engine.has_seen_alert(wazuh_alert_id) if hasattr(self.engine, "has_seen_alert") else (wazuh_alert_id in self.engine._seen_alert_ids)
+        return in_memory or self.state_manager.has_seen_alert_id(wazuh_alert_id)
 
     def drain_and_score(self) -> List[ScoredMetaAlert]:
         """Drain all currently active engine buckets, score them, and persist."""

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import json
+import gzip
 from pathlib import Path
 import time
 import pytest
@@ -78,6 +79,7 @@ def test_replay_dataset_discovery_and_path_validation(tmp_path: Path, test_bundl
     assert len(datasets) == 2
     assert datasets[0]["name"] == "valid1.jsonl"
     assert datasets[1]["name"] == "valid2.jsonl"
+    assert all(item["inspection_status"] == "pending" for item in datasets)
 
     # Valid path
     assert controller.validate_dataset_path("valid1.jsonl").name == "valid1.jsonl"
@@ -263,3 +265,62 @@ def test_replay_research_determinism(tmp_path: Path, test_bundle):
         assert abs(a.threshold_used - b.threshold_used) < 1e-6
         assert a.decision == b.decision
         assert a.action == b.action
+
+
+def test_replay_accepts_gzip_and_persists_frozen_dataset_manifest(tmp_path: Path, test_bundle):
+    data_dir = tmp_path / "datasets"
+    runs_dir = tmp_path / "runs"
+    data_dir.mkdir()
+    plain = data_dir / "demo.jsonl"
+    create_sample_wazuh_jsonl(plain, count=12)
+    compressed = data_dir / "demo.jsonl.gz"
+    with plain.open("rt", encoding="utf-8") as source, gzip.open(compressed, "wt", encoding="utf-8") as target:
+        target.write(source.read())
+    plain.unlink()
+
+    controller = ReplayController(
+        scoring_pipeline=ScoringPipeline(test_bundle),
+        replay_data_dir=data_dir,
+        replay_runs_dir=runs_dir,
+    )
+
+    controller.start_catalog_refresh()
+    catalog_status = controller.wait_for_catalog_refresh(timeout=5.0)
+    assert catalog_status["status"] == "COMPLETED"
+    listed = controller.list_datasets()
+    assert listed[0]["name"] == "demo.jsonl.gz"
+    assert listed[0]["total_events"] == 12
+    controller.start("demo.jsonl.gz", speed_factor="MAX")
+    controller.wait_until_complete(5.0)
+
+    assert controller.status == "COMPLETED"
+    run_meta = json.loads((runs_dir / controller.run_id / "run.json").read_text(encoding="utf-8"))
+    assert run_meta["dataset_manifest"]["sha256"] == listed[0]["sha256"]
+    assert run_meta["dataset_manifest"]["total_events"] == 12
+
+
+def test_catalog_refresh_runs_in_background_and_all_requires_current_catalog(tmp_path: Path, test_bundle):
+    data_dir = tmp_path / "datasets"
+    runs_dir = tmp_path / "runs"
+    data_dir.mkdir()
+    create_sample_wazuh_jsonl(data_dir / "day-1.jsonl", count=5)
+    create_sample_wazuh_jsonl(data_dir / "day-2.jsonl", count=7)
+    controller = ReplayController(
+        scoring_pipeline=ScoringPipeline(test_bundle),
+        replay_data_dir=data_dir,
+        replay_runs_dir=runs_dir,
+    )
+
+    assert controller.list_datasets()[0]["inspection_status"] == "pending"
+    with pytest.raises(RuntimeError, match="Indeks dataset belum lengkap"):
+        controller.start("__ALL__", speed_factor="MAX")
+
+    started = controller.start_catalog_refresh()
+    assert started["status"] in {"STARTING", "RUNNING", "COMPLETED"}
+    finished = controller.wait_for_catalog_refresh(timeout=5.0)
+
+    assert finished["status"] == "COMPLETED"
+    assert finished["completed_files"] == 2
+    assert finished["failed_files"] == 0
+    assert finished["pending_files"] == 0
+    assert all(item["inspection_status"] == "cached" for item in controller.list_datasets())

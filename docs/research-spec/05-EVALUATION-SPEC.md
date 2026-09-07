@@ -36,6 +36,8 @@ Tujuannya adalah menjadi pembanding statis terhadap RBTA context-aware + adaptiv
 
 Output baseline harus mempertahankan schema meta-alert yang cukup kompatibel untuk perbandingan ARR, tetapi implementasi tidak boleh diam-diam menambahkan contextual key RBTA ke baseline.
 
+Baseline wajib dilengkapi dua ablation lain sehingga perbandingan final terdiri dari: `time_only_fixed`, `contextual_fixed`, dan `contextual_adaptive`. Untuk setiap varian, laporkan context purity dan context contamination. ARR tidak boleh diinterpretasikan sendirian.
+
 ### A3. Alert Reduction Rate
 
 ```text
@@ -48,7 +50,7 @@ ARR dihitung terpisah untuk Fixed Window dan RBTA bila keduanya dibandingkan.
 
 ### A4. Noise Robustness
 
-Noise rate:
+Noise rate yang sama harus dipakai pada ketiga varian agregasi dengan stream injeksi identik per seed:
 
 ```text
 0%, 5%, 10%, 20%, 30%
@@ -80,7 +82,7 @@ Noise injection ini berbeda dari synthetic attack injection. Ia hanya digunakan 
 
 ### A5. Runtime Complexity
 
-Jalankan RBTA pada delapan ukuran subset yang meningkat menuju 100% dataset.
+Jalankan RBTA pada delapan ukuran subset yang meningkat menuju 100% dataset. Lakukan warm-up, lima pengulangan, dan laporkan median serta IQR. Waktu persiapan/sorting dilaporkan terpisah.
 
 Untuk setiap subset catat:
 
@@ -104,6 +106,8 @@ throughput_variation
 Tidak boleh menulis R² atau klaim scalability sebelum eksperimen berjalan.
 
 ## Phase B — Isolation Forest Structural Evaluation
+
+Sebelum agregasi, data diurutkan lalu dibagi kronologis menjadi 60% reference, 20% calibration, dan 20% test. Scaler serta Isolation Forest hanya di-fit pada reference; kalibrasi skor dan threshold Tukey memakai calibration; seluruh hasil Phase B dilaporkan pada test tanpa refit.
 
 ### B1. Build Observed Partition
 

@@ -190,7 +190,7 @@ def test_raw_alert_detail_redaction(test_setup):
 
 
 def test_replay_start_contract_and_datasets(test_setup):
-    client, headers, _, _, _, datasets_dir = test_setup
+    client, headers, _, _, replay_ctrl, datasets_dir = test_setup
 
     # Create dummy dataset
     (datasets_dir / "demo.jsonl").write_text("{\"id\": \"1\", \"timestamp\": \"2026-08-29T10:00:00Z\", \"agent\": {\"id\": \"001\"}, \"rule\": {\"id\": \"1\", \"level\": 3, \"groups\": [\"syslog\"]}}\n", encoding="utf-8")
@@ -200,6 +200,15 @@ def test_replay_start_contract_and_datasets(test_setup):
     assert resp_ds.status_code == 200
     assert len(resp_ds.json()["items"]) == 1
     assert resp_ds.json()["items"][0]["name"] == "demo.jsonl"
+    assert resp_ds.json()["items"][0]["inspection_status"] == "pending"
+
+    refresh = client.post("/api/v1/replay/datasets/refresh", headers=headers)
+    assert refresh.status_code == 200
+    replay_ctrl.wait_for_catalog_refresh(timeout=5.0)
+    catalog_status = client.get("/api/v1/replay/datasets/catalog-status", headers=headers)
+    assert catalog_status.status_code == 200
+    assert catalog_status.json()["status"] == "COMPLETED"
+    assert catalog_status.json()["pending_files"] == 0
 
     # Start with Pydantic JSON body
     resp_start = client.post(
@@ -216,3 +225,39 @@ def test_nonexistent_api_route_returns_404_json(test_setup):
     resp = client.get("/api/v1/does_not_exist", headers=headers)
     assert resp.status_code == 404
     assert resp.headers["content-type"].startswith("application/json")
+
+
+def test_post_replay_evaluation_api_lifecycle(test_setup):
+    client, headers, _, _, replay_ctrl, datasets_dir = test_setup
+    base_t = datetime(2026, 8, 29, 10, 0, tzinfo=timezone.utc)
+    records = []
+    for idx in range(30):
+        records.append({
+            "id": f"eval-{idx}",
+            "timestamp": (base_t + timedelta(minutes=idx * 3)).isoformat(),
+            "agent": {"id": f"00{idx % 3 + 1}", "name": f"agent-{idx % 3 + 1}"},
+            "rule": {
+                "id": str(5700 + idx % 5),
+                "level": (idx % 12) + 1,
+                "groups": ["auth" if idx % 2 else "web"],
+                "mitre": {"tactic": ["Execution"] if idx % 5 == 0 else []},
+            },
+        })
+    import json
+    (datasets_dir / "evaluation.jsonl").write_text(
+        "\n".join(json.dumps(record) for record in records) + "\n",
+        encoding="utf-8",
+    )
+
+    replay_ctrl.start("evaluation.jsonl", "MAX")
+    replay_ctrl.wait_until_complete(5.0)
+    started = client.post("/api/v1/replay/evaluation/start", headers=headers)
+    assert started.status_code == 200
+    replay_ctrl.wait_until_evaluation_complete(timeout=15.0)
+
+    status_response = client.get("/api/v1/replay/evaluation/status", headers=headers)
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "COMPLETED"
+    artifact_response = client.get("/api/v1/replay/evaluation/artifact", headers=headers)
+    assert artifact_response.status_code == 200
+    assert artifact_response.headers["content-type"].startswith("application/json")

@@ -34,6 +34,14 @@ class DurableStateManager:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS seen_alert_ids (
+                    wazuh_alert_id TEXT PRIMARY KEY,
+                    inserted_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
 
     def append_finalized(self, scored_items: List[Dict[str, Any]]) -> None:
         if not scored_items:
@@ -53,16 +61,93 @@ class DurableStateManager:
                 batch
             )
 
-    def load_finalized_history(self) -> List[Dict[str, Any]]:
+    def load_finalized_history(self, limit: int = 1000) -> List[Dict[str, Any]]:
         if not self.history_db_path.exists():
             return []
-            
         with sqlite3.connect(self.history_db_path) as conn:
-            cursor = conn.execute("SELECT scored_data FROM finalized_history ORDER BY meta_id ASC")
+            cursor = conn.execute(
+                "SELECT scored_data FROM (SELECT meta_id, scored_data FROM finalized_history ORDER BY meta_id DESC LIMIT ?) ORDER BY meta_id ASC",
+                (max(1, int(limit)),),
+            )
             rows = cursor.fetchall()
-            
         return [json.loads(row[0]) for row in rows]
-        self.filepath: Path = Path(filepath).resolve()
+
+    def get_finalized(self, meta_id: int) -> Optional[Dict[str, Any]]:
+        with sqlite3.connect(self.history_db_path) as conn:
+            row = conn.execute(
+                "SELECT scored_data FROM finalized_history WHERE meta_id = ?", (int(meta_id),)
+            ).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def query_finalized(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+        decision: Optional[str] = None,
+        action: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        search: Optional[str] = None,
+        sort_by: str = "end_time",
+        sort_order: str = "desc",
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Query the append-only history in SQLite without loading it into RAM."""
+        sort_expressions = {
+            "meta_id": "meta_id",
+            "start_time": "json_extract(scored_data, '$.start_time')",
+            "end_time": "json_extract(scored_data, '$.end_time')",
+            "alert_count": "CAST(json_extract(scored_data, '$.alert_count') AS INTEGER)",
+            "max_severity": "CAST(json_extract(scored_data, '$.max_severity') AS INTEGER)",
+            "anomaly_score": "CAST(json_extract(scored_data, '$.anomaly_score') AS REAL)",
+        }
+        order_expr = sort_expressions.get(sort_by, sort_expressions["end_time"])
+        direction = "ASC" if sort_order.lower() == "asc" else "DESC"
+        clauses: List[str] = []
+        params: List[Any] = []
+        for field, value in (("decision", decision), ("action", action), ("agent_id", agent_id)):
+            if value:
+                clauses.append(f"json_extract(scored_data, '$.{field}') = ?")
+                params.append(value)
+        if search and search.strip():
+            clauses.append("(CAST(meta_id AS TEXT) LIKE ? OR lower(json_extract(scored_data, '$.rule_group_primary')) LIKE ? OR lower(json_extract(scored_data, '$.agent_name')) LIKE ? OR lower(json_extract(scored_data, '$.agent_id')) LIKE ?)")
+            needle = f"%{search.strip().lower()}%"
+            params.extend([needle] * 4)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        offset = (max(1, page) - 1) * max(1, page_size)
+        with sqlite3.connect(self.history_db_path) as conn:
+            total_row = conn.execute(f"SELECT COUNT(*) FROM finalized_history{where}", params).fetchone()
+            rows = conn.execute(
+                f"SELECT scored_data FROM finalized_history{where} ORDER BY {order_expr} {direction} LIMIT ? OFFSET ?",
+                [*params, max(1, page_size), offset],
+            ).fetchall()
+        return [json.loads(row[0]) for row in rows], int(total_row[0]) if total_row else 0
+
+    def append_seen_alert_ids(self, alert_ids: Set[str]) -> None:
+        """Persist only IDs committed since the previous checkpoint."""
+        if not alert_ids:
+            return
+        with sqlite3.connect(self.history_db_path) as conn:
+            conn.executemany(
+                "INSERT OR IGNORE INTO seen_alert_ids (wazuh_alert_id) VALUES (?)",
+                ((alert_id,) for alert_id in alert_ids),
+            )
+
+    def load_seen_alert_ids(self) -> Set[str]:
+        with sqlite3.connect(self.history_db_path) as conn:
+            rows = conn.execute("SELECT wazuh_alert_id FROM seen_alert_ids").fetchall()
+        return {str(row[0]) for row in rows}
+
+    def count_seen_alert_ids(self) -> int:
+        with sqlite3.connect(self.history_db_path) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM seen_alert_ids").fetchone()
+        return int(row[0]) if row else 0
+
+    def has_seen_alert_id(self, alert_id: str) -> bool:
+        with sqlite3.connect(self.history_db_path) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM seen_alert_ids WHERE wazuh_alert_id = ? LIMIT 1", (alert_id,)
+            ).fetchone()
+        return row is not None
 
     @property
     def state_path(self) -> Path:
@@ -85,8 +170,14 @@ class DurableStateManager:
 
         tmp_file = self.filepath.with_suffix(".tmp")
 
-        # 1. Serialize Seen IDs and Meta Counter
-        seen_ids = list(engine._seen_alert_ids)
+        # Seen IDs are append-only in SQLite so checkpoint cost is proportional
+        # to new events rather than rewriting the full replay history as JSON.
+        new_seen_ids = set(getattr(engine, "_new_seen_alert_ids", set()))
+        self.append_seen_alert_ids(new_seen_ids)
+        if hasattr(engine, "_new_seen_alert_ids"):
+            engine._new_seen_alert_ids.difference_update(new_seen_ids)
+
+        # 1. Serialize Meta Counter
         meta_id_counter = engine._meta_id_counter
 
         # 2. Serialize Agent Temporal States
@@ -128,10 +219,9 @@ class DurableStateManager:
             })
 
         payload = {
-            "schema_version": "1.0",
+            "schema_version": "1.1",
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "meta_id_counter": meta_id_counter,
-            "seen_alert_ids": seen_ids,
             "temporal_states": temporal_states_data,
             "active_buckets": active_buckets_data,
             "source_checkpoint": source_checkpoint or {},
@@ -144,7 +234,7 @@ class DurableStateManager:
 
         tmp_file.replace(self.filepath)
 
-    def restore_state(self, engine: RBTAEngine) -> Dict[str, Any]:
+    def restore_state(self, engine: RBTAEngine, hydrate_seen_ids: bool = True) -> Dict[str, Any]:
         """Restore internal engine structures from disk into the provided RBTAEngine instance.
 
         Parameters
@@ -158,13 +248,19 @@ class DurableStateManager:
             Restored metadata dictionary containing 'outbox' and 'source_checkpoint'.
         """
         if not self.filepath.exists():
+            engine._seen_alert_ids = self.load_seen_alert_ids() if hydrate_seen_ids else set()
+            engine._new_seen_alert_ids = set()
             return {"outbox": [], "source_checkpoint": {}, "finalized_history": self.load_finalized_history()}
 
         with self.filepath.open("r", encoding="utf-8") as f:
             data = json.load(f)
 
         # 1. Restore Seen IDs and Counter
-        engine._seen_alert_ids = set(data.get("seen_alert_ids", []))
+        legacy_seen_ids = set(data.get("seen_alert_ids", []))
+        if legacy_seen_ids:
+            self.append_seen_alert_ids(legacy_seen_ids)
+        engine._seen_alert_ids = self.load_seen_alert_ids() if hydrate_seen_ids else set()
+        engine._new_seen_alert_ids = set()
         engine._meta_id_counter = int(data.get("meta_id_counter", 1))
 
         # 2. Restore Temporal States

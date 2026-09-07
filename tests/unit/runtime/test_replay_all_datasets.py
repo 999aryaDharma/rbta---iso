@@ -58,6 +58,11 @@ def create_sample_wazuh_jsonl(file_path: Path, count: int = 20, start_idx: int =
     file_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def index_catalog(controller: ReplayController) -> None:
+    controller.start_catalog_refresh()
+    assert controller.wait_for_catalog_refresh(timeout=5.0)["status"] == "COMPLETED"
+
+
 def test_all_datasets_discovery_and_sorted_order(tmp_path: Path, test_bundle):
     data_dir = tmp_path / "datasets"
     runs_dir = tmp_path / "runs"
@@ -72,6 +77,7 @@ def test_all_datasets_discovery_and_sorted_order(tmp_path: Path, test_bundle):
         replay_data_dir=data_dir,
         replay_runs_dir=runs_dir,
     )
+    index_catalog(controller)
 
     controller.start(ALL_DATASETS_SENTINEL, speed_factor="MAX")
     controller.wait_until_complete(5.0)
@@ -97,6 +103,7 @@ def test_all_datasets_single_run_id(tmp_path: Path, test_bundle):
         replay_data_dir=data_dir,
         replay_runs_dir=runs_dir,
     )
+    index_catalog(controller)
 
     controller.start(ALL_DATASETS_SENTINEL, speed_factor="MAX")
     controller.wait_until_complete(5.0)
@@ -121,6 +128,7 @@ def test_all_datasets_continuous_state(tmp_path: Path, test_bundle):
         replay_data_dir=data_dir,
         replay_runs_dir=runs_dir,
     )
+    index_catalog(controller)
 
     controller.start(ALL_DATASETS_SENTINEL, speed_factor="MAX")
     controller.wait_until_complete(5.0)
@@ -149,15 +157,13 @@ def test_all_datasets_error_reports_correct_dataset(tmp_path: Path, test_bundle)
         replay_runs_dir=runs_dir,
     )
 
-    controller.start(ALL_DATASETS_SENTINEL, speed_factor="MAX")
-    time.sleep(0.5)
-
-    status = controller.get_status()
-    assert status["status"] == "ERROR"
-    assert status["last_error"] is not None
-    assert status["last_error"]["dataset"] == "2_bad.jsonl"
-    assert status["last_error"]["line_number"] == 2
-    assert status["processed_count"] == 6 # 5 from good, 1 from bad
+    controller.start_catalog_refresh()
+    index_status = controller.wait_for_catalog_refresh(timeout=5.0)
+    assert index_status["status"] == "COMPLETED"
+    assert index_status["failed_files"] == 0
+    assert index_status["invalid_files"] == 1
+    with pytest.raises(ValueError, match="dataset tidak valid.*2_bad.jsonl"):
+        controller.start(ALL_DATASETS_SENTINEL, speed_factor="MAX")
 
 
 def test_all_datasets_pause_resume(tmp_path: Path, test_bundle):
@@ -173,6 +179,7 @@ def test_all_datasets_pause_resume(tmp_path: Path, test_bundle):
         replay_data_dir=data_dir,
         replay_runs_dir=runs_dir,
     )
+    index_catalog(controller)
 
     controller.start(ALL_DATASETS_SENTINEL, speed_factor="1")
     time.sleep(0.05)

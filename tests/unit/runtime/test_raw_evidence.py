@@ -225,3 +225,48 @@ def test_store_decoder_object_from_canonical_metadata(store: RawAlertEvidenceSto
         "parent": "kernel",
         "name": "kernel",
     }
+
+
+def test_replay_duplicate_count_tracks_rows_actually_inserted(store: RawAlertEvidenceStore):
+    """Replay fast mode must not report two evidence rows for one primary key."""
+    alert = make_alert("replay-duplicate")
+
+    assert store.store(alert, source_mode="REPLAY", skip_conflict_check=True) is True
+    assert store.store(alert, source_mode="REPLAY", skip_conflict_check=True) is False
+    assert store.count() == 1
+
+
+def test_replay_duplicate_keeps_full_canonical_conflict_detection(store: RawAlertEvidenceStore):
+    """Replay optimization must not weaken the canonical evidence fingerprint."""
+    original = make_alert("replay-conflict", rule_level=4)
+    conflicting = make_alert("replay-conflict", rule_level=12)
+
+    assert store.store(original, source_mode="REPLAY", skip_conflict_check=True) is True
+    with pytest.raises(RawEvidenceConflictError, match="Conflicting canonical evidence"):
+        store.store(conflicting, source_mode="REPLAY", skip_conflict_check=True)
+
+
+def test_replay_can_preserve_sanitized_original_envelope(store: RawAlertEvidenceStore):
+    """A replay run can retain its exact source envelope for audit drill-down."""
+    alert = make_alert("replay-envelope")
+    original = {"id": "replay-envelope", "authorization": "secret", "nested": {"value": 7}}
+
+    assert store.store(alert, original_payload=original, source_mode="REPLAY", skip_conflict_check=True)
+    record = store.get("replay-envelope", redact=True)
+
+    assert record is not None
+    assert record["original_source_payload"]["authorization"] == "[REDACTED]"
+    assert record["original_source_payload"]["nested"] == {"value": 7}
+
+
+def test_export_canonical_alerts_roundtrips_in_timestamp_order(store: RawAlertEvidenceStore):
+    later = make_alert("later", timestamp=datetime(2026, 8, 29, 13, 0, tzinfo=timezone.utc))
+    earlier = make_alert("earlier", timestamp=datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc))
+    store.store(later)
+    store.store(earlier)
+
+    exported = store.export_canonical_alerts()
+
+    assert [alert.wazuh_alert_id for alert in exported] == ["earlier", "later"]
+    assert exported[0].rule_group_primary == earlier.rule_group_primary
+    assert exported[0].mitre_tactics == earlier.mitre_tactics

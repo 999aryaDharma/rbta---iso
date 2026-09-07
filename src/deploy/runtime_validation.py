@@ -4,11 +4,12 @@
 Validates the actual mounted runtime environment as the container user (UID 10001):
 1. UID check (assert 10001 when running on POSIX container)
 2. Model bundle registry load, metadata truth, and 7-feature schema verification
-3. Replay dataset readiness: discovers *.jsonl, validates non-empty, checks first event canonicalization, proves read-only behavior, rejects compressed-only parts
+3. Replay dataset readiness: discovers *.jsonl/*.jsonl.gz, validates non-empty, checks first event canonicalization, and proves read-only behavior
 4. State directory behavioral RW proof: write, flush, fsync, atomic rename, read, delete
 """
 
 import json
+import gzip
 import os
 from pathlib import Path
 import sys
@@ -85,26 +86,26 @@ def validate_replay_datasets(
     replay_dir: Path,
     verify_read_only: bool = True,
 ) -> Dict[str, str]:
-    """Validate replay archive directory, JSONL presence, first-record canonicalization, and read-only mount."""
+    """Validate replay directory, JSONL/gzip presence, first record, and read-only mount."""
     if not replay_dir.exists() or not replay_dir.is_dir():
         raise RuntimeValidationError(f"Replay archive directory does not exist: '{replay_dir}'")
 
-    # Discover candidate files
+    # Discover candidate files (plain and gzip are both first-class replay formats)
     all_files = [p for p in replay_dir.iterdir() if p.is_file()]
-    jsonl_files = [p for p in all_files if p.name.endswith(".jsonl")]
+    jsonl_files = [p for p in all_files if p.name.endswith((".jsonl", ".jsonl.gz"))]
     compressed_files = [
         p for p in all_files
-        if p.name.endswith(".gz") or p.name.endswith(".part") or ".jsonl.gz" in p.name
+        if p.name.endswith(".part") or (p.name.endswith(".gz") and not p.name.endswith(".jsonl.gz"))
     ]
 
     if not jsonl_files:
         if compressed_files:
             raise RuntimeValidationError(
                 f"Replay directory '{replay_dir}' contains compressed archive parts ({[f.name for f in compressed_files]}), "
-                "but no ready *.jsonl dataset. Compressed archives must be derived into replay *.jsonl before deployment."
+                "but no ready *.jsonl or *.jsonl.gz dataset."
             )
         raise RuntimeValidationError(
-            f"Replay directory '{replay_dir}' contains zero *.jsonl datasets. At least one non-empty *.jsonl dataset is required."
+            f"Replay directory '{replay_dir}' contains zero *.jsonl datasets or *.jsonl.gz datasets. At least one is required."
         )
 
     # Validate non-empty file and first event canonicalization
@@ -121,7 +122,8 @@ def validate_replay_datasets(
 
     # Read and canonicalize first non-empty line
     first_record_ok = False
-    with open(valid_file, "r", encoding="utf-8") as f:
+    opener = gzip.open if valid_file.name.endswith(".gz") else open
+    with opener(valid_file, "rt", encoding="utf-8") as f:
         for line in f:
             line_str = line.strip()
             if not line_str:

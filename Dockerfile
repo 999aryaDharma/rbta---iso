@@ -42,8 +42,8 @@ RUN groupadd --gid 10001 appgroup && \
 WORKDIR /app
 
 # Install dependencies deterministically from pyproject.toml
-COPY pyproject.toml README.md /app/
-RUN pip install --no-cache-dir .
+COPY pyproject.toml README.md constraints.txt /app/
+RUN pip install --no-cache-dir -c constraints.txt .
 
 # Copy application source code
 COPY src/ /app/src/

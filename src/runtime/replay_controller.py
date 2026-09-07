@@ -13,8 +13,11 @@ from src.etl.wazuh_canonicalizer import canonicalize_wazuh_alert
 from src.contracts.raw_alert import CanonicalRawAlert
 from src.model.scoring_pipeline import ScoringPipeline
 from src.runtime.durable_state import DurableStateManager
+from src.runtime.dataset_catalog import ReplayDatasetCatalog
 from src.runtime.escalation_sink import DeferredTelegramFileSink
+from src.runtime.evaluation_job import EvaluationJobController
 from src.runtime.raw_evidence import RawAlertEvidenceStore
+from src.runtime.replay_evaluation import ReplayEvaluationTracker
 from src.runtime.service import LiveRBTAService
 
 logger = logging.getLogger(__name__)
@@ -49,12 +52,30 @@ class ReplayController:
 
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.runs_dir.mkdir(parents=True, exist_ok=True)
+        self.dataset_catalog = ReplayDatasetCatalog(
+            self.data_dir,
+            cache_path=self.runs_dir.parent / "replay-dataset-catalog.json",
+        )
 
         self._lock = threading.RLock()
         self._pause_event = threading.Event()
         self._pause_event.set()
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._catalog_thread: Optional[threading.Thread] = None
+        initial_catalog = self.dataset_catalog.list_fast()
+        initial_pending = sum(item["inspection_status"] == "pending" for item in initial_catalog)
+        self._catalog_state: Dict[str, Any] = {
+            "status": "COMPLETED" if initial_catalog and initial_pending == 0 else "IDLE",
+            "total_files": len(initial_catalog),
+            "completed_files": len(initial_catalog) - initial_pending,
+            "failed_files": 0,
+            "current_file": None,
+            "last_error": None,
+            "errors": [],
+            "started_at_utc": None,
+            "completed_at_utc": None,
+        }
 
         # Current active run state
         self.run_id: Optional[str] = None
@@ -71,6 +92,7 @@ class ReplayController:
         self.wall_clock_start: Optional[float] = None
         self.wall_clock_elapsed: float = 0.0
         self.last_error: Optional[Dict[str, Any]] = None
+        self.dataset_manifest: Optional[Dict[str, Any]] = None
 
         self.current_service: Optional[LiveRBTAService] = None
         self.current_evidence_store: Optional[RawAlertEvidenceStore] = None
@@ -81,56 +103,95 @@ class ReplayController:
         self.decision_counts: Dict[str, int] = {"ESCALATE": 0, "SUPPRESS": 0, "DAILY_DIGEST": 0}
         self._latest_scored_meta: Optional[Any] = None
         self._last_raw_alert_info: Optional[Dict[str, Any]] = None
+        model_metadata = getattr(self.scoring_pipeline, "metadata", {})
+        self.evaluation_tracker = ReplayEvaluationTracker(model_metadata)
+        self.evaluation_job = (
+            EvaluationJobController(self.scoring_pipeline)
+            if self.scoring_pipeline is not None
+            else None
+        )
 
 
     def list_datasets(self) -> List[Dict[str, Any]]:
-        """List valid .jsonl replay datasets available in the data directory."""
-        items: List[Dict[str, Any]] = []
-        if not self.data_dir.exists():
-            return items
+        """List replay datasets without scanning uncached alert contents."""
+        return self.dataset_catalog.list_fast()
 
-        for p in sorted(self.data_dir.glob("*.jsonl")):
-            if p.is_file():
-                # Count lines efficiently
-                line_count = 0
-                try:
-                    with open(p, "r", encoding="utf-8") as f:
-                        for line in f:
-                            if line.strip():
-                                line_count += 1
-                except Exception:
-                    pass
-                    
-                items.append({
-                    "name": p.name,
-                    "size_bytes": p.stat().st_size,
-                    "total_events": line_count,
-                })
-        return items
+    def get_catalog_status(self) -> Dict[str, Any]:
+        """Return progress plus the number of uncached or changed files."""
+        with self._lock:
+            state = dict(self._catalog_state)
+        items = self.dataset_catalog.list_fast()
+        state["pending_files"] = sum(item["inspection_status"] == "pending" for item in items)
+        state["invalid_files"] = sum(
+            item["inspection_status"] == "cached" and not item["is_valid"] for item in items
+        )
+        return state
+
+    def start_catalog_refresh(self) -> Dict[str, Any]:
+        """Start a single background scan of all supported replay datasets."""
+        with self._lock:
+            if self.status in ("RUNNING", "PAUSED"):
+                raise RuntimeError("Indeks dataset tidak dapat diperbarui ketika replay sedang berjalan")
+            if self._catalog_thread is not None and self._catalog_thread.is_alive():
+                return self.get_catalog_status()
+            total = len(self.dataset_catalog.list_fast())
+            if total == 0:
+                raise ValueError("No replay datasets found in data directory")
+            self._catalog_state = {
+                "status": "STARTING",
+                "total_files": total,
+                "completed_files": 0,
+                "failed_files": 0,
+                "current_file": None,
+                "last_error": None,
+                "errors": [],
+                "started_at_utc": datetime.now(timezone.utc).isoformat(),
+                "completed_at_utc": None,
+            }
+            self._catalog_thread = threading.Thread(
+                target=self._run_catalog_refresh,
+                daemon=True,
+                name="replay-dataset-index",
+            )
+            self._catalog_thread.start()
+        return self.get_catalog_status()
+
+    def _run_catalog_refresh(self) -> None:
+        def update(completed: int, total: int, name: str, error: Optional[str]) -> None:
+            with self._lock:
+                self._catalog_state["status"] = "RUNNING"
+                self._catalog_state["completed_files"] = completed
+                self._catalog_state["total_files"] = total
+                self._catalog_state["current_file"] = name
+                if error:
+                    self._catalog_state["failed_files"] += 1
+                    self._catalog_state["last_error"] = {"dataset": name, "error_message": error}
+
+        result = self.dataset_catalog.refresh_all(update)
+        with self._lock:
+            self._catalog_state.update(
+                {
+                    "status": result["status"],
+                    "completed_files": result["completed_files"],
+                    "failed_files": result["failed_files"],
+                    "errors": result["errors"],
+                    "current_file": None,
+                    "completed_at_utc": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            if result["errors"]:
+                self._catalog_state["last_error"] = result["errors"][-1]
+
+    def wait_for_catalog_refresh(self, timeout: float = 30.0) -> Dict[str, Any]:
+        """Test/operator helper that waits for a terminal catalog state."""
+        thread = self._catalog_thread
+        if thread is not None:
+            thread.join(timeout=timeout)
+        return self.get_catalog_status()
 
     def validate_dataset_path(self, dataset_name: str) -> Path:
-        """Validate dataset name against directory traversal, absolute paths, and unsupported extensions."""
-        if not dataset_name:
-            raise ValueError("Dataset name cannot be empty")
-
-        # Reject path separators and traversal
-        if os.path.basename(dataset_name) != dataset_name or ".." in dataset_name or "/" in dataset_name or "\\" in dataset_name:
-            raise ValueError(f"Path traversal detected in dataset_name: '{dataset_name}'")
-
-        if not dataset_name.endswith(".jsonl"):
-            raise ValueError(f"Replay datasets must be .jsonl files, got: '{dataset_name}'")
-
-        target_path = (self.data_dir / dataset_name).resolve()
-        # Verify it stays strictly within data_dir
-        try:
-            target_path.relative_to(self.data_dir)
-        except ValueError:
-            raise ValueError(f"Dataset path escapes data directory: '{dataset_name}'")
-
-        if not target_path.exists() or not target_path.is_file():
-            raise FileNotFoundError(f"Replay dataset not found: '{dataset_name}'")
-
-        return target_path
+        """Validate and resolve a supported replay dataset path."""
+        return self.dataset_catalog.resolve(dataset_name)
 
     def _init_run_workspace(self, dataset_name: str, speed_factor: SpeedFactor) -> str:
         """Create a dedicated, isolated run directory with its own state and evidence databases."""
@@ -172,6 +233,7 @@ class ReplayController:
         self.wall_clock_start = None
         self.wall_clock_elapsed = 0.0
         self.last_error = None
+        self.dataset_manifest = None
         self.status = "IDLE"
 
         # Clear/initialize live telemetry
@@ -179,13 +241,17 @@ class ReplayController:
         self.decision_counts = {"ESCALATE": 0, "SUPPRESS": 0, "DAILY_DIGEST": 0}
         self._latest_scored_meta = None
         self._last_raw_alert_info = None
+        self.evaluation_tracker = ReplayEvaluationTracker(self.scoring_pipeline.metadata)
+        self.evaluation_job = EvaluationJobController(self.scoring_pipeline)
 
         self._persist_run_meta()
         return new_run_id
 
     def _model_version(self) -> str:
         """Extract exact model version from loaded scoring pipeline metadata fail-closed."""
-        if self.scoring_pipeline is None or not self.scoring_pipeline.metadata:
+        if self.scoring_pipeline is None:
+            return "unavailable"
+        if not self.scoring_pipeline.metadata:
             raise RuntimeError("Loaded scoring pipeline is missing mandatory model_version metadata")
         value = self.scoring_pipeline.metadata.get("model_version")
         if not value:
@@ -207,6 +273,7 @@ class ReplayController:
             "wall_clock_elapsed_seconds": self.wall_clock_elapsed,
             "last_error": self.last_error,
             "model_version": self._model_version(),
+            "dataset_manifest": self.dataset_manifest,
         }
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
@@ -216,48 +283,52 @@ class ReplayController:
         with self._lock:
             if self.status in ("RUNNING", "PAUSED"):
                 raise RuntimeError(f"Cannot start replay while status is '{self.status}'")
+            if self.evaluation_job is not None and self.evaluation_job.status == "RUNNING":
+                raise RuntimeError("Cannot start replay while post-replay evaluation is running")
 
             if dataset_name in (ALL_DATASETS_SENTINEL, "ALL", "__ALL__"):
-                datasets = [p for p in sorted(self.data_dir.glob("*.jsonl")) if p.is_file()]
-                if not datasets:
+                manifests = self.dataset_catalog.list_fast()
+                if not manifests:
                     raise ValueError("No replay datasets found in data directory")
-                
-                total = 0
-                valid_datasets = []
-                for p in datasets:
-                    with open(p, "r", encoding="utf-8") as f:
-                        file_has_lines = False
-                        for line in f:
-                            if line.strip():
-                                total += 1
-                                file_has_lines = True
-                        if file_has_lines:
-                            valid_datasets.append(p)
-                
+                pending = [item["name"] for item in manifests if item["inspection_status"] == "pending"]
+                if pending:
+                    raise RuntimeError(
+                        "Indeks dataset belum lengkap. Jalankan 'Indeks ulang dataset' sebelum memilih semua dataset. "
+                        f"Pending: {len(pending)} file."
+                    )
+                invalid = [item["name"] for item in manifests if not item["is_valid"]]
+                if invalid:
+                    raise ValueError(
+                        "Full-corpus replay diblokir karena dataset tidak valid: " + ", ".join(invalid[:5])
+                    )
+                valid_manifests = [item for item in manifests if item["total_events"] > 0]
+                total = sum(int(item["total_events"]) for item in valid_manifests)
                 if total == 0:
                     raise ValueError("No valid events found across any datasets")
-                
+
                 self._init_run_workspace(ALL_DATASETS_SENTINEL, speed_factor)
                 self.dataset_mode = "all"
-                self.dataset_count = len(valid_datasets)
-                self.current_dataset = valid_datasets[0].name if valid_datasets else None
+                self.dataset_count = len(valid_manifests)
+                self.current_dataset = valid_manifests[0]["name"] if valid_manifests else None
                 self.current_dataset_index = 0
-                dataset_paths = valid_datasets
+                dataset_paths = [self.dataset_catalog.resolve(item["name"]) for item in valid_manifests]
+                self.dataset_manifest = {
+                    "name": ALL_DATASETS_SENTINEL,
+                    "total_events": total,
+                    "dataset_count": len(valid_manifests),
+                    "datasets": valid_manifests,
+                }
             else:
                 dataset_path = self.validate_dataset_path(dataset_name)
-
-                # Count total non-empty lines in dataset
-                total = 0
-                with open(dataset_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        if line.strip():
-                            total += 1
+                manifest = self.dataset_catalog.get(dataset_name)
+                total = int(manifest["total_events"])
 
                 if total == 0:
                     raise ValueError(f"Replay dataset '{dataset_name}' contains no events")
 
                 self._init_run_workspace(dataset_name, speed_factor)
                 dataset_paths = [dataset_path]
+                self.dataset_manifest = manifest
 
             self.total_count = total
             self.status = "RUNNING"
@@ -364,7 +435,7 @@ class ReplayController:
                     self.current_dataset_index = idx
 
                 line_no = 0
-                with open(dataset_path, "r", encoding="utf-8") as f:
+                with self.dataset_catalog.open_text(dataset_path.name) as f:
                     for raw_line in f:
                         line_no += 1
                         line_str = raw_line.strip()
@@ -419,11 +490,15 @@ class ReplayController:
 
                         # Ingest alert into isolated run service
                         assert self.current_service is not None
-                        scored_metas = self.current_service.ingest_alert(canonical_alert)
+                        scored_metas = self.current_service.ingest_alert(
+                            canonical_alert,
+                            original_payload=raw_data,
+                        )
                         now_ts = datetime.now(WITA_TIMEZONE).strftime("%H:%M:%S.%f")[:-3]
 
                         with self._lock:
                             self.processed_count += 1
+                            self.evaluation_tracker.record_raw()
                             self.current_event_time = canonical_alert.timestamp.isoformat()
                             self._last_raw_alert_info = {
                                 "alert_id": canonical_alert.wazuh_alert_id,
@@ -454,6 +529,7 @@ class ReplayController:
                                     self._latest_scored_meta = sm
                                     action = sm.action if sm.action in self.decision_counts else "SUPPRESS"
                                     self.decision_counts[action] = self.decision_counts.get(action, 0) + 1
+                                    self.evaluation_tracker.record_scored(sm)
 
                                     self._trace_buffer.append({
                                         "timestamp": now_ts,
@@ -515,6 +591,7 @@ class ReplayController:
                                 self._latest_scored_meta = sm
                                 action = sm.action if sm.action in self.decision_counts else "SUPPRESS"
                                 self.decision_counts[action] = self.decision_counts.get(action, 0) + 1
+                                self.evaluation_tracker.record_scored(sm)
                                 self._trace_buffer.append({
                                     "timestamp": now_ts,
                                     "stage": "FINALIZE",
@@ -572,7 +649,7 @@ class ReplayController:
 
             eps = (self.processed_count / elapsed) if elapsed > 0 else 0.0
             progress = (self.processed_count / self.total_count) if self.total_count > 0 else 0.0
-            model_ver = getattr(self.scoring_pipeline.bundle, "model_version", "v1") if self.scoring_pipeline and hasattr(self.scoring_pipeline, "bundle") else "v1"
+            model_ver = self._model_version()
 
             latest_meta_dict = None
             if self._latest_scored_meta:
@@ -628,6 +705,10 @@ class ReplayController:
                     "telegram_deferred_count": telegram_count,
                     "latest_payload": latest_payload,
                 },
+                "evaluation_live": self.evaluation_tracker.snapshot(
+                    active_buckets=active_buckets,
+                    evidence_count=evidence_count,
+                ),
                 "trace": list(self._trace_buffer)[-50:],
             }
 
@@ -651,6 +732,60 @@ class ReplayController:
                 "last_error": self.last_error,
                 "telemetry": telemetry,
             }
+
+    def start_evaluation(self, random_seed: int = 42) -> Dict[str, Any]:
+        """Start the complete post-replay evaluation for the isolated active run."""
+        with self._lock:
+            if self.status not in ("COMPLETED", "STOPPED"):
+                raise RuntimeError(
+                    f"Evaluation requires a COMPLETED or STOPPED replay, current status is '{self.status}'"
+                )
+            if not self.run_id or self.current_evidence_store is None or self.current_service is None:
+                raise RuntimeError("No isolated replay run is available for evaluation")
+            if self.evaluation_job is None:
+                raise RuntimeError("No frozen scoring pipeline is available for evaluation")
+            alerts = self.current_evidence_store.export_canonical_alerts()
+            artifact_path = self.runs_dir / self.run_id / "evaluation.json"
+            return self.evaluation_job.start(
+                self.run_id,
+                alerts,
+                artifact_path,
+                base_delta_t=self.current_service.base_delta_t,
+                random_seed=random_seed,
+            )
+
+    def get_evaluation_status(self) -> Dict[str, Any]:
+        if self.evaluation_job is None:
+            return {
+                "run_id": None,
+                "status": "UNAVAILABLE",
+                "current_phase": None,
+                "completed_phases": 0,
+                "total_phases": 7,
+                "progress_percent": 0.0,
+                "results": {},
+                "last_error": {"type": "RuntimeError", "message": "No frozen scoring pipeline available"},
+                "artifact_available": False,
+            }
+        return self.evaluation_job.get_status()
+
+    def cancel_evaluation(self) -> Dict[str, Any]:
+        if self.evaluation_job is None:
+            return self.get_evaluation_status()
+        return self.evaluation_job.cancel()
+
+    def wait_until_evaluation_complete(self, timeout: float = 30.0) -> Dict[str, Any]:
+        if self.evaluation_job is None:
+            return self.get_evaluation_status()
+        return self.evaluation_job.wait_until_complete(timeout)
+
+    def get_evaluation_artifact_path(self) -> Path:
+        if self.evaluation_job is None:
+            raise FileNotFoundError("Completed evaluation artifact is not available")
+        path = self.evaluation_job.artifact_path
+        if not path or not path.is_file() or self.evaluation_job.status != "COMPLETED":
+            raise FileNotFoundError("Completed evaluation artifact is not available")
+        return path
 
     def get_telegram_payloads(self, limit: int = 50) -> Dict[str, Any]:
         """Return latest deferred Telegram payloads and total count."""

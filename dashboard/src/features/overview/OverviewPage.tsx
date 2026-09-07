@@ -35,8 +35,8 @@ export function OverviewPage() {
     <>
       <PageHeader
         breadcrumbs={['Security Analytics', 'Overview']}
-        title="Security Analytics Overview"
-        description="Continuous Rule-Based Temporal Aggregation (RBTA) and Isolation Forest Anomaly Detection Engine"
+        title="Ringkasan Hasil Triase"
+        description="RBTA mengurangi unit pemeriksaan; Isolation Forest memprioritaskan keanehan tanpa menyatakan kebenaran serangan."
       />
 
       <div className="px-6 py-8 lg:px-10 space-y-8">
@@ -47,7 +47,7 @@ export function OverviewPage() {
               <div className="flex items-center gap-3">
                 <WarningCircle size={22} className="text-rose-600 dark:text-rose-400 shrink-0" weight="fill" />
                 <h2 className="text-xs font-semibold uppercase tracking-wider text-kumo-strong">
-                  Needs Investigation ({needsInvestigation.length} Active Escalations)
+                  Perlu Ditinjau ({needsInvestigation.length} MetaAlert ESCALATE)
                 </h2>
               </div>
               <Button
@@ -56,7 +56,7 @@ export function OverviewPage() {
                 className="text-xs text-rose-600 dark:text-rose-400 hover:text-rose-700"
                 onClick={() => navigate(withRunId('/meta-alerts?action=ESCALATE'))}
               >
-                View all escalated incidents <ArrowRight size={14} className="ml-1" />
+                Lihat seluruh prioritas <ArrowRight size={14} className="ml-1" />
               </Button>
             </div>
 
@@ -125,22 +125,22 @@ export function OverviewPage() {
                 ? `${summary.alert_reduction_rate_percent}%`
                 : '—'
             }
-            sub="SOC noise elimination"
+            sub="Pengurangan unit triase, bukan akurasi"
           />
           <div
             onClick={() => navigate(withRunId('/meta-alerts?action=ESCALATE'))}
             className="cursor-pointer transition-opacity hover:opacity-95"
           >
             <MetricCard
-              label="Escalated Incidents"
+              label="MetaAlert ESCALATE"
               value={summary ? formatNumber(summary.escalate_count) : '—'}
-              sub="High-priority anomalies"
+              sub="Prioritas investigasi, bukan insiden terbukti"
             />
           </div>
           <MetricCard
-            label="Contextual Anomalies"
+            label="Di Atas Threshold"
             value={summary ? formatNumber(summary.anomalies_detected) : '—'}
-            sub="Outliers detected by IF"
+            sub="Keanehan struktural menurut IF"
           />
           <div
             onClick={() => navigate(withRunId('/rbta'))}
@@ -158,9 +158,9 @@ export function OverviewPage() {
             sub="Low-frequency routine batches"
           />
           <MetricCard
-            label="Suppressed Noise"
+            label="MetaAlert SUPPRESS"
             value={summary ? formatNumber(summary.suppress_count) : '—'}
-            sub="Benign repetitive patterns"
+            sub="Prioritas lebih rendah, bukan label benign"
           />
         </div>
 

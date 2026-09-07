@@ -5,10 +5,20 @@ import {
   MetaAlertSchema,
   RawAlertSchema,
   ReplayStatusSchema,
+  DatasetCatalogStatusSchema,
   SystemInfoSchema,
 } from './schemas';
 
 describe('Zod v4 Schema Validation & Contract Integrity', () => {
+  it('parses dataset catalog indexing progress', () => {
+    const result = DatasetCatalogStatusSchema.parse({
+      status: 'RUNNING', total_files: 142, completed_files: 38, failed_files: 0, invalid_files: 0,
+      pending_files: 104, current_file: 'wazuh-alerts-4.x-2026.05.10.jsonl',
+      last_error: null, errors: [], started_at_utc: '2026-09-07T10:00:00Z', completed_at_utc: null,
+    });
+    expect(result.completed_files).toBe(38);
+    expect(result.pending_files).toBe(104);
+  });
   it('parses valid dashboard summary without fabricated defaults', () => {
     const valid = {
       raw_alert_count: 100,

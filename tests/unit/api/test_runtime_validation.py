@@ -1,6 +1,7 @@
 """Unit tests for container runtime validator and environment parsing helper."""
 
 from datetime import datetime, timedelta, timezone
+import gzip
 import json
 from pathlib import Path
 import pytest
@@ -101,14 +102,22 @@ def test_runtime_validation_fails_on_empty_replay_dir(tmp_path: Path, test_env_f
         validate_replay_datasets(empty_replay, verify_read_only=False)
 
 
-def test_runtime_validation_fails_on_compressed_only_replay_dir(tmp_path: Path):
-    """Runtime validation fails with clear error when replay directory contains only *.jsonl.gz."""
+def test_runtime_validation_accepts_valid_gzip_only_replay_dir(tmp_path: Path):
+    """Runtime validation accepts the gzip format supported by the replay engine."""
     comp_replay = tmp_path / "compressed_replay"
     comp_replay.mkdir()
-    (comp_replay / "campus_batch_01.jsonl.gz").write_bytes(b"dummy-compressed-bytes")
+    payload = {
+        "id": "gzip-1",
+        "timestamp": "2026-08-29T10:15:00+00:00",
+        "agent": {"id": "001", "name": "agent"},
+        "rule": {"id": "5501", "level": 7, "groups": ["pam"]},
+    }
+    with gzip.open(comp_replay / "campus_batch_01.jsonl.gz", "wt", encoding="utf-8") as stream:
+        stream.write(json.dumps(payload) + "\n")
 
-    with pytest.raises(RuntimeValidationError, match="contains compressed archive parts"):
-        validate_replay_datasets(comp_replay, verify_read_only=False)
+    result = validate_replay_datasets(comp_replay, verify_read_only=False)
+    assert result["dataset_count"] == "1"
+    assert result["first_dataset"] == "campus_batch_01.jsonl.gz"
 
 
 def test_runtime_validation_fails_on_corrupt_model(tmp_path: Path):

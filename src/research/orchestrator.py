@@ -31,8 +31,9 @@ import numpy as np
 import pandas as pd
 
 from src.contracts.raw_alert import CanonicalRawAlert
-from src.etl.wazuh_canonicalizer import canonicalize_wazuh_alert
 from src.evaluation.fixed_window_baseline import run_fixed_window_baseline
+from src.evaluation.contextual_fixed_baseline import run_contextual_fixed_window_baseline
+from src.evaluation.context_quality import compute_context_quality
 from src.evaluation.metrics import compute_arr
 from src.evaluation.noise_robustness import run_noise_robustness_evaluation
 from src.evaluation.runtime_complexity import RUNTIME_EVALUATION_SUBSETS, run_runtime_complexity_evaluation
@@ -47,6 +48,7 @@ from src.model.scoring_pipeline import (
 )
 from src.rbta.engine import RBTAEngine
 from src.runners.batch_runner import BatchResearchRunner
+from src.research.corpus_input import ResearchCorpusError, load_research_corpus
 
 
 class ResearchInputError(RuntimeError):
@@ -192,6 +194,7 @@ def run_canonical_research_pipeline(
     alerts: List[CanonicalRawAlert] = []
     input_mode = "real_jsonl"
     input_provenance = ""
+    input_corpus: Optional[Dict[str, Any]] = None
     research_valid = True
 
     if raw_alerts is not None:
@@ -200,17 +203,12 @@ def run_canonical_research_pipeline(
         input_mode = "engineering_fixture" if is_fixture_mode else "real_jsonl"
         research_valid = not is_fixture_mode
     elif raw_file_path is not None:
-        if not raw_file_path.exists():
-            raise FileNotFoundError(f"Input alert file not found: {raw_file_path}")
-        with raw_file_path.open("r", encoding="utf-8") as f:
-            for line_no, line in enumerate(f, start=1):
-                line = line.strip()
-                if line:
-                    try:
-                        hit = json.loads(line)
-                        alerts.append(canonicalize_wazuh_alert(hit))
-                    except Exception as exc:
-                        raise ResearchInputError(f"Malformed input alert at line {line_no}: {exc}") from exc
+        try:
+            corpus = load_research_corpus(raw_file_path)
+        except ResearchCorpusError as exc:
+            raise ResearchInputError(str(exc)) from exc
+        alerts = corpus.alerts
+        input_corpus = corpus.provenance
         input_mode = "real_jsonl"
         input_provenance = str(raw_file_path.resolve())
         research_valid = True
@@ -229,14 +227,28 @@ def run_canonical_research_pipeline(
             "or --fixture for explicit engineering smoke testing."
         )
 
-    n_raw = len(alerts)
-    if n_raw == 0:
+    dataset_n_raw = len(alerts)
+    if dataset_n_raw == 0:
         raise ResearchInputError("Input dataset contains zero valid canonical alerts.")
-    print(f"  Loaded {n_raw} canonical raw alerts (input_mode: {input_mode})")
+    sorted_alerts = sorted(alerts, key=lambda alert: alert.timestamp)
+    reference_end = int(dataset_n_raw * 0.60)
+    calibration_end = reference_end + int(dataset_n_raw * 0.20)
+    reference_alerts = sorted_alerts[:reference_end]
+    calibration_alerts = sorted_alerts[reference_end:calibration_end]
+    test_alerts = sorted_alerts[calibration_end:]
+    if min(len(reference_alerts), len(calibration_alerts), len(test_alerts)) < 4:
+        raise ResearchInputError(
+            "Chronological 60/20/20 evaluation requires at least 4 raw alerts in every partition"
+        )
+    print(f"  Loaded {dataset_n_raw} canonical raw alerts (input_mode: {input_mode})")
+    print(
+        "  Chronological split: "
+        f"reference={len(reference_alerts)}, calibration={len(calibration_alerts)}, test={len(test_alerts)}"
+    )
 
     # Phase 2: Delta-t Sensitivity Analysis (adaptive=False)
     print("\n[Phase 2] Delta-t Sensitivity Analysis (adaptive=False)...")
-    sens_result = run_delta_t_sensitivity_analysis(alerts)
+    sens_result = run_delta_t_sensitivity_analysis(reference_alerts)
     recommended_delta_t = sens_result.recommended_elbow_delta_t
     print(f"  Sensitivity Curve Evaluated: {list(SENSITIVITY_DELTA_T_MINUTES)}")
     print(f"  Calculated Recommended Elbow Delta-t: {recommended_delta_t} minutes")
@@ -259,37 +271,77 @@ def run_canonical_research_pipeline(
 
     # Phase 4: Final RBTA Temporal Aggregation (Agent-Local ETW, adaptive=True, selected Delta-t)
     print(f"\n[Phase 4] Final RBTA Temporal Aggregation (adaptive=True, base_delta_t={selected_delta_t}m)...")
-    runner = BatchResearchRunner(base_delta_t=selected_duration, adaptive=True)
-    agg_result = runner.run(alerts)
-    meta_alerts = agg_result.meta_alerts
+    reference_result = BatchResearchRunner(base_delta_t=selected_duration, adaptive=True).run(reference_alerts)
+    calibration_result = BatchResearchRunner(base_delta_t=selected_duration, adaptive=True).run(calibration_alerts)
+    test_result = BatchResearchRunner(base_delta_t=selected_duration, adaptive=True).run(test_alerts)
+    reference_metas = reference_result.meta_alerts
+    calibration_metas = calibration_result.meta_alerts
+    meta_alerts = test_result.meta_alerts
+    n_raw = len(test_alerts)
     n_meta = len(meta_alerts)
     arr = compute_arr(n_raw, n_meta)
-    print(f"  Aggregated MetaAlerts: {n_meta}")
+    print(f"  Test MetaAlerts: {n_meta}")
     print(f"  Alert Reduction Rate (ARR): {arr:.2f}%")
 
     # Phase 5: Fixed Tumbling Window Baseline (selected Delta-t)
     print(f"\n[Phase 5] Fixed Tumbling Window Baseline (duration={selected_delta_t}m)...")
-    baseline_result = run_fixed_window_baseline(alerts, window_duration=selected_duration)
+    baseline_result = run_fixed_window_baseline(test_alerts, window_duration=selected_duration)
+    contextual_fixed_result = run_contextual_fixed_window_baseline(
+        test_alerts,
+        window_duration=selected_duration,
+    )
+    time_quality = compute_context_quality(baseline_result.meta_alerts, test_alerts)
+    contextual_fixed_quality = compute_context_quality(contextual_fixed_result.meta_alerts, test_alerts)
+    rbta_quality = compute_context_quality(meta_alerts, test_alerts)
     print(f"  Fixed Window Baseline ARR: {baseline_result.arr:.2f}% (RBTA ARR: {arr:.2f}%)")
 
     # Phase 6: Noise Robustness Evaluation (selected Delta-t)
     print(f"\n[Phase 6] Noise Robustness Evaluation (delta_t={selected_delta_t}m)...")
-    noise_result = run_noise_robustness_evaluation(alerts, delta_t=selected_duration, random_seed=random_seed)
+    noise_result = run_noise_robustness_evaluation(test_alerts, delta_t=selected_duration, random_seed=random_seed)
 
     # Phase 7: Runtime Complexity Proof (selected Delta-t, exactly 8 subsets)
     print(f"\n[Phase 7] Runtime Complexity Evaluation (8 subsets, delta_t={selected_delta_t}m)...")
-    complexity_result = run_runtime_complexity_evaluation(alerts, n_subsets=RUNTIME_EVALUATION_SUBSETS, delta_t=selected_duration)
+    complexity_result = run_runtime_complexity_evaluation(test_alerts, n_subsets=RUNTIME_EVALUATION_SUBSETS, delta_t=selected_duration)
     print(f"  Empirical runtime scaling R^2: {complexity_result.r_squared:.4f} (Slope: {complexity_result.slope:.6f} ms/alert)")
 
     phase_a_summary = {
         "rbta_arr": arr,
         "fixed_baseline_arr": baseline_result.arr,
-        "arr_advantage_percent_points": round(arr - baseline_result.arr, 2),
+        "contextual_fixed_arr": contextual_fixed_result.arr,
+        "arr_advantage_percent_points": round(arr - contextual_fixed_result.arr, 2),
+        "aggregation_ablation": [
+            {
+                "variant": "time_only_fixed",
+                "n_raw": baseline_result.n_raw,
+                "n_meta": baseline_result.n_meta,
+                "arr": baseline_result.arr,
+                "context_purity_percent": time_quality.context_purity_percent,
+                "context_contamination_percent": time_quality.context_contamination_percent,
+            },
+            {
+                "variant": "contextual_fixed",
+                "n_raw": contextual_fixed_result.n_raw,
+                "n_meta": contextual_fixed_result.n_meta,
+                "arr": contextual_fixed_result.arr,
+                "context_purity_percent": contextual_fixed_quality.context_purity_percent,
+                "context_contamination_percent": contextual_fixed_quality.context_contamination_percent,
+            },
+            {
+                "variant": "contextual_adaptive",
+                "n_raw": n_raw,
+                "n_meta": n_meta,
+                "arr": arr,
+                "context_purity_percent": rbta_quality.context_purity_percent,
+                "context_contamination_percent": rbta_quality.context_contamination_percent,
+            },
+        ],
         "recommended_elbow_delta_t_minutes": recommended_delta_t,
         "selected_delta_t_minutes": selected_delta_t,
         "delta_t_selection_source": selection_source,
         "runtime_r_squared": complexity_result.r_squared,
         "mean_throughput_alerts_per_ms": complexity_result.mean_throughput,
+        "runtime_repetitions": complexity_result.repetitions,
+        "runtime_preparation_time_ms": complexity_result.preparation_time_ms,
         "sensitivity_curve": sens_result.summary_df.to_dict(orient="records"),
         "noise_robustness": noise_result.summary_df.to_dict(orient="records"),
         "complexity_subsets": complexity_result.subset_df.to_dict(orient="records"),
@@ -310,7 +362,8 @@ def run_canonical_research_pipeline(
     resolved_git_commit = git_commit or resolve_git_commit(require_git=research_valid)
 
     bundle = train_reference_pipeline(
-        meta_alerts,
+        reference_metas,
+        calibration_metas=calibration_metas,
         random_state=random_seed,
         model_version=model_version,
         training_run_id=run_id,
@@ -337,6 +390,7 @@ def run_canonical_research_pipeline(
         scored_meta_alerts, bundle, n_permutations=100, random_seed=random_seed
     )
     phase_b_summary = {
+        "evaluation_population": "test_without_refit",
         "is_calculable": silhouette_result.is_calculable,
         "uncalculable_reason": silhouette_result.uncalculable_reason,
         "observed_silhouette": silhouette_result.observed_silhouette,
@@ -369,6 +423,7 @@ def run_canonical_research_pipeline(
         "git_commit": resolved_git_commit,
         "input_mode": input_mode,
         "input_provenance": input_provenance,
+        "input_corpus": input_corpus,
         "research_results_valid_for_seminar": research_valid,
         "random_seed": random_seed,
         "sensitivity_delta_values": list(SENSITIVITY_DELTA_T_MINUTES),
@@ -378,13 +433,36 @@ def run_canonical_research_pipeline(
         "adaptive_final": True,
         "ema_alpha": 0.10,
         "warmup_count": 100,
-        "n_raw_alerts": n_raw,
+        "n_raw_alerts": dataset_n_raw,
+        "evaluation_n_raw_alerts": n_raw,
         "n_meta_alerts": n_meta,
         "arr": arr,
         "fixed_window_duration_minutes": selected_delta_t,
         "fixed_window_arr": baseline_result.arr,
         "noise_rates": list(noise_result.summary_df["noise_rate"]),
         "runtime_subset_count": RUNTIME_EVALUATION_SUBSETS,
+        "runtime_repetitions": complexity_result.repetitions,
+        "temporal_split": {
+            "strategy": "chronological",
+            "reference": {
+                "n_raw": len(reference_alerts),
+                "n_meta": len(reference_metas),
+                "start": reference_alerts[0].timestamp.isoformat(),
+                "end": reference_alerts[-1].timestamp.isoformat(),
+            },
+            "calibration": {
+                "n_raw": len(calibration_alerts),
+                "n_meta": len(calibration_metas),
+                "start": calibration_alerts[0].timestamp.isoformat(),
+                "end": calibration_alerts[-1].timestamp.isoformat(),
+            },
+            "test": {
+                "n_raw": len(test_alerts),
+                "n_meta": len(meta_alerts),
+                "start": test_alerts[0].timestamp.isoformat(),
+                "end": test_alerts[-1].timestamp.isoformat(),
+            },
+        },
         "model_version": model_version,
         "training_run_id": run_id,
         "feature_schema_version": "1.0",
@@ -427,7 +505,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--input", type=Path, default=None, help="Path to raw JSONL Wazuh alerts file")
+    group.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Path to one Wazuh .jsonl/.jsonl.gz file or a directory of daily exports",
+    )
     group.add_argument("--fixture", action="store_true", help="Run explicit engineering smoke fixture (non-seminar)")
 
     parser.add_argument("--output-dir", type=Path, default=Path("artifacts/research-runs"), help="Output directory")

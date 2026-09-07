@@ -1,18 +1,20 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppShell } from '@/components/shared/AppShell';
-import { OverviewPage } from '@/features/overview/OverviewPage';
-import { RBTAPage } from '@/features/rbta/RBTAPage';
-import { MetaAlertsPage } from '@/features/meta-alerts/MetaAlertsPage';
-import { MetaAlertDetailPage } from '@/features/meta-alerts/MetaAlertDetailPage';
-import { RawAlertsPage } from '@/features/raw-alerts/RawAlertsPage';
-import { RawAlertDetailPage } from '@/features/raw-alerts/RawAlertDetailPage';
-import { ReplayPage } from '@/features/replay/ReplayPage';
-import { IntegrationsPage } from '@/features/integrations/IntegrationsPage';
-import { SystemPage } from '@/features/system/SystemPage';
 import { AuthGate } from '@/components/shared/AuthGate';
 
 import { ThemeProvider } from '@/context/ThemeContext';
+
+const OverviewPage = lazy(() => import('@/features/overview/OverviewPage').then(m => ({ default: m.OverviewPage })));
+const RBTAPage = lazy(() => import('@/features/rbta/RBTAPage').then(m => ({ default: m.RBTAPage })));
+const MetaAlertsPage = lazy(() => import('@/features/meta-alerts/MetaAlertsPage').then(m => ({ default: m.MetaAlertsPage })));
+const MetaAlertDetailPage = lazy(() => import('@/features/meta-alerts/MetaAlertDetailPage').then(m => ({ default: m.MetaAlertDetailPage })));
+const RawAlertsPage = lazy(() => import('@/features/raw-alerts/RawAlertsPage').then(m => ({ default: m.RawAlertsPage })));
+const RawAlertDetailPage = lazy(() => import('@/features/raw-alerts/RawAlertDetailPage').then(m => ({ default: m.RawAlertDetailPage })));
+const ReplayPage = lazy(() => import('@/features/replay/ReplayPage').then(m => ({ default: m.ReplayPage })));
+const IntegrationsPage = lazy(() => import('@/features/integrations/IntegrationsPage').then(m => ({ default: m.IntegrationsPage })));
+const SystemPage = lazy(() => import('@/features/system/SystemPage').then(m => ({ default: m.SystemPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -30,7 +32,7 @@ export function App() {
         <BrowserRouter basename="/dashboard">
           <AuthGate>
             <AppShell>
-            <Routes>
+            <Suspense fallback={<div className="p-10 text-sm text-kumo-subtle">Memuat halaman…</div>}><Routes>
               <Route path="/" element={<Navigate to="/overview" replace />} />
               <Route path="/overview" element={<OverviewPage />} />
               <Route path="/rbta" element={<RBTAPage />} />
@@ -38,10 +40,11 @@ export function App() {
               <Route path="/meta-alerts/:metaId" element={<MetaAlertDetailPage />} />
               <Route path="/meta-alerts/:metaId/raw-alerts" element={<RawAlertsPage />} />
               <Route path="/meta-alerts/:metaId/raw-alerts/:alertId" element={<RawAlertDetailPage />} />
-              <Route path="/replay" element={<ReplayPage />} />
+              <Route path="/demo" element={<ReplayPage />} />
+              <Route path="/replay" element={<Navigate to="/demo" replace />} />
               <Route path="/integrations" element={<IntegrationsPage />} />
               <Route path="/system" element={<SystemPage />} />
-            </Routes>
+            </Routes></Suspense>
           </AppShell>
         </AuthGate>
       </BrowserRouter>

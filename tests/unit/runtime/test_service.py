@@ -28,7 +28,7 @@ def make_alert(idx: int, ts: datetime, group: str = "pam", level: int = 3, crit:
 
 
 def test_live_service_ingestion_scoring_and_idle_flush(tmp_path: Path):
-    """Live service ingests alerts, flushes idle buckets when idle_gap > delta_t, and enqueues to outbox."""
+    """Live service finalizes every score but queues only actionable delivery records."""
     base_t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
 
     # 1. Train model bundle
@@ -63,14 +63,10 @@ def test_live_service_ingestion_scoring_and_idle_flush(tmp_path: Path):
     assert isinstance(flushed_16[0], ScoredMetaAlert)
     assert flushed_16[0].meta_id == 1
 
-    # 5. Outbox contains the scored alert
+    # 5. This low-context score remains in history but not delivery outbox.
     outbox = service.get_outbox()
-    assert len(outbox) == 1
-    assert outbox[0].meta_id == 1
-
-    # 6. Acknowledge outbox item
-    service.acknowledge_outbox(outbox[0].meta_id)
-    assert len(service.get_outbox()) == 0
+    assert flushed_16[0].action != "ESCALATE"
+    assert outbox == []
     assert len(service.get_history()) == 1  # History survives ACK
     assert service.get_meta_detail(1) is not None
 
@@ -166,7 +162,76 @@ def test_live_service_scoring_failure_durable_recovery(tmp_path: Path):
 
     # Service2 must have automatically recovered and scored the pending meta-alert!
     assert len(service2.pending_scoring) == 0
-    assert len(service2.get_outbox()) == 1
-    assert service2.get_outbox()[0].meta_id == 1
+    assert service2.get_outbox() == []
     assert len(service2.get_history()) == 1
 
+
+def test_non_escalate_scored_alert_is_history_not_actionable_outbox(tmp_path: Path):
+    """The delivery outbox must contain only records whose action is ESCALATE."""
+    base_t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    sample_alerts = [
+        make_alert(i, base_t + timedelta(minutes=i * 20), level=(i % 12) + 1)
+        for i in range(30)
+    ]
+    batch_res = BatchResearchRunner(base_delta_t=timedelta(minutes=15), adaptive=False).run(sample_alerts)
+    scoring_pipe = ScoringPipeline(train_reference_pipeline(batch_res.meta_alerts, model_version="outbox-v1"))
+    service = LiveRBTAService(
+        scoring_pipeline=scoring_pipe,
+        state_manager=DurableStateManager(tmp_path / "state.json"),
+        adaptive=False,
+    )
+    meta = batch_res.meta_alerts[0]
+    suppressed = ScoredMetaAlert(
+        meta_id=meta.meta_id,
+        agent_id=meta.agent_id,
+        agent_name=meta.agent_name,
+        rule_group_primary=meta.rule_group_primary,
+        start_time=meta.start_time,
+        end_time=meta.end_time,
+        alert_count=meta.alert_count,
+        max_severity=meta.max_severity,
+        mitre_tactics=meta.mitre_tactics_unique,
+        seven_features={
+            "max_severity": float(meta.max_severity),
+            "mitre_tactic_count": 0.0,
+            "critical_mitre_tactic_present": 0.0,
+            "alert_count_log": 0.0,
+            "rule_diversity_shannon": 0.0,
+            "severity_dispersion": 0.0,
+            "agent_criticality": float(meta.agent_criticality),
+        },
+        raw_model_score=0.1,
+        anomaly_score=0.1,
+        threshold_used=0.5,
+        decision="NOISE",
+        action="SUPPRESS",
+        escalate=False,
+        model_version="outbox-v1",
+        feature_schema_version="1.0",
+        score_calibration_version="minmax-v1",
+        source_alert_ids=meta.wazuh_alert_ids,
+    )
+    service.pending_scoring.append(meta)
+
+    with patch.object(scoring_pipe, "score_single", return_value=suppressed):
+        result = service._drain_pending_scoring()
+
+    assert result == [suppressed]
+    assert service.get_outbox() == []
+    assert service.get_history() == [suppressed]
+
+
+def test_seen_id_memory_is_bounded_by_sqlite_duplicate_index(tmp_path: Path):
+    base_t = datetime(2026, 8, 28, 10, 0, tzinfo=timezone.utc)
+    alerts = [make_alert(i, base_t + timedelta(minutes=i * 20), level=(i % 12) + 1) for i in range(30)]
+    metas = BatchResearchRunner(base_delta_t=timedelta(minutes=15), adaptive=False).run(alerts).meta_alerts
+    pipeline = ScoringPipeline(train_reference_pipeline(metas, model_version="seen-v1"))
+    service = LiveRBTAService(pipeline, DurableStateManager(tmp_path / "state.json"), adaptive=False)
+
+    first = make_alert(999, base_t)
+    service.ingest_alert(first)
+    assert len(service.engine._seen_alert_ids) <= 10_000
+    assert service.is_seen(first.wazuh_alert_id)
+    before = len(service.engine._active_buckets)
+    assert service.ingest_alert(first) == []
+    assert len(service.engine._active_buckets) == before

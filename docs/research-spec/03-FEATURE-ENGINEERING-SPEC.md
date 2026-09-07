@@ -158,7 +158,7 @@ Fallback silent hanya boleh digunakan dalam test fixture yang eksplisit.
 
 Gunakan `RobustScaler` pada matriks 7 fitur sebelum Isolation Forest.
 
-Scaler harus fit pada dataset yang sama yang digunakan pada eksperimen IF sesuai rancangan penelitian, dan hasil `X_scaled` dipakai juga untuk evaluasi Silhouette sehingga ruang evaluasi sama dengan ruang input model.
+Scaler harus fit hanya pada reference split. Transformasi scaler yang telah beku dipakai pada calibration dan test. Evaluasi Silhouette memakai test split dalam ruang tujuh fitur hasil transformasi scaler yang sama, tanpa refit.
 
 ## Unit Tests Minimum
 

@@ -99,26 +99,27 @@ if [ ! -d "${REPLAY_DIR}" ]; then
   exit 1
 fi
 
-# Require at least one ready *.jsonl dataset
-JSONL_FILES=$(find "${REPLAY_DIR}" -maxdepth 1 -type f -name '*.jsonl' 2>/dev/null || true)
-JSONL_COUNT=$(echo "${JSONL_FILES}" | grep -v '^$' | wc -l || true)
-COMPRESSED_FILES=$(find "${REPLAY_DIR}" -maxdepth 1 -type f \( -name '*.gz' -o -name '*.part' \) 2>/dev/null || true)
-COMPRESSED_COUNT=$(echo "${COMPRESSED_FILES}" | grep -v '^$' | wc -l || true)
+# Require at least one ready *.jsonl or *.jsonl.gz dataset.
+# `.meta` sidecars and unrelated archives are intentionally excluded.
+mapfile -d '' READY_FILES < <(find "${REPLAY_DIR}" -maxdepth 1 -type f \( -name '*.jsonl' -o -name '*.jsonl.gz' \) -print0 2>/dev/null || true)
+JSONL_COUNT=${#READY_FILES[@]}
+mapfile -d '' UNSUPPORTED_COMPRESSED_FILES < <(find "${REPLAY_DIR}" -maxdepth 1 -type f \( \( -name '*.gz' ! -name '*.jsonl.gz' \) -o -name '*.part' \) -print0 2>/dev/null || true)
+COMPRESSED_COUNT=${#UNSUPPORTED_COMPRESSED_FILES[@]}
 
 if [ "${JSONL_COUNT}" -eq 0 ]; then
   if [ "${COMPRESSED_COUNT}" -gt 0 ]; then
-    echo "ERROR: Replay directory '${REPLAY_DIR}' contains only compressed archive parts, but no ready *.jsonl dataset." >&2
-    echo "       Compressed archives must be derived into replay *.jsonl before deployment." >&2
+    echo "ERROR: Replay directory '${REPLAY_DIR}' contains only unsupported archive parts." >&2
+    echo "       Ready formats are *.jsonl and *.jsonl.gz." >&2
     exit 1
   else
-    echo "ERROR: Replay directory '${REPLAY_DIR}' contains zero *.jsonl datasets. At least one non-empty dataset is required for replay-only deployment." >&2
+    echo "ERROR: Replay directory '${REPLAY_DIR}' contains zero *.jsonl or *.jsonl.gz datasets." >&2
     exit 1
   fi
 fi
 
 # Ensure at least one dataset is non-empty
 NON_EMPTY_JSONL=false
-for f in ${JSONL_FILES}; do
+for f in "${READY_FILES[@]}"; do
   if [ -s "$f" ]; then
     NON_EMPTY_JSONL=true
     break
@@ -126,10 +127,10 @@ for f in ${JSONL_FILES}; do
 done
 
 if [ "${NON_EMPTY_JSONL}" != "true" ]; then
-  echo "ERROR: All *.jsonl datasets in '${REPLAY_DIR}' are empty." >&2
+  echo "ERROR: All supported replay datasets in '${REPLAY_DIR}' are empty." >&2
   exit 1
 fi
-echo "✓ Replay archive readiness: ${JSONL_COUNT} *.jsonl dataset(s) found (non-empty)"
+echo "✓ Replay archive readiness: ${JSONL_COUNT} .jsonl/.jsonl.gz dataset(s) found (non-empty)"
 
 echo "=== [5/6] Validating Container Engine & Compose Specification ==="
 command -v docker >/dev/null 2>&1 || { echo "ERROR: docker command not found." >&2; exit 1; }

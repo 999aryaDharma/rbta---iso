@@ -22,8 +22,8 @@ def make_alert(idx: int, ts: datetime, agent_id: str = "001", group: str = "pam"
     )
 
 
-def test_runtime_complexity_eight_subsets_and_linear_regression():
-    """Runtime evaluation measures 8 subsets, computes throughput, and fits linear regression."""
+def test_runtime_complexity_uses_repeated_median_measurements():
+    """Runtime evidence uses five samples per subset and robust summary statistics."""
     base_t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
     alerts = [make_alert(i, base_t + timedelta(seconds=i * 5)) for i in range(160)]
 
@@ -32,9 +32,15 @@ def test_runtime_complexity_eight_subsets_and_linear_regression():
     assert isinstance(result.subset_df, pd.DataFrame)
     assert len(result.subset_df) == 8
 
-    for col in ["n_alerts", "n_meta", "execution_time_ms", "throughput_alerts_per_ms"]:
+    for col in [
+        "n_alerts", "n_meta", "execution_time_ms", "execution_iqr_ms",
+        "throughput_alerts_per_ms", "measurement_samples_ms",
+    ]:
         assert col in result.subset_df.columns
 
-    assert result.slope > 0
+    assert result.repetitions == 5
+    assert result.preparation_time_ms >= 0
+    assert result.subset_df["measurement_samples_ms"].map(len).eq(5).all()
+    assert result.subset_df["execution_iqr_ms"].ge(0).all()
     assert 0.0 <= result.r_squared <= 1.0
     assert result.mean_throughput > 0

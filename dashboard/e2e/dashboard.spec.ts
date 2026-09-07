@@ -355,6 +355,10 @@ async function setupRouteMocks(page: Page) {
     await route.fulfill({ status: 200, json: replayState });
   });
 
+  await page.route(/\/api\/v1\/replay\/evaluation\/status/, async (route: Route) => {
+    await route.fulfill({ status: 200, json: { run_id: replayState.run_id, status: 'IDLE', current_phase: null, completed_phases: 0, total_phases: 7, progress_percent: 0, artifact_available: false, last_error: null, results: {} } });
+  });
+
   await page.route(/\/api\/v1\/replay\/telegram-payloads/, async (route: Route) => {
     await route.fulfill({
       status: 200,
@@ -389,8 +393,8 @@ async function setupRouteMocks(page: Page) {
       ...replayState,
       run_id: 'replay-test-run-001',
       status: 'RUNNING',
-      dataset: postData.dataset || 'eval_dataset_demo.jsonl',
-      speed: postData.speed || 10,
+      dataset: postData.dataset_name || 'eval_dataset_demo.jsonl',
+      speed: postData.speed_factor || 'MAX',
       processed_count: 250,
       progress: 25.0,
       events_per_second: 150,
@@ -657,9 +661,9 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     await page.addInitScript((key) => {
       window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
     }, VALID_API_KEY);
-    await page.goto('/dashboard/replay');
+    await page.goto('/dashboard/demo');
 
-    await expect(page.locator('text=Demonstration Replay Controller')).toBeVisible();
+    await expect(page.locator('text=Demo Sidang RBTA–Isolation Forest')).toBeVisible();
     const select = page.locator('select').first();
     await expect(select).toBeVisible();
     await select.selectOption('eval_dataset_demo.jsonl');
@@ -669,12 +673,12 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     await page.addInitScript((key) => {
       window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
     }, VALID_API_KEY);
-    await page.goto('/dashboard/replay');
+    await page.goto('/dashboard/demo');
 
     const select = page.locator('select').first();
     await select.selectOption('eval_dataset_demo.jsonl');
 
-    const startBtn = page.locator('button:has-text("Start Replay")');
+    const startBtn = page.locator('button:has-text("Mulai Demo")');
     await startBtn.click();
     await expect(page.locator('text=RUNNING').first()).toBeVisible();
   });
@@ -685,12 +689,12 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     await page.addInitScript((key) => {
       window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
     }, VALID_API_KEY);
-    await page.goto('/dashboard/replay');
+    await page.goto('/dashboard/demo');
 
-    const pauseBtn = page.locator('button:has-text("Pause")');
+    const pauseBtn = page.locator('button:has-text("Jeda")');
     if (await pauseBtn.isVisible()) {
       await pauseBtn.click();
-      await expect(page.locator('button:has-text("Resume")')).toBeVisible();
+      await expect(page.locator('button:has-text("Lanjut")')).toBeVisible();
     }
   });
 
@@ -700,13 +704,13 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     await page.addInitScript((key) => {
       window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
     }, VALID_API_KEY);
-    await page.goto('/dashboard/replay');
+    await page.goto('/dashboard/demo');
 
-    const resetBtn = page.locator('button:has-text("Reset New Run")');
+    const resetBtn = page.locator('button:has-text("Siapkan run baru")');
     if (await resetBtn.isVisible()) {
       await resetBtn.click();
-      await expect(page.locator('text=Start New Replay Run?')).toBeVisible();
-      await page.locator('button:has-text("Confirm & Prepare New Run")').click();
+      await expect(page.locator('text=Siapkan run demo baru?')).toBeVisible();
+      await page.locator('button:has-text("Konfirmasi")').click();
       await expect(page.locator('text=IDLE').first()).toBeVisible();
     }
   });
@@ -764,12 +768,12 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     await page.addInitScript((key) => {
       window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
     }, VALID_API_KEY);
-    await page.goto('/dashboard/replay');
+    await page.goto('/dashboard/demo');
 
     const select = page.locator('select').first();
     await select.selectOption('__ALL__');
 
-    const startBtn = page.locator('button:has-text("Start Replay")');
+    const startBtn = page.locator('button:has-text("Mulai Demo")');
     await startBtn.click();
     await expect(page.locator('text=RUNNING').first()).toBeVisible();
   });
@@ -790,9 +794,9 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     await page.addInitScript((key) => {
       window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
     }, VALID_API_KEY);
-    await page.goto('/dashboard/replay');
+    await page.goto('/dashboard/demo');
 
-    const startBtn = page.locator('button:has-text("Start Replay")');
+    const startBtn = page.locator('button:has-text("Mulai Demo")');
     await startBtn.click();
     await expect(page.locator('text=Operational Processing Pipeline')).toBeVisible();
 
@@ -816,9 +820,9 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     await page.addInitScript((key) => {
       window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
     }, VALID_API_KEY);
-    await page.goto('/dashboard/replay');
+    await page.goto('/dashboard/demo');
 
-    const startBtn = page.locator('button:has-text("Start Replay")');
+    const startBtn = page.locator('button:has-text("Mulai Demo")');
     await startBtn.click();
 
     await page.locator('button:has-text("6. 7 Features")').click();
@@ -832,7 +836,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     await page.addInitScript((key) => {
       window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
     }, VALID_API_KEY);
-    await page.goto('/dashboard/replay');
+    await page.goto('/dashboard/demo');
 
     await expect(page.locator('text=Deferred Telegram Payload Outbox')).toBeVisible();
     await expect(page.locator('text=1 ESCALATE Payloads')).toBeVisible();

@@ -54,37 +54,17 @@ def list_meta_alerts(
     api_key: str = Depends(get_api_key),
 ) -> Dict[str, Any]:
     service, _, _ = resolver.resolve(run_id)
-    history = list(service.finalized_history)
-
-    filtered = []
-    search_lower = search.strip().lower() if search else None
-
-    for m in history:
-        if decision and m.decision != decision:
-            continue
-        if action and m.action != action:
-            continue
-        if agent_id and m.agent_id != agent_id:
-            continue
-        if search_lower:
-            match = (
-                search_lower in str(m.meta_id)
-                or search_lower in m.rule_group_primary.lower()
-                or search_lower in m.agent_name.lower()
-                or search_lower in m.agent_id.lower()
-            )
-            if not match:
-                continue
-        filtered.append(m)
-
-    # Sort
-    reverse = (sort_order == "desc")
-    filtered.sort(key=lambda x: getattr(x, sort_by, 0), reverse=reverse)
-
-    total = len(filtered)
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
-    items = [_scored_alert_to_dict(m) for m in filtered[start_idx:end_idx]]
+    history, total = service.query_history(
+        page=page,
+        page_size=page_size,
+        decision=decision,
+        action=action,
+        agent_id=agent_id,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
+    )
+    items = [_scored_alert_to_dict(m) for m in history]
 
     return {
         "items": items,
@@ -102,9 +82,9 @@ def get_meta_alert_detail(
     api_key: str = Depends(get_api_key),
 ) -> Dict[str, Any]:
     service, _, _ = resolver.resolve(run_id)
-    for m in service.finalized_history:
-        if m.meta_id == meta_id:
-            return _scored_alert_to_dict(m)
+    m = service.get_meta_detail(meta_id)
+    if m is not None:
+        return _scored_alert_to_dict(m)
     raise HTTPException(status_code=404, detail=f"MetaAlert #{meta_id} not found")
 
 
@@ -116,18 +96,18 @@ def get_meta_alert_trace(
     api_key: str = Depends(get_api_key),
 ) -> Dict[str, Any]:
     service, _, _ = resolver.resolve(run_id)
-    for m in service.finalized_history:
-        if m.meta_id == meta_id:
-            return {
-                "meta_id": m.meta_id,
-                "agent_id": m.agent_id,
-                "rule_group": m.rule_group_primary,
-                "source_alert_ids": list(m.source_alert_ids),
-                "count": len(m.source_alert_ids),
-                "model_version": m.model_version,
-                "decision": m.decision,
-                "action": m.action,
-            }
+    m = service.get_meta_detail(meta_id)
+    if m is not None:
+        return {
+            "meta_id": m.meta_id,
+            "agent_id": m.agent_id,
+            "rule_group": m.rule_group_primary,
+            "source_alert_ids": list(m.source_alert_ids),
+            "count": len(m.source_alert_ids),
+            "model_version": m.model_version,
+            "decision": m.decision,
+            "action": m.action,
+        }
     raise HTTPException(status_code=404, detail=f"MetaAlert #{meta_id} trace not found")
 
 
@@ -147,11 +127,7 @@ def get_meta_alert_raw_alerts(
     api_key: str = Depends(get_api_key),
 ) -> Dict[str, Any]:
     service, evidence_store, _ = resolver.resolve(run_id)
-    meta = None
-    for m in service.finalized_history:
-        if m.meta_id == meta_id:
-            meta = m
-            break
+    meta = service.get_meta_detail(meta_id)
 
     if meta is None:
         raise HTTPException(status_code=404, detail=f"MetaAlert #{meta_id} not found")

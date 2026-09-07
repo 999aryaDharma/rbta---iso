@@ -1,0 +1,26 @@
+import type { EvaluationStatus } from '@/api/schemas';
+import { Button } from '@cloudflare/kumo/components/button';
+import { DownloadSimple, Flask, Stop } from '@phosphor-icons/react';
+
+const labels: Record<string, string> = { time_only_fixed: 'Time-only fixed', contextual_fixed: 'Contextual fixed', contextual_adaptive: 'Contextual adaptive' };
+
+export function PostReplayEvaluation({ replayStatus, evaluation, onStart, onCancel, onDownload }: { replayStatus?: string; evaluation?: EvaluationStatus; onStart: () => void; onCancel: () => void; onDownload: () => void }) {
+  const running = evaluation?.status === 'RUNNING';
+  const eligible = replayStatus === 'COMPLETED' || replayStatus === 'STOPPED';
+  const silhouette = evaluation?.results.structural_silhouette;
+  return (
+    <section className="rounded-2xl border border-kumo-hairline bg-kumo-canvas p-6 shadow-xs" aria-labelledby="post-eval-title">
+      <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 id="post-eval-title" className="text-lg font-bold text-kumo-strong">Evaluasi lengkap RBTA & Isolation Forest</h2><p className="mt-1 max-w-3xl text-sm text-kumo-subtle">Dijalankan setelah replay: sensitivitas Δt, tiga ablation, lima tingkat noise, runtime 5×, frozen-model scoring, dan Silhouette 100 permutasi.</p></div><div className="flex gap-2">{running ? <Button size="sm" variant="outline" onClick={onCancel}><Stop size={14} className="mr-1" />Batalkan</Button> : <Button size="sm" variant="primary" disabled={!eligible} onClick={onStart}><Flask size={14} className="mr-1" />Jalankan evaluasi</Button>}{evaluation?.artifact_available && <Button size="sm" variant="outline" onClick={onDownload}><DownloadSimple size={14} className="mr-1" />Unduh artifact</Button>}</div></div>
+      <div className="mt-5"><div className="mb-2 flex justify-between text-xs"><span className="font-semibold text-kumo-default">{evaluation?.current_phase?.replace(/_/g, ' ') || 'menunggu replay selesai'}</span><span className="font-mono text-kumo-subtle">{evaluation?.progress_percent ?? 0}%</span></div><div className="h-2 overflow-hidden rounded-full bg-kumo-recessed"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${evaluation?.progress_percent ?? 0}%` }} /></div></div>
+      {evaluation?.last_error && <p className="mt-4 rounded-lg bg-red-500/10 p-3 text-xs text-red-700 dark:text-red-300">{String(evaluation.last_error.message ?? 'Evaluasi gagal')}</p>}
+      {evaluation && evaluation.completed_phases > 0 && <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-xl bg-kumo-recessed/50 p-3"><div className="text-[10px] font-semibold uppercase text-kumo-subtle">Sensitivitas Δt</div><div className="mt-1 text-sm font-bold text-kumo-strong">{evaluation.results.sensitivity?.length ?? 0} skenario</div><div className="text-xs text-kumo-subtle">Elbow: {evaluation.results.recommended_elbow_delta_t_minutes ?? '—'} menit</div></div>
+        <div className="rounded-xl bg-kumo-recessed/50 p-3"><div className="text-[10px] font-semibold uppercase text-kumo-subtle">Noise robustness</div><div className="mt-1 text-sm font-bold text-kumo-strong">{evaluation.results.noise_robustness?.length ?? 0} kombinasi</div><div className="text-xs text-kumo-subtle">5 rate × 3 agregasi</div></div>
+        <div className="rounded-xl bg-kumo-recessed/50 p-3"><div className="text-[10px] font-semibold uppercase text-kumo-subtle">Runtime</div><div className="mt-1 text-sm font-bold text-kumo-strong">{evaluation.results.runtime?.repetitions ?? 0}× per subset</div><div className="text-xs text-kumo-subtle">R² {evaluation.results.runtime ? evaluation.results.runtime.r_squared.toFixed(4) : '—'} · median/IQR</div></div>
+        <div className="rounded-xl bg-kumo-recessed/50 p-3"><div className="text-[10px] font-semibold uppercase text-kumo-subtle">Frozen IF</div><div className="mt-1 text-sm font-bold text-kumo-strong">{evaluation.results.isolation_forest?.meta_alert_count ?? 0} meta-alert</div><div className="text-xs text-kumo-subtle">Refit: {evaluation.results.isolation_forest?.refit_performed ? 'ya' : 'tidak'}</div></div>
+      </div>}
+      {evaluation?.results.aggregation_ablation && <div className="mt-6 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr className="border-b border-kumo-hairline text-kumo-subtle"><th className="py-2">Skenario</th><th>Meta-alert</th><th>ARR</th><th>Context purity</th><th>Kontaminasi</th></tr></thead><tbody>{evaluation.results.aggregation_ablation.map(row => <tr key={row.variant} className="border-b border-kumo-hairline/50"><td className="py-3 font-semibold text-kumo-strong">{labels[row.variant] ?? row.variant}</td><td>{row.n_meta}</td><td>{row.arr.toFixed(2)}%</td><td>{row.context_purity_percent.toFixed(2)}%</td><td>{row.context_contamination_percent.toFixed(2)}%</td></tr>)}</tbody></table></div>}
+      {silhouette && <p className="mt-5 rounded-xl bg-kumo-recessed/50 p-4 text-xs leading-5 text-kumo-default"><strong>Silhouette {silhouette.is_calculable ? Number(silhouette.observed_silhouette).toFixed(4) : 'tidak dapat dihitung'}.</strong> Nilai ini menilai pemisahan struktural internal terhadap permutasi acak, bukan akurasi atau kebenaran serangan.</p>}
+    </section>
+  );
+}

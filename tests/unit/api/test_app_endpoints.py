@@ -38,6 +38,44 @@ def test_health_endpoint_liveness():
     data = resp.json()
     assert data["status"] == "ok"
     assert data["service"] == "rbta-security-analytics"
+    assert resp.headers["x-content-type-options"] == "nosniff"
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert "default-src 'self'" in resp.headers["content-security-policy"]
+    assert resp.headers["referrer-policy"] == "no-referrer"
+
+
+def test_control_rate_limit_does_not_block_health(monkeypatch):
+    monkeypatch.setenv("RBTA_CONTROL_RATE_LIMIT", "2")
+    app = create_app(service=None, api_key="rate-secret")
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer rate-secret"}
+
+    first = client.post("/api/v1/replay/pause", headers=headers)
+    second = client.post("/api/v1/replay/pause", headers=headers)
+    limited = client.post("/api/v1/replay/pause", headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert limited.status_code == 429
+    assert limited.headers["retry-after"] == "60"
+    assert client.get("/health").status_code == 200
+
+
+def test_api_rejects_declared_oversized_request_before_parsing(monkeypatch):
+    monkeypatch.setenv("RBTA_MAX_REQUEST_BYTES", "128")
+    app = create_app(service=None, api_key="size-secret")
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/replay/start",
+        content=b"x" * 129,
+        headers={
+            "Authorization": "Bearer size-secret",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert response.status_code == 413
 
 
 def test_ready_endpoint_fails_503_when_no_active_model(tmp_path: Path):
@@ -145,7 +183,7 @@ def test_ingest_alert_endpoint_and_outbox_ack(tmp_path: Path):
     assert stats_resp.json()["seen_alerts_count"] == 1
     assert stats_resp.json()["active_buckets_count"] == 1
 
-    # Ingest second alert after 20 minutes (triggers bucket finalization and outbox item)
+    # Ingest second alert after 20 minutes (triggers bucket finalization)
     payload2 = {
         "id": "raw_101",
         "timestamp": "2026-08-28T10:20:00.000+0000",
@@ -155,23 +193,21 @@ def test_ingest_alert_endpoint_and_outbox_ack(tmp_path: Path):
     resp2 = client.post("/api/v1/alerts/ingest", json=payload2, headers=headers)
     assert resp2.status_code == 200
 
-    # Check outbox
+    # Low-context/non-ESCALATE results remain queryable history but are not
+    # incorrectly queued for an external dispatch.
     outbox_resp = client.get("/api/v1/outbox", headers=headers)
     assert outbox_resp.status_code == 200
     outbox_items = outbox_resp.json()
-    assert len(outbox_items) == 1
-    meta_id = outbox_items[0]["meta_id"]
+    assert outbox_items == []
+    history = client.get("/api/v1/meta-alerts", headers=headers).json()
+    assert history["total"] == 1
+    meta_id = history["items"][0]["meta_id"]
 
     # Check meta-alert details
     meta_resp = client.get(f"/api/v1/meta-alerts/{meta_id}", headers=headers)
     assert meta_resp.status_code == 200
     assert meta_resp.json()["meta_id"] == meta_id
 
-    # Acknowledge outbox
+    # A nonexistent delivery record cannot be acknowledged silently.
     ack_resp = client.post(f"/api/v1/outbox/{meta_id}/ack", headers=headers)
-    assert ack_resp.status_code == 200
-    assert ack_resp.json()["status"] == "acknowledged"
-
-    # Outbox is now empty
-    outbox_after = client.get("/api/v1/outbox", headers=headers).json()
-    assert len(outbox_after) == 0
+    assert ack_resp.status_code == 404

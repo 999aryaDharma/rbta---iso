@@ -100,6 +100,12 @@ def test_replay_telemetry_structure_and_trace(tmp_path: Path, trained_pipeline):
     assert final_telemetry["raw"]["evidence_count"] == 20
     assert final_telemetry["raw"]["last_alert"] is not None
     assert final_telemetry["rbta"]["finalized_meta_alerts"] > 0
+    live_eval = final_telemetry["evaluation_live"]
+    assert live_eval["raw_alerts"] == 20
+    assert live_eval["active_meta_alerts"] == 0
+    assert live_eval["finalized_meta_alerts"] == final_telemetry["rbta"]["finalized_meta_alerts"]
+    assert live_eval["model_provenance"]["model_version"] == "rbta-if-v1"
+    assert live_eval["claim_boundary"]["accuracy_available"] is False
 
     # Decision counts sum to finalized count
     dec_counts = final_telemetry["decision_counts"]
@@ -126,3 +132,10 @@ def test_replay_telemetry_structure_and_trace(tmp_path: Path, trained_pipeline):
     assert "items" in payloads_dto
     assert "total_count" in payloads_dto
     assert payloads_dto["total_count"] == dec_counts["ESCALATE"]
+
+    evaluation_started = controller.start_evaluation(random_seed=42)
+    assert evaluation_started["status"] in {"RUNNING", "COMPLETED"}
+    evaluation = controller.wait_until_evaluation_complete(timeout=15.0)
+    assert evaluation["status"] == "COMPLETED"
+    assert evaluation["artifact_available"] is True
+    assert controller.get_evaluation_artifact_path().is_file()

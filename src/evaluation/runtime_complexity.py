@@ -25,12 +25,15 @@ class RuntimeComplexityResult:
     r_squared: float
     mean_throughput: float
     throughput_variation: float
+    repetitions: int
+    preparation_time_ms: float
 
 
 def run_runtime_complexity_evaluation(
     alerts: Iterable[CanonicalRawAlert],
     n_subsets: int = RUNTIME_EVALUATION_SUBSETS,
     delta_t: timedelta = timedelta(minutes=15),
+    repetitions: int = 5,
 ) -> RuntimeComplexityResult:
     """Measure RBTA throughput across increasing data scale subsets and fit linear regression.
 
@@ -48,7 +51,11 @@ def run_runtime_complexity_evaluation(
     RuntimeComplexityResult
         Subset measurements, regression parameters (slope, intercept, R^2), and throughput statistics.
     """
+    if repetitions < 3:
+        raise ValueError("Runtime evaluation requires at least 3 repetitions")
+    preparation_start = time.perf_counter()
     sorted_alerts = sorted(list(alerts), key=lambda a: a.timestamp)
+    preparation_time_ms = (time.perf_counter() - preparation_start) * 1000.0
     total_len = len(sorted_alerts)
 
     subset_fractions = np.linspace(1.0 / n_subsets, 1.0, n_subsets)
@@ -58,17 +65,32 @@ def run_runtime_complexity_evaluation(
         k = max(1, int(round(total_len * frac)))
         subset = sorted_alerts[:k]
 
-        runner = BatchResearchRunner(base_delta_t=delta_t, adaptive=True)
-        start_t = time.perf_counter()
-        res = runner.run(subset)
-        exec_ms = max(0.001, (time.perf_counter() - start_t) * 1000.0)
+        # Warm caches and interpreter paths without using the sample in results.
+        BatchResearchRunner(base_delta_t=delta_t, adaptive=True).run(subset)
+        samples: List[float] = []
+        n_meta_values: List[int] = []
+        for _ in range(repetitions):
+            runner = BatchResearchRunner(base_delta_t=delta_t, adaptive=True)
+            start_t = time.perf_counter()
+            res = runner.run(subset)
+            samples.append(max(0.001, (time.perf_counter() - start_t) * 1000.0))
+            n_meta_values.append(len(res.meta_alerts))
+        if len(set(n_meta_values)) != 1:
+            raise RuntimeError("Runtime repetitions produced non-deterministic meta-alert counts")
 
+        exec_ms = float(np.median(samples))
+        q1 = float(np.percentile(samples, 25))
+        q3 = float(np.percentile(samples, 75))
         throughput = len(subset) / exec_ms
 
         records.append({
             "n_alerts": len(subset),
-            "n_meta": len(res.meta_alerts),
+            "n_meta": n_meta_values[0],
             "execution_time_ms": exec_ms,
+            "execution_q1_ms": q1,
+            "execution_q3_ms": q3,
+            "execution_iqr_ms": q3 - q1,
+            "measurement_samples_ms": samples,
             "throughput_alerts_per_ms": throughput,
         })
 
@@ -92,4 +114,6 @@ def run_runtime_complexity_evaluation(
         r_squared=r_squared,
         mean_throughput=mean_thr,
         throughput_variation=std_thr,
+        repetitions=repetitions,
+        preparation_time_ms=preparation_time_ms,
     )

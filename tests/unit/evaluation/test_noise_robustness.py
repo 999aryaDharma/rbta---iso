@@ -32,12 +32,17 @@ def test_noise_robustness_evaluates_exact_five_noise_rates():
     result = run_noise_robustness_evaluation(alerts, delta_t=timedelta(minutes=15), random_seed=42)
 
     assert isinstance(result.summary_df, pd.DataFrame)
-    assert len(result.summary_df) == 5
-    assert list(result.summary_df["noise_rate"]) == [0.0, 0.05, 0.10, 0.20, 0.30]
+    assert len(result.summary_df) == 15
+    assert set(result.summary_df["variant"]) == {
+        "time_only_fixed", "contextual_fixed", "contextual_adaptive"
+    }
+    assert sorted(result.summary_df["noise_rate"].unique()) == [0.0, 0.05, 0.10, 0.20, 0.30]
+    assert result.summary_df.groupby("noise_rate")["injected_stream_sha256"].nunique().eq(1).all()
 
     # Required output columns
     required_cols = [
         "noise_rate",
+        "variant",
         "n_noise",
         "n_total",
         "n_meta",
@@ -46,14 +51,16 @@ def test_noise_robustness_evaluates_exact_five_noise_rates():
         "noise_absorption_count",
         "noise_absorption_rate",
         "execution_time_ms",
+        "context_purity_percent",
+        "injected_stream_sha256",
     ]
     for col in required_cols:
         assert col in result.summary_df.columns
 
     # Baseline 0% noise has zero degradation
-    row_0 = result.summary_df.iloc[0]
-    assert row_0["n_noise"] == 0
-    assert row_0["arr_degradation"] == 0.0
+    rows_0 = result.summary_df[result.summary_df["noise_rate"] == 0.0]
+    assert rows_0["n_noise"].eq(0).all()
+    assert rows_0["arr_degradation"].eq(0.0).all()
 
 
 def test_noise_absorption_traceability():
@@ -62,9 +69,11 @@ def test_noise_absorption_traceability():
     alerts = [make_alert(i, base_t + timedelta(seconds=i * 10)) for i in range(50)]
 
     result = run_noise_robustness_evaluation(alerts, noise_rates=(0.0, 0.20), delta_t=timedelta(minutes=15), random_seed=42)
-    row_20 = result.summary_df.iloc[1]
+    row_20 = result.summary_df[
+        (result.summary_df["noise_rate"] == 0.20)
+        & (result.summary_df["variant"] == "contextual_adaptive")
+    ].iloc[0]
     assert row_20["noise_rate"] == 0.20
     assert row_20["n_noise"] == 10
     assert 0 <= row_20["noise_absorption_count"] <= 10
     assert 0.0 <= row_20["noise_absorption_rate"] <= 100.0
-

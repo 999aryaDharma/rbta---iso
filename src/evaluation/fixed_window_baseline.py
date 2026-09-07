@@ -38,6 +38,16 @@ def run_fixed_window_baseline(
     FixedWindowResult
         Aggregated results and computed ARR for fixed-window baseline.
     """
+    return _run_tumbling_window_baseline(alerts, window_duration, contextual=False)
+
+
+def _run_tumbling_window_baseline(
+    alerts: Iterable[CanonicalRawAlert],
+    window_duration: timedelta,
+    *,
+    contextual: bool,
+) -> FixedWindowResult:
+    """Shared calendar-window aggregator used by the two ablation baselines."""
     sorted_alerts = sorted(list(alerts), key=lambda a: a.timestamp)
     n_raw = len(sorted_alerts)
 
@@ -45,19 +55,23 @@ def run_fixed_window_baseline(
         return FixedWindowResult(n_raw=0, n_meta=0, arr=0.0, meta_alerts=[])
 
     window_sec = window_duration.total_seconds()
-    windows: Dict[int, List[CanonicalRawAlert]] = {}
+    windows: Dict[Tuple[int, str, str], List[CanonicalRawAlert]] = {}
 
     for a in sorted_alerts:
         bucket_idx = int(a.timestamp.timestamp() // window_sec)
-        if bucket_idx not in windows:
-            windows[bucket_idx] = []
-        windows[bucket_idx].append(a)
+        bucket_key = (
+            bucket_idx,
+            a.agent_id if contextual else "*",
+            a.rule_group_primary if contextual else "*",
+        )
+        windows.setdefault(bucket_key, []).append(a)
 
     meta_alerts: List[MetaAlert] = []
     meta_id = 1
 
-    for bucket_idx in sorted(windows.keys()):
-        b_alerts = windows[bucket_idx]
+    for bucket_key in sorted(windows.keys()):
+        bucket_idx = bucket_key[0]
+        b_alerts = windows[bucket_key]
         start_t = b_alerts[0].timestamp
         end_t = b_alerts[-1].timestamp
         count = len(b_alerts)
@@ -96,7 +110,10 @@ def run_fixed_window_baseline(
             critical_mitre_present=crit_mitre,
             agent_criticality=agent_crit,
             wazuh_alert_ids=tuple(a.wazuh_alert_id for a in b_alerts),
-            metadata={"baseline_window_idx": bucket_idx},
+            metadata={
+                "baseline_window_idx": bucket_idx,
+                "baseline_variant": "contextual_fixed" if contextual else "time_only_fixed",
+            },
         )
         meta_alerts.append(meta)
         meta_id += 1

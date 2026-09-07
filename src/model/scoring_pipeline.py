@@ -34,6 +34,7 @@ class ModelArtifactBundle:
 
 def train_reference_pipeline(
     metas: Sequence[MetaAlert],
+    calibration_metas: Optional[Sequence[MetaAlert]] = None,
     random_state: int = 42,
     model_version: str = "rbta-if-v1",
     training_run_id: Optional[str] = None,
@@ -82,8 +83,17 @@ def train_reference_pipeline(
     )
     model.fit(X_scaled)
 
-    # 4. Derive Raw Anomaly Scores (higher = more anomalous)
-    raw_scores = -model.score_samples(X_scaled)
+    # 4. Derive calibration scores on a distinct later population when
+    # supplied. Backward-compatible callers retain the legacy same-population
+    # behavior, but official research orchestration always supplies this set.
+    calibration_population = list(calibration_metas) if calibration_metas is not None else list(metas)
+    if len(calibration_population) < 4:
+        raise ValueError(
+            f"At least 4 meta-alerts are required for score calibration, got {len(calibration_population)}"
+        )
+    calibration_df = SevenFeatureExtractor.extract_features_df(calibration_population)
+    calibration_scaled = scaler.transform(calibration_df)
+    raw_scores = -model.score_samples(calibration_scaled)
     raw_min = float(np.min(raw_scores))
     raw_max = float(np.max(raw_scores))
 
@@ -107,6 +117,8 @@ def train_reference_pipeline(
 
     start_times = [m.start_time for m in metas if m.start_time is not None]
     end_times = [m.end_time for m in metas if m.end_time is not None]
+    calibration_start_times = [m.start_time for m in calibration_population if m.start_time is not None]
+    calibration_end_times = [m.end_time for m in calibration_population if m.end_time is not None]
 
     if git_commit is not None:
         resolved_git_commit = git_commit
@@ -135,8 +147,16 @@ def train_reference_pipeline(
         "random_state": random_state,
         "training_row_count": len(metas),
         "meta_alert_count": len(metas),
+        "calibration_row_count": len(calibration_population),
+        "validation_strategy": (
+            "chronological_reference_calibration_test"
+            if calibration_metas is not None
+            else "same_population_legacy"
+        ),
         "training_period_start": min(start_times).isoformat() if start_times else None,
         "training_period_end": max(end_times).isoformat() if end_times else None,
+        "calibration_period_start": min(calibration_start_times).isoformat() if calibration_start_times else None,
+        "calibration_period_end": max(calibration_end_times).isoformat() if calibration_end_times else None,
         "score_calibration_version": calibration.version,
         "git_commit": resolved_git_commit,
         "research_config_hash": resolved_config_hash,
@@ -157,6 +177,7 @@ class ScoringPipeline:
     """Inference scoring pipeline executing strictly in read-only prediction mode."""
 
     def __init__(self, bundle: ModelArtifactBundle) -> None:
+        self.bundle: ModelArtifactBundle = bundle
         self.scaler: RobustScaler = bundle.scaler
         self.model: IsolationForest = bundle.model
         self.calibration: ScoreCalibration = bundle.calibration

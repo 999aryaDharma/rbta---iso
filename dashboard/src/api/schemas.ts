@@ -153,6 +153,39 @@ export const PipelineLatestMetaAlertSchema = z.object({
 
 export type PipelineLatestMetaAlert = z.infer<typeof PipelineLatestMetaAlertSchema>;
 
+export const LiveEvaluationSchema = z.object({
+  schema_version: z.string(),
+  raw_alerts: z.number(),
+  finalized_meta_alerts: z.number(),
+  active_meta_alerts: z.number(),
+  triage_units_current: z.number(),
+  live_arr_percent: z.number(),
+  decision_distribution: z.record(z.string(), z.number()),
+  action_distribution: z.record(z.string(), z.number()),
+  threshold: z.object({ above_count: z.number(), above_rate_percent: z.number() }),
+  score_distribution: z.object({
+    count: z.number(),
+    min: z.number().nullable(),
+    max: z.number().nullable(),
+    mean: z.number().nullable(),
+    bins: z.array(z.string()),
+    histogram: z.array(z.number()),
+  }),
+  reference_range_exceedance_count: z.number(),
+  evidence_coverage_percent: z.number(),
+  source_reference_coverage_percent: z.number(),
+  model_provenance: z.record(z.string(), z.unknown()),
+  claim_boundary: z.object({
+    accuracy_available: z.boolean(),
+    arr_interpretation: z.string(),
+    score_interpretation: z.string(),
+    silhouette_interpretation: z.string(),
+    contamination_interpretation: z.string(),
+  }),
+});
+
+export type LiveEvaluation = z.infer<typeof LiveEvaluationSchema>;
+
 export const PipelineTelemetrySchema = z.object({
   raw: z.object({
     processed: z.number(),
@@ -171,6 +204,7 @@ export const PipelineTelemetrySchema = z.object({
     latest_payload: z.record(z.string(), z.unknown()).nullable().optional(),
   }),
   trace: z.array(PipelineTraceItemSchema).optional(),
+  evaluation_live: LiveEvaluationSchema.optional(),
 });
 
 export type PipelineTelemetry = z.infer<typeof PipelineTelemetrySchema>;
@@ -228,13 +262,97 @@ export type ReplayStatus = z.infer<typeof ReplayStatusSchema>;
 export const ReplayDatasetSchema = z.object({
   name: z.string(),
   size_bytes: z.number(),
+  total_events: z.number().default(0),
+  valid_events: z.number().default(0),
+  invalid_events: z.number().default(0),
+  is_valid: z.boolean().default(true),
+  sha256: z.string().default(''),
+  timestamp_start: z.string().nullable().optional(),
+  timestamp_end: z.string().nullable().optional(),
+  compression: z.string().default('none'),
+  classification: z.enum(['unclassified', 'golden', 'research']).default('unclassified'),
+  random_seed: z.number().nullable().optional(),
+  cache_status: z.string().optional(),
+  inspection_status: z.enum(['cached', 'pending']).default('pending'),
 });
+
+export type ReplayDataset = z.infer<typeof ReplayDatasetSchema>;
 
 export const ReplayDatasetListSchema = z.object({
   items: z.array(ReplayDatasetSchema),
 });
 
 export type ReplayDatasetList = z.infer<typeof ReplayDatasetListSchema>;
+
+export const DatasetCatalogStatusSchema = z.object({
+  status: z.enum(['IDLE', 'STARTING', 'RUNNING', 'COMPLETED', 'ERROR']),
+  total_files: z.number(),
+  completed_files: z.number(),
+  failed_files: z.number(),
+  invalid_files: z.number(),
+  pending_files: z.number(),
+  current_file: z.string().nullable(),
+  last_error: z.record(z.string(), z.unknown()).nullable(),
+  errors: z.array(z.record(z.string(), z.unknown())),
+  started_at_utc: z.string().nullable(),
+  completed_at_utc: z.string().nullable(),
+});
+
+export type DatasetCatalogStatus = z.infer<typeof DatasetCatalogStatusSchema>;
+
+export const EvaluationAblationRowSchema = z.object({
+  variant: z.string(),
+  n_raw: z.number(),
+  n_meta: z.number(),
+  arr: z.number(),
+  context_purity_percent: z.number(),
+  context_contamination_percent: z.number(),
+});
+
+export const EvaluationStatusSchema = z.object({
+  run_id: z.string().nullable(),
+  status: z.enum(['IDLE', 'RUNNING', 'COMPLETED', 'ERROR', 'CANCELLED', 'UNAVAILABLE']),
+  current_phase: z.string().nullable(),
+  completed_phases: z.number(),
+  total_phases: z.number(),
+  progress_percent: z.number(),
+  artifact_available: z.boolean(),
+  last_error: z.record(z.string(), z.unknown()).nullable(),
+  results: z.object({
+    sensitivity: z.array(z.record(z.string(), z.unknown())).optional(),
+    recommended_elbow_delta_t_minutes: z.number().nullable().optional(),
+    aggregation_ablation: z.array(EvaluationAblationRowSchema).optional(),
+    noise_robustness: z.array(z.record(z.string(), z.unknown())).optional(),
+    runtime: z.object({
+      slope_ms_per_alert: z.number(),
+      intercept_ms: z.number(),
+      r_squared: z.number(),
+      mean_throughput_alerts_per_ms: z.number(),
+      throughput_variation: z.number(),
+      repetitions: z.number(),
+      preparation_time_ms: z.number(),
+    }).passthrough().optional(),
+    isolation_forest: z.object({
+      evaluation_population: z.string(),
+      refit_performed: z.boolean(),
+      model_version: z.string().nullable().optional(),
+      meta_alert_count: z.number(),
+      score_min: z.number().nullable(),
+      score_max: z.number().nullable(),
+      score_mean: z.number().nullable(),
+      decision_distribution: z.record(z.string(), z.number()),
+      action_distribution: z.record(z.string(), z.number()),
+    }).passthrough().optional(),
+    structural_silhouette: z.object({
+      is_calculable: z.boolean(),
+      observed_silhouette: z.number().nullable().optional(),
+      empirical_p_value: z.number().nullable().optional(),
+      n_valid_permutations: z.number().optional(),
+    }).passthrough().optional(),
+  }).passthrough().default({}),
+});
+
+export type EvaluationStatus = z.infer<typeof EvaluationStatusSchema>;
 
 export const TimeseriesPointSchema = z.object({
   timestamp: z.string(),

@@ -1,5 +1,6 @@
 from typing import Optional
 from fastapi import Header, HTTPException, Request, status
+from hmac import compare_digest
 import os
 
 
@@ -18,8 +19,8 @@ def get_api_key(request: Request, authorization: Optional[str] = Header(None)) -
             detail="Missing Authorization header",
         )
 
-    expected_bearer = f"Bearer {expected_key}"
-    if authorization != expected_bearer and authorization != expected_key:
+    supplied_key = authorization[7:] if authorization.startswith("Bearer ") else authorization
+    if not compare_digest(str(supplied_key), str(expected_key)):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Authorization header",

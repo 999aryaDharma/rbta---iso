@@ -1,6 +1,7 @@
 """Tests for canonical research orchestrator (phase order, delta-t propagation, subsets, input modes)."""
 
 from pathlib import Path
+import json
 import pytest
 from unittest.mock import patch, MagicMock
 
@@ -75,6 +76,61 @@ def test_runtime_uses_exactly_eight_subsets(tmp_path):
     )
     phase_a = summary["phase_a"]
     assert len(phase_a["complexity_subsets"]) == 8
+
+
+def test_official_pipeline_records_chronological_reference_calibration_test_split(tmp_path):
+    fixture_alerts = _generate_engineering_smoke_fixture(n_alerts=120, seed=42)
+    summary = run_canonical_research_pipeline(
+        raw_alerts=fixture_alerts,
+        output_base_dir=tmp_path,
+        is_fixture_mode=True,
+        random_seed=42,
+    )
+
+    split = summary["manifest"]["temporal_split"]
+    assert split["strategy"] == "chronological"
+    assert split["reference"]["n_raw"] == 72
+    assert split["calibration"]["n_raw"] == 24
+    assert split["test"]["n_raw"] == 24
+    assert sum(part["n_raw"] for key, part in split.items() if key != "strategy") == 120
+    assert summary["phase_b"]["evaluation_population"] == "test_without_refit"
+
+
+def test_directory_input_records_multi_file_corpus_provenance(tmp_path):
+    corpus_dir = tmp_path / "indexer-export"
+    corpus_dir.mkdir()
+    fixture_alerts = _generate_engineering_smoke_fixture(n_alerts=60, seed=42)
+    for filename, subset in (("2026.04.02.jsonl", fixture_alerts[:30]), ("2026.04.03.jsonl", fixture_alerts[30:])):
+        rows = []
+        for alert in subset:
+            rows.append({
+                "id": alert.wazuh_alert_id,
+                "timestamp": alert.timestamp.isoformat(),
+                "agent": {"id": alert.agent_id, "name": alert.agent_name},
+                "rule": {
+                    "id": alert.rule_id,
+                    "level": alert.rule_level,
+                    "groups": [alert.rule_group_primary],
+                    "mitre": {"tactic": list(alert.mitre_tactics)},
+                },
+            })
+        (corpus_dir / filename).write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    (corpus_dir / "2026.04.02.meta").write_text("{}", encoding="utf-8")
+
+    summary = run_canonical_research_pipeline(
+        raw_file_path=corpus_dir,
+        output_base_dir=tmp_path / "runs",
+        model_version="directory-input-v1",
+        random_seed=42,
+        git_commit="a" * 40,
+    )
+
+    corpus = summary["manifest"]["input_corpus"]
+    assert corpus["source_kind"] == "directory"
+    assert corpus["file_count"] == 2
+    assert corpus["event_count"] == 60
+    assert [item["name"] for item in corpus["files"]] == ["2026.04.02.jsonl", "2026.04.03.jsonl"]
+    assert summary["manifest"]["research_results_valid_for_seminar"] is True
 
 
 def test_canonical_research_phase_order(tmp_path):
@@ -162,6 +218,8 @@ def test_canonical_research_phase_order(tmp_path):
     expected_phases = [
         "sensitivity",
         "final_rbta_run",
+        "final_rbta_run",
+        "final_rbta_run",
         "fixed_window",
         "noise",
         "runtime",
@@ -176,5 +234,3 @@ def test_canonical_research_phase_order(tmp_path):
     # Verify final RBTA had adaptive == True
     init_call = [c for c in call_order if c.startswith("batch_runner_init")][0]
     assert "adaptive_True" in init_call
-
-

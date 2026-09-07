@@ -1,6 +1,10 @@
+from collections import defaultdict, deque
 from datetime import datetime, timezone
+from hmac import compare_digest
 import os
 from pathlib import Path
+import threading
+import time
 from typing import Any, Dict, List, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
@@ -50,10 +54,66 @@ def create_app(
     app.state.replay_controller = replay_controller or runtime_resolver.replay_controller
     app.state.auth_key = auth_key
 
+    rate_limit = max(1, int(os.getenv("RBTA_CONTROL_RATE_LIMIT", "120")))
+    max_request_bytes = max(128, int(os.getenv("RBTA_MAX_REQUEST_BYTES", str(1024 * 1024))))
+    rate_windows: Dict[str, deque[float]] = defaultdict(deque)
+    rate_lock = threading.Lock()
+
+    @app.middleware("http")
+    async def security_and_control_limits(request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length and content_length.isdigit() and int(content_length) > max_request_bytes:
+            response = JSONResponse(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                content={"detail": f"Request body exceeds {max_request_bytes} bytes"},
+            )
+        else:
+            is_control = request.method == "POST" and (
+                request.url.path.startswith("/api/v1/replay/")
+                or request.url.path == "/api/v1/alerts/ingest"
+            )
+            limited = False
+            if is_control:
+                identity = request.headers.get("authorization") or (
+                    request.client.host if request.client else "unknown"
+                )
+                now = time.monotonic()
+                with rate_lock:
+                    window = rate_windows[identity]
+                    while window and now - window[0] >= 60.0:
+                        window.popleft()
+                    if len(window) >= rate_limit:
+                        limited = True
+                    else:
+                        window.append(now)
+            if limited:
+                response = JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={"detail": "Control request rate limit exceeded"},
+                    headers={"Retry-After": "60"},
+                )
+            else:
+                response = await call_next(request)
+
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; "
+            "base-uri 'self'; frame-ancestors 'none'"
+        )
+        if request.url.path.startswith("/api/"):
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
     def verify_auth(authorization: Optional[str] = Header(None)) -> None:
         if auth_key:
-            expected = f"Bearer {auth_key}"
-            if authorization != expected and authorization != auth_key:
+            supplied = authorization or ""
+            supplied_key = supplied[7:] if supplied.startswith("Bearer ") else supplied
+            if not compare_digest(str(supplied_key), str(auth_key)):
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid or missing Authorization header",
@@ -124,7 +184,7 @@ def create_app(
         if service is None:
             return {"status": "uninitialized"}
 
-        seen_cnt = len(service.engine._seen_alert_ids) if hasattr(service.engine, "_seen_alert_ids") else 0
+        seen_cnt = service.state_manager.count_seen_alert_ids()
         buckets_cnt = len(service.engine.snapshot_buckets())
 
         return {
@@ -184,7 +244,7 @@ def create_app(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=str(exc),
             )
-        is_dup = service.engine.has_seen_alert(canonical_alert.wazuh_alert_id) if hasattr(service.engine, "has_seen_alert") else False
+        is_dup = service.is_seen(canonical_alert.wazuh_alert_id)
         service.ingest_alert(canonical_alert)
         return {
             "status": "accepted",
@@ -223,7 +283,8 @@ def create_app(
         verify_auth(authorization)
         if service is None:
             raise HTTPException(status_code=503, detail="Service uninitialized")
-        service.commit_outbox([meta_id])
+        if service.commit_outbox([meta_id]) == 0:
+            raise HTTPException(status_code=404, detail=f"Pending outbox item #{meta_id} not found")
         return {"status": "acknowledged", "meta_id": meta_id}
 
     @app.post("/outbox/commit", tags=["Outbox"])

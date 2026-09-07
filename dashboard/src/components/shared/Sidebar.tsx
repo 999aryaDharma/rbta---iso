@@ -36,7 +36,7 @@ export function AppSidebar() {
       const now = Date.now();
       if (lastKey === 'g' && now - lastKeyTime < 1000) {
         const map: Record<string, string> = {
-          o: '/overview', m: '/meta-alerts', r: '/rbta', p: '/replay', s: '/system',
+          o: '/overview', m: '/meta-alerts', r: '/rbta', d: '/demo', s: '/system',
         };
         if (map[e.key]) {
           e.preventDefault();
@@ -140,18 +140,18 @@ export function AppSidebar() {
           </SidebarMenu>
         </SidebarGroup>
 
-        {/* Build / Demonstration Section */}
+        {/* Thesis Demonstration Section */}
         <SidebarGroup>
-          <SidebarGroupLabel>Build</SidebarGroupLabel>
+          <SidebarGroupLabel>Sidang</SidebarGroupLabel>
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
                 icon={Play}
-                active={isPathActive('/replay')}
-                tooltip="Replay Demonstration"
-                onClick={() => navigate(withRunId('/replay'))}
+                active={isPathActive('/demo')}
+                tooltip="Demo penelitian"
+                onClick={() => navigate(withRunId('/demo'))}
               >
-                Replay Pipeline
+                Demo
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

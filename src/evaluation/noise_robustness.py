@@ -3,12 +3,17 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import random
+import hashlib
+import json
 import time
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 import pandas as pd
 
 from src.contracts.raw_alert import CanonicalRawAlert
 from src.evaluation.metrics import compute_arr
+from src.evaluation.context_quality import compute_context_quality
+from src.evaluation.contextual_fixed_baseline import run_contextual_fixed_window_baseline
+from src.evaluation.fixed_window_baseline import run_fixed_window_baseline
 from src.runners.batch_runner import BatchResearchRunner
 
 NOISE_RATES: Tuple[float, ...] = (0.0, 0.05, 0.10, 0.20, 0.30)
@@ -92,8 +97,7 @@ def run_noise_robustness_evaluation(
     rng = random.Random(random_seed)
 
     records: List[Dict[str, Any]] = []
-    baseline_arr: Optional[float] = None
-    baseline_n_meta: int = 0
+    baseline_arr: Dict[str, float] = {}
 
     for rate in noise_rates:
         n_noise = int(round(n_clean * rate))
@@ -101,42 +105,61 @@ def run_noise_robustness_evaluation(
         combined_stream = sorted(clean_list + noise_alerts, key=lambda a: a.timestamp)
         n_total = len(combined_stream)
 
-        runner = BatchResearchRunner(base_delta_t=delta_t, adaptive=True)
-        start_t = time.perf_counter()
-        res = runner.run(combined_stream)
-        exec_ms = (time.perf_counter() - start_t) * 1000.0
+        digest_payload = [
+            [a.wazuh_alert_id, a.timestamp.isoformat(), a.agent_id, a.rule_group_primary, a.rule_level]
+            for a in combined_stream
+        ]
+        stream_digest = hashlib.sha256(
+            json.dumps(digest_payload, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
 
-        n_meta = len(res.meta_alerts)
-        arr = compute_arr(n_total, n_meta) if n_total > 0 else 0.0
+        variants = (
+            ("time_only_fixed", lambda: run_fixed_window_baseline(combined_stream, delta_t)),
+            ("contextual_fixed", lambda: run_contextual_fixed_window_baseline(combined_stream, delta_t)),
+            (
+                "contextual_adaptive",
+                lambda: BatchResearchRunner(base_delta_t=delta_t, adaptive=True).run(combined_stream),
+            ),
+        )
+        for variant, execute in variants:
+            start_t = time.perf_counter()
+            result = execute()
+            exec_ms = (time.perf_counter() - start_t) * 1000.0
+            metas = result.meta_alerts
+            n_meta = len(metas)
+            arr = compute_arr(n_total, n_meta) if n_total > 0 else 0.0
 
-        if rate == 0.0:
-            baseline_arr = arr
-            baseline_n_meta = n_meta
-            degradation = 0.0
-            absorption_count = 0
-            absorption_rate = 100.0
-        else:
-            base = baseline_arr if baseline_arr is not None else arr
-            degradation = float(base - arr)
-            # Traceable absorption via MetaAlert.wazuh_alert_ids
-            absorbed_count = 0
-            for meta in res.meta_alerts:
-                has_clean = any(not wid.startswith("noise_") for wid in meta.wazuh_alert_ids)
-                if has_clean:
-                    absorbed_count += sum(1 for wid in meta.wazuh_alert_ids if wid.startswith("noise_"))
-            absorption_count = absorbed_count
-            absorption_rate = (absorption_count / n_noise * 100.0) if n_noise > 0 else 100.0
+            if rate == 0.0:
+                baseline_arr[variant] = arr
+                degradation = 0.0
+                absorption_count = 0
+                absorption_rate = 100.0
+            else:
+                degradation = float(baseline_arr.get(variant, arr) - arr)
+                absorption_count = 0
+                for meta in metas:
+                    has_clean = any(not wid.startswith("noise_") for wid in meta.wazuh_alert_ids)
+                    if has_clean:
+                        absorption_count += sum(
+                            1 for wid in meta.wazuh_alert_ids if wid.startswith("noise_")
+                        )
+                absorption_rate = (absorption_count / n_noise * 100.0) if n_noise else 100.0
 
-        records.append({
-            "noise_rate": rate,
-            "n_noise": n_noise,
-            "n_total": n_total,
-            "n_meta": n_meta,
-            "arr": arr,
-            "arr_degradation": degradation,
-            "noise_absorption_count": absorption_count,
-            "noise_absorption_rate": absorption_rate,
-            "execution_time_ms": exec_ms,
-        })
+            quality = compute_context_quality(metas, combined_stream)
+            records.append({
+                "noise_rate": rate,
+                "variant": variant,
+                "n_noise": n_noise,
+                "n_total": n_total,
+                "n_meta": n_meta,
+                "arr": arr,
+                "arr_degradation": degradation,
+                "noise_absorption_count": absorption_count,
+                "noise_absorption_rate": absorption_rate,
+                "context_purity_percent": quality.context_purity_percent,
+                "context_contamination_percent": quality.context_contamination_percent,
+                "injected_stream_sha256": stream_digest,
+                "execution_time_ms": exec_ms,
+            })
 
     return NoiseRobustnessResult(summary_df=pd.DataFrame(records))

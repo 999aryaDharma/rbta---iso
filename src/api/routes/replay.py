@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Literal
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from src.api.auth import get_api_key
@@ -24,6 +25,27 @@ def list_datasets(
 ) -> Dict[str, List[Dict[str, Any]]]:
     items = controller.list_datasets()
     return {"items": items}
+
+
+@router.get("/datasets/catalog-status")
+def dataset_catalog_status(
+    controller: ReplayController = Depends(_get_replay_controller),
+    api_key: str = Depends(get_api_key),
+) -> Dict[str, Any]:
+    return controller.get_catalog_status()
+
+
+@router.post("/datasets/refresh")
+def refresh_dataset_catalog(
+    controller: ReplayController = Depends(_get_replay_controller),
+    api_key: str = Depends(get_api_key),
+) -> Dict[str, Any]:
+    try:
+        return controller.start_catalog_refresh()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/status")
@@ -87,3 +109,44 @@ def replay_reset(
     api_key: str = Depends(get_api_key),
 ) -> Dict[str, Any]:
     return controller.reset()
+
+
+@router.post("/evaluation/start")
+def evaluation_start(
+    controller: ReplayController = Depends(_get_replay_controller),
+    api_key: str = Depends(get_api_key),
+) -> Dict[str, Any]:
+    try:
+        return controller.start_evaluation(random_seed=42)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/evaluation/status")
+def evaluation_status(
+    controller: ReplayController = Depends(_get_replay_controller),
+    api_key: str = Depends(get_api_key),
+) -> Dict[str, Any]:
+    return controller.get_evaluation_status()
+
+
+@router.post("/evaluation/cancel")
+def evaluation_cancel(
+    controller: ReplayController = Depends(_get_replay_controller),
+    api_key: str = Depends(get_api_key),
+) -> Dict[str, Any]:
+    return controller.cancel_evaluation()
+
+
+@router.get("/evaluation/artifact", response_class=FileResponse)
+def evaluation_artifact(
+    controller: ReplayController = Depends(_get_replay_controller),
+    api_key: str = Depends(get_api_key),
+) -> FileResponse:
+    try:
+        path = controller.get_evaluation_artifact_path()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return FileResponse(path, media_type="application/json", filename=path.name)

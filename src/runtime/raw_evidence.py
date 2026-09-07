@@ -3,6 +3,7 @@ import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from src.contracts.raw_alert import CanonicalRawAlert
@@ -185,73 +186,67 @@ class RawAlertEvidenceStore:
         if dec is None:
             dec = ""
         elif not isinstance(dec, str):
-            dec = str(dec) if skip_conflict_check else deterministic_json_dumps(dec)
+            dec = deterministic_json_dumps(dec)
         flog = meta.get("full_log", "")
 
         # Unify source index / doc id
         source_index = meta.get("source_index", meta.get("opensearch_index", ""))
         source_doc_id = meta.get("source_document_id", meta.get("opensearch_document_id", ""))
 
-        if skip_conflict_check:
-            import hashlib
-            fast_str = f"{alert.wazuh_alert_id}|{alert.timestamp}|{alert.agent_id}"
-            fingerprint = hashlib.sha256(fast_str.encode("utf-8")).hexdigest()
-        else:
-            fingerprint = compute_canonical_fingerprint(
-                wazuh_alert_id=alert.wazuh_alert_id,
-                timestamp=alert.timestamp,
-                agent_id=alert.agent_id,
-                agent_name=alert.agent_name,
-                rule_id=alert.rule_id,
-                rule_level=alert.rule_level,
-                rule_group_primary=alert.rule_group_primary,
-                srcip=alert.srcip or "",
-                agent_criticality=alert.agent_criticality,
-                mitre_tactics=alert.mitre_tactics,
-                metadata=meta,
-            )
+        # Replay used to hash only ID/timestamp/agent and skip duplicate checks.
+        # That optimization made the evidence count inaccurate and could hide a
+        # conflicting rule/severity payload behind the same Wazuh ID.  Keep the
+        # legacy flag for API compatibility, but never weaken evidence integrity.
+        fingerprint = compute_canonical_fingerprint(
+            wazuh_alert_id=alert.wazuh_alert_id,
+            timestamp=alert.timestamp,
+            agent_id=alert.agent_id,
+            agent_name=alert.agent_name,
+            rule_id=alert.rule_id,
+            rule_level=alert.rule_level,
+            rule_group_primary=alert.rule_group_primary,
+            srcip=alert.srcip or "",
+            agent_criticality=alert.agent_criticality,
+            mitre_tactics=alert.mitre_tactics,
+            metadata=meta,
+        )
 
         with self._lock:
-            if not skip_conflict_check:
-                if alert.wazuh_alert_id in self._recent_fingerprints:
-                    existing_fp = self._recent_fingerprints[alert.wazuh_alert_id]
-                    if existing_fp == fingerprint:
-                        return False
-                    raise RawEvidenceConflictError(
-                        f"Conflicting canonical evidence detected for wazuh_alert_id='{alert.wazuh_alert_id}'. "
-                        f"Existing fingerprint '{existing_fp}' != incoming '{fingerprint}'."
-                    )
+            if alert.wazuh_alert_id in self._recent_fingerprints:
+                existing_fp = self._recent_fingerprints[alert.wazuh_alert_id]
+                if existing_fp == fingerprint:
+                    return False
+                raise RawEvidenceConflictError(
+                    f"Conflicting canonical evidence detected for wazuh_alert_id='{alert.wazuh_alert_id}'. "
+                    f"Existing fingerprint '{existing_fp}' != incoming '{fingerprint}'."
+                )
 
-                conn = self._get_conn()
-                row = conn.execute(
-                    "SELECT canonical_fingerprint FROM raw_alert_evidence WHERE wazuh_alert_id = ?",
-                    (alert.wazuh_alert_id,),
-                ).fetchone()
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT canonical_fingerprint FROM raw_alert_evidence WHERE wazuh_alert_id = ?",
+                (alert.wazuh_alert_id,),
+            ).fetchone()
 
-                if row is not None:
-                    existing_fp = row["canonical_fingerprint"]
-                    if len(self._recent_fingerprints) < self._max_recent_fingerprints:
-                        self._recent_fingerprints[alert.wazuh_alert_id] = existing_fp
-                    if existing_fp == fingerprint:
-                        return False
-                    raise RawEvidenceConflictError(
-                        f"Conflicting canonical evidence detected for wazuh_alert_id='{alert.wazuh_alert_id}'. "
-                        f"Existing fingerprint '{existing_fp}' != incoming '{fingerprint}'."
-                    )
+            if row is not None:
+                existing_fp = row["canonical_fingerprint"]
+                if len(self._recent_fingerprints) < self._max_recent_fingerprints:
+                    self._recent_fingerprints[alert.wazuh_alert_id] = existing_fp
+                if existing_fp == fingerprint:
+                    return False
+                raise RawEvidenceConflictError(
+                    f"Conflicting canonical evidence detected for wazuh_alert_id='{alert.wazuh_alert_id}'. "
+                    f"Existing fingerprint '{existing_fp}' != incoming '{fingerprint}'."
+                )
 
-                if len(self._recent_fingerprints) >= self._max_recent_fingerprints:
-                    self._recent_fingerprints.clear()
-                self._recent_fingerprints[alert.wazuh_alert_id] = fingerprint
+            if len(self._recent_fingerprints) >= self._max_recent_fingerprints:
+                self._recent_fingerprints.clear()
+            self._recent_fingerprints[alert.wazuh_alert_id] = fingerprint
 
             ingested_at = datetime.now(timezone.utc).isoformat()
             ts_str = alert.timestamp.isoformat() if isinstance(alert.timestamp, datetime) else str(alert.timestamp)
             
-            if skip_conflict_check:
-                original_payload_str = None
-                meta_str = json.dumps(to_json_safe(meta))
-            else:
-                original_payload_str = deterministic_json_dumps(original_payload) if original_payload is not None else None
-                meta_str = deterministic_json_dumps(meta)
+            original_payload_str = deterministic_json_dumps(original_payload) if original_payload is not None else None
+            meta_str = deterministic_json_dumps(meta)
 
             record = (
                 alert.wazuh_alert_id,
@@ -478,6 +473,34 @@ class RawAlertEvidenceStore:
             row = conn.execute("SELECT COUNT(*) AS total FROM raw_alert_evidence").fetchone()
             self._cached_count = int(row["total"]) if row else 0
             return self._cached_count
+
+    def export_canonical_alerts(self) -> List[CanonicalRawAlert]:
+        """Export the isolated run evidence as canonical alerts in event-time order."""
+        self.flush()
+        with self._lock:
+            rows = self._get_conn().execute(
+                "SELECT * FROM raw_alert_evidence ORDER BY timestamp ASC, wazuh_alert_id ASC"
+            ).fetchall()
+
+        alerts: List[CanonicalRawAlert] = []
+        for row in rows:
+            item = self._row_to_dict(row, redact=False)
+            alerts.append(
+                CanonicalRawAlert(
+                    wazuh_alert_id=item["wazuh_alert_id"],
+                    timestamp=datetime.fromisoformat(str(item["timestamp"]).replace("Z", "+00:00")),
+                    agent_id=item["agent_id"],
+                    agent_name=item["agent_name"],
+                    rule_group_primary=item["rule_group_primary"],
+                    rule_level=int(item["rule_level"]),
+                    rule_id=item["rule_id"],
+                    mitre_tactics=tuple(item.get("mitre_tactics") or ()),
+                    srcip=item.get("srcip") or None,
+                    agent_criticality=float(item["agent_criticality"]),
+                    metadata=MappingProxyType(item.get("metadata") or {}),
+                )
+            )
+        return alerts
 
     def count_by_hour(
         self,

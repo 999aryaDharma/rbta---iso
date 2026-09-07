@@ -10,6 +10,12 @@ import {
   resumeReplay,
   stopReplay,
   resetReplay,
+  fetchEvaluationStatus,
+  startEvaluation,
+  cancelEvaluation,
+  downloadEvaluationArtifact,
+  fetchDatasetCatalogStatus,
+  refreshDatasetCatalog,
 } from '@/api/replay';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { MetricCard } from '@/components/shared/MetricCard';
@@ -23,6 +29,10 @@ import { CurrentMetaAlertCard } from './CurrentMetaAlertCard';
 import { PipelineStageDetail } from './PipelineStageDetail';
 import { ProcessingTrace } from './ProcessingTrace';
 import { DeferredTelegramOutbox } from './DeferredTelegramOutbox';
+import { ResearchBoundaryCard } from '@/features/demo/ResearchBoundaryCard';
+import { LiveEvaluationPanel } from '@/features/demo/LiveEvaluationPanel';
+import { PostReplayEvaluation } from '@/features/demo/PostReplayEvaluation';
+import { DatasetCatalogPanel } from '@/features/demo/DatasetCatalogPanel';
 
 export function ReplayPage() {
   const queryClient = useQueryClient();
@@ -30,6 +40,8 @@ export function ReplayPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: datasetsData } = useQuery({ queryKey: ['replay-datasets'], queryFn: fetchReplayDatasets });
   const { data: status } = usePollingQuery(['replay'], fetchReplayStatus, 1000);
+  const { data: evaluation } = usePollingQuery(['replay-evaluation'], fetchEvaluationStatus, 1200);
+  const { data: catalogStatus } = usePollingQuery(['dataset-catalog'], fetchDatasetCatalogStatus, 1500);
 
   const [selectedDataset, setSelectedDataset] = useState<string>('');
   const [speed, setSpeed] = useState<'1' | '10' | '100' | 'MAX'>('MAX');
@@ -53,12 +65,19 @@ export function ReplayPage() {
     }
   }, [status?.run_id, searchParams, setSearchParams]);
 
+  React.useEffect(() => {
+    if (catalogStatus?.completed_at_utc) {
+      void queryClient.invalidateQueries({ queryKey: ['replay-datasets'] });
+    }
+  }, [catalogStatus?.completed_at_utc, queryClient]);
+
   const handleAction = async (action: () => Promise<any>) => {
     setIsLoading(true);
     try {
       await action();
       await queryClient.invalidateQueries({ queryKey: ['replay'] });
       await queryClient.invalidateQueries({ queryKey: ['telegram-payloads'] });
+      await queryClient.invalidateQueries({ queryKey: ['replay-evaluation'] });
     } finally {
       setIsLoading(false);
     }
@@ -84,23 +103,34 @@ export function ReplayPage() {
   const metaFinalized = telemetry?.rbta.finalized_meta_alerts ?? 0;
   const latestMeta = telemetry?.latest_meta_alert;
   const decisionCounts = telemetry?.decision_counts;
+  const selectedManifest = datasetsData?.items.find((item) => item.name === selectedDataset);
+  const fullCorpusReady = catalogStatus?.status === 'COMPLETED' && catalogStatus.pending_files === 0 && catalogStatus.failed_files === 0 && catalogStatus.invalid_files === 0;
+  const selectedDatasetReady = selectedDataset === '__ALL__'
+    ? fullCorpusReady
+    : Boolean(selectedManifest && (selectedManifest.inspection_status === 'pending' || selectedManifest.is_valid));
 
   return (
     <>
       <PageHeader
-        breadcrumbs={['Security Analytics', 'Replay']}
-        title="Demonstration Replay Controller"
-        description="Deterministic historical workload replay streaming with calibrated pacing, session isolation, and strict evidence logging"
+        breadcrumbs={['Riset', 'Demo']}
+        title="Demo Sidang RBTA–Isolation Forest"
+        description="Ikuti alur alert mentah → meta-alert → fitur → skor keanehan → keputusan, lengkap dengan batas klaim dan bukti sumber."
       />
 
       <div className="px-6 py-8 lg:px-10 space-y-8">
+        <ResearchBoundaryCard dataset={selectedManifest} modelVersion={status?.model_version || 'rbta-if-v1'} />
+        <DatasetCatalogPanel
+          status={catalogStatus}
+          disabled={!isIdle || isLoading}
+          onRefresh={() => handleAction(refreshDatasetCatalog)}
+        />
         {/* Control Panel Card */}
         <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-5">
           <div className="flex flex-wrap items-center justify-between gap-5">
             <div className="flex flex-wrap items-center gap-5">
               <div>
                 <label className="block text-[11px] font-semibold mb-1.5 text-kumo-subtle uppercase tracking-wider">
-                  Replay Dataset (.jsonl)
+                  Dataset Demo (.jsonl / .jsonl.gz)
                 </label>
                 <div className="w-[280px]">
                   <select
@@ -109,10 +139,10 @@ export function ReplayPage() {
                     disabled={!isIdle || isLoading || !datasetsData?.items?.length}
                     className="w-full px-3.5 py-2 border border-kumo-hairline rounded-lg text-xs font-mono bg-kumo-recessed/40 text-kumo-strong focus:border-kumo-strong outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <option value="__ALL__">All datasets (Sequential)</option>
+                    <option value="__ALL__">Semua dataset (berurutan)</option>
                     {datasetsData?.items?.map((ds) => (
                       <option key={ds.name} value={ds.name}>
-                        {ds.name} ({Math.round(ds.size_bytes / 1024)} KB)
+                        {ds.name} · {ds.classification} · {ds.inspection_status === 'pending' ? 'menunggu indeks' : `${ds.total_events.toLocaleString('id-ID')} alert`}
                       </option>
                     ))}
                   </select>
@@ -121,7 +151,7 @@ export function ReplayPage() {
 
               <div>
                 <label className="block text-[11px] font-semibold mb-1.5 text-kumo-subtle uppercase tracking-wider">
-                  Playback Speed
+                  Kecepatan pemutaran
                 </label>
                 <div className="w-[220px]">
                   <select
@@ -130,10 +160,10 @@ export function ReplayPage() {
                     disabled={!isIdle || isLoading}
                     className="w-full px-3.5 py-2 border border-kumo-hairline rounded-lg text-xs font-mono bg-kumo-recessed/40 text-kumo-strong focus:border-kumo-strong outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    <option value="1">1x (Realtime Clock)</option>
-                    <option value="10">10x Throttled</option>
-                    <option value="100">100x Fast Pacing</option>
-                    <option value="MAX">MAX (Unthrottled Throughput)</option>
+                    <option value="1">1× (mengikuti waktu event)</option>
+                    <option value="10">10×</option>
+                    <option value="100">100×</option>
+                    <option value="MAX">MAX (uji throughput)</option>
                   </select>
                 </div>
               </div>
@@ -146,9 +176,9 @@ export function ReplayPage() {
                   variant="primary"
                   size="sm"
                   onClick={() => handleAction(() => startReplay(selectedDataset, speed))}
-                  disabled={isLoading || !selectedDataset}
+                  disabled={isLoading || !selectedDataset || !selectedDatasetReady}
                 >
-                  <Play size={14} weight="fill" className="mr-1" /> Start Replay
+                  <Play size={14} weight="fill" className="mr-1" /> Mulai Demo
                 </Button>
               )}
 
@@ -159,7 +189,7 @@ export function ReplayPage() {
                   onClick={() => handleAction(pauseReplay)}
                   disabled={isLoading}
                 >
-                  <Pause size={14} weight="fill" className="mr-1" /> Pause
+                  <Pause size={14} weight="fill" className="mr-1" /> Jeda
                 </Button>
               )}
 
@@ -170,7 +200,7 @@ export function ReplayPage() {
                   onClick={() => handleAction(resumeReplay)}
                   disabled={isLoading}
                 >
-                  <FastForward size={14} weight="fill" className="mr-1" /> Resume
+                  <FastForward size={14} weight="fill" className="mr-1" /> Lanjut
                 </Button>
               )}
 
@@ -181,7 +211,7 @@ export function ReplayPage() {
                   onClick={() => handleAction(stopReplay)}
                   disabled={isLoading}
                 >
-                  <Stop size={14} weight="fill" className="mr-1" /> Stop
+                  <Stop size={14} weight="fill" className="mr-1" /> Hentikan
                 </Button>
               )}
 
@@ -191,7 +221,7 @@ export function ReplayPage() {
                 onClick={() => setShowResetConfirm(true)}
                 disabled={isLoading || status?.status === 'IDLE'}
               >
-                <ArrowClockwise size={14} className="mr-1" /> Reset New Run
+                <ArrowClockwise size={14} className="mr-1" /> Siapkan run baru
               </Button>
             </div>
           </div>
@@ -200,7 +230,7 @@ export function ReplayPage() {
           {status && status.total_count > 0 && (
             <div className="pt-4 border-t border-kumo-hairline">
               <div className="flex justify-between text-xs mb-2 font-mono">
-                <span className="text-kumo-subtle">Replay Progress</span>
+                <span className="text-kumo-subtle">Progres demo</span>
                 <span className="font-semibold text-kumo-strong">{progressPercent.toFixed(1)}% ({formatNumber(status.processed_count)} / {formatNumber(status.total_count)})</span>
               </div>
               <div className="w-full h-2.5 rounded-full overflow-hidden bg-kumo-recessed">
@@ -218,7 +248,7 @@ export function ReplayPage() {
           <Banner
             variant="error"
             size="sm"
-            title="Replay Execution Failed"
+            title="Demo gagal dijalankan"
             description={`Dataset: ${String(status.last_error.dataset)} · Line: ${String(status.last_error.line_number)} · Error: ${String(status.last_error.error_message)}`}
           />
         )}
@@ -228,11 +258,11 @@ export function ReplayPage() {
           <Banner
             variant="default"
             size="base"
-            title="Replay Finished Successfully"
-            description={`Processed all ${formatNumber(status.total_count)} alerts in ${formatDuration(status.wall_clock_elapsed_seconds)} (${status.events_per_second.toFixed(1)} ev/s).`}
+            title="Replay selesai dan evidence tersimpan"
+            description={`${formatNumber(status.total_count)} alert diproses dalam ${formatDuration(status.wall_clock_elapsed_seconds)} (${status.events_per_second.toFixed(1)} ev/s). Lanjutkan ke evaluasi lengkap atau telusuri meta-alert.`}
           >
             <Banner.Action onClick={() => navigate(withRunId('/meta-alerts'))}>
-              Investigate MetaAlerts <ArrowRight size={14} className="ml-1" />
+              Telusuri meta-alert <ArrowRight size={14} className="ml-1" />
             </Banner.Action>
           </Banner>
         )}
@@ -253,6 +283,16 @@ export function ReplayPage() {
           decisionCounts={decisionCounts}
         />
 
+        <LiveEvaluationPanel live={telemetry?.evaluation_live} eventsPerSecond={status?.events_per_second ?? 0} />
+
+        <PostReplayEvaluation
+          replayStatus={status?.status}
+          evaluation={evaluation}
+          onStart={() => void handleAction(startEvaluation)}
+          onCancel={() => void handleAction(cancelEvaluation)}
+          onDownload={() => void downloadEvaluationArtifact()}
+        />
+
         {/* Selected Pipeline Stage Deep Inspector */}
         <PipelineStageDetail
           activeStage={activeStage}
@@ -268,10 +308,10 @@ export function ReplayPage() {
 
         {/* Telemetry KPI Metrics */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
-          <MetricCard label="Playback Status" value={status?.status || 'IDLE'} sub="Replay engine lifecycle" />
-          <MetricCard label="Processed Events" value={status ? formatNumber(status.processed_count) : '0'} sub="Events parsed from dataset" />
-          <MetricCard label="Total Dataset Events" value={status ? formatNumber(status.total_count) : '0'} sub="Total lines in dataset" />
-          <MetricCard label="Throughput" value={status ? `${formatNumber(status.events_per_second)} ev/s` : '0 ev/s'} sub="Streaming velocity" />
+          <MetricCard label="Status demo" value={status?.status || 'IDLE'} sub="Siklus hidup replay" />
+          <MetricCard label="Alert diproses" value={status ? formatNumber(status.processed_count) : '0'} sub="Alert valid dari dataset" />
+          <MetricCard label="Total dataset" value={status ? formatNumber(status.total_count) : '0'} sub="Jumlah event pada manifest" />
+          <MetricCard label="Throughput" value={status ? `${formatNumber(status.events_per_second)} ev/s` : '0 ev/s'} sub="Kecepatan pada host demo" />
         </div>
 
         {/* Replay Details Card */}
@@ -320,14 +360,14 @@ export function ReplayPage() {
       {/* Reset Confirmation Dialog */}
       <DialogRoot open={showResetConfirm} onOpenChange={(o) => { if (!o) setShowResetConfirm(false); }}>
         <Dialog className="max-w-md w-full p-6 bg-kumo-canvas border border-kumo-hairline shadow-2xl rounded-xl">
-          <DialogTitle className="text-base font-bold text-kumo-strong">Start New Replay Run?</DialogTitle>
+          <DialogTitle className="text-base font-bold text-kumo-strong">Siapkan run demo baru?</DialogTitle>
           <DialogDescription className="text-xs text-kumo-subtle mt-2 leading-relaxed">
-            Resetting will prepare a clean, isolated workspace for your next replay run. All data and SQLite evidence from the current run ({status?.run_id?.slice(0, 8)}) will remain preserved on disk for audit investigation.
+            Sistem akan membuat workspace terisolasi. Data dan evidence SQLite dari run {status?.run_id?.slice(0, 8)} tetap disimpan untuk audit.
           </DialogDescription>
           <div className="flex justify-end gap-3 pt-4 mt-4 border-t border-kumo-hairline">
             <DialogClose>
               <Button variant="ghost" size="sm" onClick={() => setShowResetConfirm(false)}>
-                Cancel
+                Batal
               </Button>
             </DialogClose>
             <Button
@@ -335,7 +375,7 @@ export function ReplayPage() {
               size="sm"
               onClick={handleConfirmReset}
             >
-              Confirm & Prepare New Run
+              Konfirmasi
             </Button>
           </div>
         </Dialog>

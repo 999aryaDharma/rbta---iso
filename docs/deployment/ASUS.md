@@ -111,7 +111,7 @@ chmod 0600 deploy/asus/.env
 |---|---|---|---|
 | `RBTA_API_KEY` | **MANDATORY** | Secret token for `/api/v1/*` & `/runtime/stats`. Fail-closed if empty. | Random 32+ char token |
 | `RBTA_MODEL_VERSION` | **MANDATORY** | Active model version subdirectory. Fail-closed if empty. | e.g. `reference-v1` |
-| `RBTA_HOST_PORT` | **MANDATORY** | Loopback port bound on host (1024–65535, port 8000 disallowed). | `8011` |
+| `RBTA_HOST_PORT` | **MANDATORY** | Loopback port bound on host (1024–65535, port 8000 disallowed). | `8010` |
 | `RBTA_SOURCE_MODE` | **MANDATORY** | Alert input mode (`DEFERRED` for replay-only deployment). | `DEFERRED` |
 | `RBTA_LOG_LEVEL` | Configurable | Log verbosity (`DEBUG`, `INFO`, `WARNING`). | `INFO` |
 | `RBTA_STATE_HOST_DIR` | Configurable | Host path to state directory. | `/srv/rbta-iso/state` |

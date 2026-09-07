@@ -145,6 +145,7 @@ class RBTAEngine:
         self._temporal_states: Dict[str, AgentTemporalState] = {}
         self._active_buckets: Dict[Tuple[str, str], _ActiveBucket] = {}
         self._seen_alert_ids: Set[str] = set()
+        self._new_seen_alert_ids: Set[str] = set()
         self._meta_id_counter: int = 1
 
     @property
@@ -289,6 +290,7 @@ class RBTAEngine:
             self._active_buckets[k] = b
         self._meta_id_counter += candidate_meta_id_increment
         self._seen_alert_ids.add(alert.wazuh_alert_id)
+        self._new_seen_alert_ids.add(alert.wazuh_alert_id)
 
         return finalized_list
 

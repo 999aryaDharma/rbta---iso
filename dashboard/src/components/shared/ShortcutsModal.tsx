@@ -10,7 +10,7 @@ export function ShortcutsModal({ open, onClose }: { open: boolean; onClose: () =
         { key: 'g o', desc: 'Navigate to Overview Dashboard' },
         { key: 'g m', desc: 'Navigate to MetaAlerts Explorer' },
         { key: 'g r', desc: 'Navigate to RBTA Aggregation Engine' },
-        { key: 'g p', desc: 'Navigate to Demonstration Replay' },
+        { key: 'g d', desc: 'Buka Demo Sidang' },
         { key: 'g s', desc: 'Navigate to System & Pipeline Health' },
       ],
     },

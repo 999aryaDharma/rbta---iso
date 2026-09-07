@@ -22,7 +22,7 @@ export function SystemPage() {
 
       <div className="px-6 py-8 lg:px-10 space-y-8">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
-          <MetricCard label="System Status" value={sys?.system_status ?? 'READY'} sub="Operational health" />
+          <MetricCard label="System Status" value={sys?.system_status ?? '—'} sub="Nilai aktual dari API" />
           <MetricCard label="Model Version" value={sys?.model_version ?? '—'} sub="Registered bundle" />
           <MetricCard label="Tukey Threshold" value={sys ? sys.tukey_threshold.toFixed(4) : '—'} sub="Calibrated anomaly boundary" />
           <MetricCard label="Base Δt (Seconds)" value={sys ? `${sys.base_delta_t_seconds}s` : '—'} sub="Initial aggregation window" />
@@ -90,7 +90,7 @@ export function SystemPage() {
             <dl className="space-y-3 text-xs">
               <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                 <dt className="text-kumo-subtle font-medium">Liveness Probe (/health)</dt>
-                <dd className="font-mono font-bold text-emerald-500">200 OK</dd>
+                <dd className="font-mono font-bold text-emerald-500">API responding</dd>
               </div>
               <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                 <dt className="text-kumo-subtle font-medium">Readiness Probe (/ready)</dt>
@@ -104,7 +104,7 @@ export function SystemPage() {
               </div>
               <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                 <dt className="text-kumo-subtle font-medium">Persistence Mode</dt>
-                <dd className="font-mono font-semibold text-kumo-default">WAL SQLite + RAM Cache</dd>
+                <dd className="font-mono font-semibold text-kumo-default">WAL SQLite + bounded recent cache</dd>
               </div>
               <div className="flex justify-between items-center py-1.5">
                 <dt className="text-kumo-subtle font-medium">RBTA Engine Concurrency</dt>
