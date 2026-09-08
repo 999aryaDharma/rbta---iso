@@ -100,11 +100,11 @@ export function CurrentMetaAlertCard({
             </div>
             <div className="h-2 w-full bg-kumo-recessed rounded-full overflow-hidden flex relative">
               <div
-                className={`h-full transition-all duration-300 ${isEscalate ? 'bg-rose-500' : 'bg-kumo-strong'}`}
+                className={`h-full transition-all duration-300 ${isEscalate ? 'bg-rose-500' : 'bg-kumo-brand'}`}
                 style={{ width: `${Math.min(100, Math.max(0, score * 100))}%` }}
               />
               <div
-                className="absolute top-0 bottom-0 w-0.5 bg-kumo-strong z-10"
+                className="absolute top-0 bottom-0 w-0.5 bg-kumo-brand z-10"
                 style={{ left: `${Math.min(100, Math.max(0, threshold * 100))}%` }}
                 title={`Threshold: ${threshold.toFixed(6)}`}
               />

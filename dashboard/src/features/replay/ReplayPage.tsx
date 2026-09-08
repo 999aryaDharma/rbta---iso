@@ -95,6 +95,7 @@ export function ReplayPage() {
   const isRunning = status?.status === 'RUNNING';
   const isPaused = status?.status === 'PAUSED';
   const progressPercent = status ? status.progress * 100 : 0;
+  const progressFill = Math.min(100, Math.max(0, progressPercent));
 
   const withRunId = (path: string) => (status?.run_id ? `${path}${path.includes('?') ? '&' : '?'}run_id=${encodeURIComponent(status.run_id)}` : path);
 
@@ -237,8 +238,13 @@ export function ReplayPage() {
               </div>
               <div className="w-full h-2.5 rounded-full overflow-hidden bg-kumo-recessed">
                 <div
-                  className="h-full bg-kumo-strong transition-all duration-300 rounded-full"
-                  style={{ width: status.total_count > 0 ? `${progressPercent}%` : '100%' }}
+                  className="h-full bg-kumo-brand transition-all duration-300 rounded-full"
+                  style={{ width: status.total_count > 0 ? `${progressFill}%` : '100%' }}
+                  role="progressbar"
+                  aria-label="Progres replay"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(progressFill)}
                 />
               </div>
             </div>

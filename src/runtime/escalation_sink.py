@@ -10,6 +10,7 @@ import threading
 from typing import Any, Dict, List, Optional, Set
 
 from src.contracts.scored_meta_alert import ScoredMetaAlert
+from src.api.telegram_formatter import format_telegram_alert
 
 logger = logging.getLogger(__name__)
 
@@ -85,12 +86,7 @@ class DeferredTelegramFileSink(EscalationSink):
             threshold_val = float(scored.threshold_used)
             score_val = float(scored.anomaly_score)
 
-            message = (
-                f"[{scored.decision}] MetaAlert #{scored.meta_id} | "
-                f"{scored.rule_group_primary} | {scored.alert_count} alerts | "
-                f"severity {scored.max_severity} | "
-                f"anomaly {score_val:.6f} > threshold {threshold_val:.6f}"
-            )
+            message = format_telegram_alert(scored, run_id=run_id)
 
             payload = {
                 "timestamp": now_iso,
@@ -108,6 +104,7 @@ class DeferredTelegramFileSink(EscalationSink):
                 "alert_count": scored.alert_count,
                 "max_severity": scored.max_severity,
                 "message": message,
+                "parse_mode": "HTML",
             }
 
             try:

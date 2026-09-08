@@ -75,6 +75,8 @@ def test_deferred_telegram_sink_escalate_emits(tmp_path: Path):
     assert p["alert_count"] == 12
     assert p["max_severity"] == 9
     assert "authentication_failed" in p["message"]
+    assert p["parse_mode"] == "HTML"
+    assert "Run:</b> <code>run-alpha</code>" in p["message"]
 
 
 def test_deferred_telegram_sink_ignores_non_escalate(tmp_path: Path):

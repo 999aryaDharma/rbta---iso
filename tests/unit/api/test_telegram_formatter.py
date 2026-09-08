@@ -33,10 +33,13 @@ def test_telegram_formatter_presentation_only():
 
     msg = format_telegram_alert(meta)
 
-    assert "🚨 *SECURITY META-ALERT: CRITICAL*" in msg
-    assert "db-prod (ID: `001`)" in msg
+    assert "<b>SECURITY META-ALERT: CRITICAL</b>" in msg
+    assert "<b>Decision:</b> CRITICAL | <b>Action:</b> ESCALATE" in msg
+    assert "db-prod (001)" in msg
     assert "sql_injection" in msg
-    assert "25 raw alerts" in msg
+    assert "Evidence:</b> 25" in msg
     assert "0.9500" in msg
     assert "0.6800" in msg
     assert "Initial Access, Impact" in msg
+    assert "WITA" in msg
+    assert "bukan bukti serangan" in msg
