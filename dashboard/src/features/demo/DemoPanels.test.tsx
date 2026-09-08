@@ -113,4 +113,10 @@ describe('thesis Demo explanation panels', () => {
     expect(screen.getByRole('img', { name: /histogram distribusi null permutation silhouette/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /unduh artifact/i })).toBeInTheDocument();
   });
+
+  it('uses plain-language labels and keeps the score distribution readable without color alone', () => {
+    render(<LiveEvaluationPanel live={live} eventsPerSecond={1250} />);
+    expect(screen.getByText(/hasil sementara saat replay berjalan/i)).toBeInTheDocument();
+    expect(screen.getByRole('table', { name: /angka distribusi skor model/i })).toBeInTheDocument();
+  });
 });

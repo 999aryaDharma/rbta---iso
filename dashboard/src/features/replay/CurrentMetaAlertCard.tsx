@@ -24,42 +24,41 @@ export function CurrentMetaAlertCard({
   const score = latestMeta?.anomaly_score ?? 0;
   const threshold = latestMeta?.threshold_used ?? 0;
   const margin = latestMeta?.margin ?? (score - threshold);
-  const isEscalate = latestMeta?.action === 'ESCALATE';
 
   return (
     <div className="rounded-xl border border-kumo-hairline bg-kumo-canvas p-6 shadow-xs space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-4 pb-3 border-b border-kumo-hairline">
         <div className="flex items-center gap-3">
           <div className="text-xs font-semibold uppercase tracking-wider text-kumo-strong">
-            Current Scored MetaAlert
+            MetaAlert terbaru
           </div>
           {latestMeta ? (
             <Badge variant="secondary">
               #{latestMeta.meta_id}
             </Badge>
           ) : (
-            <span className="text-xs text-kumo-subtle italic">Awaiting first finalized bucket...</span>
+            <span className="text-xs text-kumo-subtle italic">Menunggu kelompok alert pertama selesai diproses.</span>
           )}
         </div>
 
-        {/* Global Reduction & Decision KPI counters */}
+        {/* Ringkasan tindakan yang sudah dibuat */}
         <div className="flex flex-wrap items-center gap-4 text-xs font-mono">
           <div className="flex items-center gap-1.5 text-kumo-subtle">
-            <span>Reduction:</span>
+            <span>Pengurangan:</span>
             <span className="font-semibold text-kumo-strong">{reductionRate.toFixed(1)}%</span>
-            <span className="text-[11px] text-kumo-subtle">({formatNumber(rawProcessed)} raw → {formatNumber(metaFinalized)} meta)</span>
+            <span className="text-[11px] text-kumo-subtle">({formatNumber(rawProcessed)} alert → {formatNumber(metaFinalized)} kelompok)</span>
           </div>
 
           <div className="flex items-center gap-3 pl-3 border-l border-kumo-hairline">
             <span className="text-rose-500 font-semibold flex items-center gap-1">
-              <Warning size={13} /> ESCALATE: {decisionCounts.ESCALATE || 0}
+              <Warning size={13} /> Perlu perhatian: {decisionCounts.ESCALATE || 0}
             </span>
             <span className="text-kumo-subtle flex items-center gap-1">
-              SUPPRESS: {decisionCounts.SUPPRESS || 0}
+              Disembunyikan: {decisionCounts.SUPPRESS || 0}
             </span>
             {decisionCounts.DAILY_DIGEST ? (
               <span className="text-kumo-subtle flex items-center gap-1">
-                DIGEST: {decisionCounts.DAILY_DIGEST}
+                Ringkasan harian: {decisionCounts.DAILY_DIGEST}
               </span>
             ) : null}
           </div>
@@ -70,67 +69,55 @@ export function CurrentMetaAlertCard({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 pt-1">
           {/* Target Metadata */}
           <div className="space-y-1.5">
-            <div className="text-[11px] text-kumo-subtle uppercase tracking-wider font-semibold">Agent & Rule Group</div>
+            <div className="text-[11px] text-kumo-subtle uppercase tracking-wider font-semibold">Sumber alert</div>
             <div className="font-mono text-xs font-semibold text-kumo-strong truncate">
               {latestMeta.agent_name} ({latestMeta.agent_id})
             </div>
             <div className="font-mono text-xs text-kumo-subtle">
-              Group: <span className="text-kumo-default font-medium">{latestMeta.rule_group_primary}</span>
+              Kelompok aturan: <span className="text-kumo-default font-medium">{latestMeta.rule_group_primary}</span>
             </div>
           </div>
 
           {/* Member alerts & Severity */}
           <div className="space-y-1.5">
-            <div className="text-[11px] text-kumo-subtle uppercase tracking-wider font-semibold">Aggregation Summary</div>
+            <div className="text-[11px] text-kumo-subtle uppercase tracking-wider font-semibold">Ringkasan kelompok</div>
             <div className="text-xs text-kumo-default">
-              <span className="font-mono font-bold text-kumo-strong">{latestMeta.alert_count}</span> raw alerts clustered
+              <span className="font-mono font-bold text-kumo-strong">{latestMeta.alert_count}</span> alert digabungkan
             </div>
             <div className="text-xs text-kumo-subtle">
-              Max Severity: <span className="font-mono font-semibold text-kumo-default">{latestMeta.max_severity}</span> / 15
+              Tingkat tertinggi: <span className="font-mono font-semibold text-kumo-default">{latestMeta.max_severity}</span> / 15
             </div>
           </div>
 
-          {/* Anomaly Score vs Threshold */}
+          {/* Perbandingan angka tanpa mengubah rentang aslinya */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-[11px]">
-              <span className="text-kumo-subtle uppercase tracking-wider font-semibold">Anomaly vs Tukey</span>
-              <span className={`font-mono font-bold ${margin >= 0 ? 'text-rose-500' : 'text-kumo-subtle'}`}>
+              <span className="text-kumo-subtle uppercase tracking-wider font-semibold">Skor dan batas</span>
+              <span className="font-mono font-bold text-kumo-strong">
                 {margin >= 0 ? `+${margin.toFixed(4)}` : margin.toFixed(4)}
               </span>
             </div>
-            <div className="h-2 w-full bg-kumo-recessed rounded-full overflow-hidden flex relative">
-              <div
-                className={`h-full transition-all duration-300 ${isEscalate ? 'bg-rose-500' : 'bg-kumo-brand'}`}
-                style={{ width: `${Math.min(100, Math.max(0, score * 100))}%` }}
-              />
-              <div
-                className="absolute top-0 bottom-0 w-0.5 bg-kumo-brand z-10"
-                style={{ left: `${Math.min(100, Math.max(0, threshold * 100))}%` }}
-                title={`Threshold: ${threshold.toFixed(6)}`}
-              />
-            </div>
             <div className="flex justify-between text-[10px] font-mono text-kumo-subtle">
-              <span>Score: {score.toFixed(4)}</span>
-              <span>Tukey: {threshold.toFixed(4)}</span>
+              <span>Skor: {score.toFixed(4)}</span>
+              <span>Batas: {threshold.toFixed(4)}</span>
             </div>
+            <p className="text-[10px] leading-4 text-kumo-subtle">{margin >= 0 ? 'Skor berada di atas batas.' : 'Skor berada di bawah batas.'} Angka asli ditampilkan tanpa dipotong.</p>
           </div>
 
-          {/* Decision & Action */}
+          {/* Keputusan dan tindakan adalah dua hal berbeda */}
           <div className="space-y-1.5 flex flex-col justify-center">
-            <div className="text-[11px] text-kumo-subtle uppercase tracking-wider font-semibold">Decision & Action</div>
+            <div className="text-[11px] text-kumo-subtle uppercase tracking-wider font-semibold">Hasil dan tindakan</div>
             <div className="flex items-center gap-2">
               {latestMeta.decision && (
                 <DecisionBadge decision={latestMeta.decision} action={latestMeta.action || 'SUPPRESS'} />
               )}
-              <Badge variant={isEscalate ? 'error' : 'secondary'}>
-                {latestMeta.action || 'SUPPRESS'}
-              </Badge>
             </div>
+            <p className="text-[10px] leading-4 text-kumo-subtle">Tindakan membantu urutan triase; ini bukan bukti bahwa terjadi serangan.</p>
           </div>
         </div>
       ) : (
         <div className="py-6 text-center text-xs text-kumo-subtle font-mono">
-          Pipeline streaming — awaiting next temporal aggregation window to close and score.
+          Data sedang diproses. MetaAlert akan muncul setelah satu kelompok alert selesai.
         </div>
       )}
     </div>

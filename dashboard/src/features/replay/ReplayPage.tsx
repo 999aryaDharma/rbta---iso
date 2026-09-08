@@ -132,15 +132,16 @@ export function ReplayPage() {
           <div className="flex flex-wrap items-center justify-between gap-5">
             <div className="flex flex-wrap items-center gap-5">
               <div>
-                <label className="block text-[11px] font-semibold mb-1.5 text-kumo-subtle uppercase tracking-wider">
-                  Dataset Demo (.jsonl / .jsonl.gz)
+                <label htmlFor="demo-dataset" className="block text-[11px] font-semibold mb-1.5 text-kumo-subtle uppercase tracking-wider">
+                  Dataset untuk demo
                 </label>
-                <div className="w-[280px]">
+                <div className="w-full min-w-0 sm:w-70">
                   <select
+                    id="demo-dataset"
                     value={selectedDataset}
                     onChange={(e) => setSelectedDataset(e.target.value)}
                     disabled={!isIdle || isLoading || !datasetsData?.items?.length}
-                    className="w-full px-3.5 py-2 border border-kumo-hairline rounded-lg text-xs font-mono bg-kumo-recessed/40 text-kumo-strong focus:border-kumo-strong outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3.5 py-2 border border-kumo-hairline rounded-lg text-sm bg-kumo-recessed/40 text-kumo-strong focus-visible:ring-2 focus-visible:ring-kumo-brand cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="__ALL__">Semua dataset (berurutan)</option>
                     {datasetsData?.items?.map((ds) => (
@@ -153,20 +154,21 @@ export function ReplayPage() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold mb-1.5 text-kumo-subtle uppercase tracking-wider">
-                  Kecepatan pemutaran
+                <label htmlFor="demo-speed" className="block text-[11px] font-semibold mb-1.5 text-kumo-subtle uppercase tracking-wider">
+                  Kecepatan demo
                 </label>
-                <div className="w-[220px]">
+                <div className="w-full min-w-0 sm:w-56">
                   <select
+                    id="demo-speed"
                     value={speed}
                     onChange={(e) => setSpeed(e.target.value as any)}
                     disabled={!isIdle || isLoading}
-                    className="w-full px-3.5 py-2 border border-kumo-hairline rounded-lg text-xs font-mono bg-kumo-recessed/40 text-kumo-strong focus:border-kumo-strong outline-none cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full px-3.5 py-2 border border-kumo-hairline rounded-lg text-sm bg-kumo-recessed/40 text-kumo-strong focus-visible:ring-2 focus-visible:ring-kumo-brand cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <option value="1">1× (mengikuti waktu event)</option>
                     <option value="10">10×</option>
                     <option value="100">100×</option>
-                    <option value="MAX">MAX (uji throughput)</option>
+                    <option value="MAX">Cepat sekali (untuk uji kecepatan)</option>
                   </select>
                 </div>
               </div>
@@ -257,7 +259,7 @@ export function ReplayPage() {
             variant="error"
             size="sm"
             title="Demo gagal dijalankan"
-            description={`Dataset: ${String(status.last_error.dataset)} · Line: ${String(status.last_error.line_number)} · Error: ${String(status.last_error.error_message)}`}
+            description={`Data berhenti di baris ${String(status.last_error.line_number)} pada ${String(status.last_error.dataset)}. Pilih data lain yang valid atau siapkan run baru. Detail: ${String(status.last_error.error_message)}`}
           />
         )}
 
@@ -275,34 +277,34 @@ export function ReplayPage() {
           </Banner>
         )}
 
-        {/* Processing Pipeline Visualizer */}
+        <section aria-labelledby="demo-replay-heading"><div className="mb-3"><h2 id="demo-replay-heading" className="text-lg font-bold text-kumo-strong">1. Jalankan dan amati proses</h2><p className="text-sm text-kumo-subtle">Klik satu langkah untuk melihat penjelasannya. Animasi hanya menunjukkan pembaruan data terbaru.</p></div>
         <ReplayPipelineVisualizer
           status={status}
           telemetry={telemetry}
           activeStage={activeStage}
           onSelectStage={setActiveStage}
-        />
+        /></section>
 
         {/* Current Scored MetaAlert Card */}
-        <CurrentMetaAlertCard
+        <section aria-labelledby="demo-result-heading"><div className="mb-3"><h2 id="demo-result-heading" className="text-lg font-bold text-kumo-strong">2. Periksa hasil terbaru</h2><p className="text-sm text-kumo-subtle">Lihat kelompok alert yang baru selesai dan alasan prioritasnya.</p></div><CurrentMetaAlertCard
           latestMeta={latestMeta}
           rawProcessed={rawProcessed}
           metaFinalized={metaFinalized}
           decisionCounts={decisionCounts}
-        />
+        /></section>
 
         <LiveEvaluationPanel live={telemetry?.evaluation_live} eventsPerSecond={status?.events_per_second ?? 0} />
 
-        <PostReplayEvaluation
+        <section aria-labelledby="demo-evaluation-heading"><div className="mb-3"><h2 id="demo-evaluation-heading" className="text-lg font-bold text-kumo-strong">3. Lihat hasil evaluasi</h2><p className="text-sm text-kumo-subtle">Evaluasi membantu menilai pengelompokan dan waktu proses, bukan membuktikan serangan.</p></div><PostReplayEvaluation
           replayStatus={status?.status}
           evaluation={evaluation}
           onStart={() => void handleAction(startEvaluation)}
           onCancel={() => void handleAction(cancelEvaluation)}
           onDownload={() => void downloadEvaluationArtifact()}
-        />
+        /></section>
 
         {/* Selected Pipeline Stage Deep Inspector */}
-        <PipelineStageDetail
+        <section aria-labelledby="demo-detail-heading"><div className="mb-3"><h2 id="demo-detail-heading" className="text-lg font-bold text-kumo-strong">4. Lihat rincian dan bukti</h2><p className="text-sm text-kumo-subtle">Gunakan bagian ini ketika audiens ingin membahas satu langkah atau isi pesan yang disiapkan.</p></div><PipelineStageDetail
           activeStage={inspectedStage}
           telemetry={telemetry}
           status={status}
@@ -312,7 +314,7 @@ export function ReplayPage() {
         <ProcessingTrace trace={telemetry?.trace} />
 
         {/* Deferred Telegram Payload Outbox */}
-        <DeferredTelegramOutbox />
+        <DeferredTelegramOutbox /></section>
 
         {/* Telemetry KPI Metrics */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
