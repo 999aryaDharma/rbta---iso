@@ -47,7 +47,7 @@ export function ReplayPage() {
   const [speed, setSpeed] = useState<'1' | '10' | '100' | 'MAX'>('MAX');
   const [isLoading, setIsLoading] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [activeStage, setActiveStage] = useState<PipelineStageId>('RBTA');
+  const [activeStage, setActiveStage] = useState<PipelineStageId | null>(null);
 
   // Set default dataset once loaded
   React.useEffect(() => {
@@ -108,6 +108,8 @@ export function ReplayPage() {
   const selectedDatasetReady = selectedDataset === '__ALL__'
     ? fullCorpusReady
     : Boolean(selectedManifest && (selectedManifest.inspection_status === 'pending' || selectedManifest.is_valid));
+  const liveStage: PipelineStageId = telemetry?.latest_meta_alert ? 'DECISION' : 'RBTA';
+  const inspectedStage = activeStage ?? liveStage;
 
   return (
     <>
@@ -295,7 +297,7 @@ export function ReplayPage() {
 
         {/* Selected Pipeline Stage Deep Inspector */}
         <PipelineStageDetail
-          activeStage={activeStage}
+          activeStage={inspectedStage}
           telemetry={telemetry}
           status={status}
         />

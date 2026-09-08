@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { ReplayStatus, PipelineTelemetry } from '@/api/schemas';
 import { formatNumber } from '@/lib/formatters';
 import {
@@ -31,7 +31,7 @@ export type PipelineStageId =
 interface ReplayPipelineVisualizerProps {
   status: ReplayStatus | undefined;
   telemetry: PipelineTelemetry | undefined;
-  activeStage: PipelineStageId;
+  activeStage: PipelineStageId | null;
   onSelectStage: (stage: PipelineStageId) => void;
 }
 
@@ -54,6 +54,18 @@ export function ReplayPipelineVisualizer({
   const activeAgents = telemetry?.rbta.active_agents ?? 0;
   const latestMeta = telemetry?.latest_meta_alert;
   const telegramCount = telemetry?.output.telegram_deferred_count ?? 0;
+  const [processing, setProcessing] = useState<Set<PipelineStageId>>(new Set());
+  const previous = useRef({ rawProcessed, evidenceCount, finalizedCount, telegramCount });
+  useEffect(() => {
+    if (!isRunning) { setProcessing(new Set()); previous.current = { rawProcessed, evidenceCount, finalizedCount, telegramCount }; return; }
+    const changed = new Set<PipelineStageId>(); const prior = previous.current;
+    if (rawProcessed > prior.rawProcessed) ['DATASET', 'CANONICAL', 'EVIDENCE', 'RBTA'].forEach((id) => changed.add(id as PipelineStageId));
+    if (evidenceCount > prior.evidenceCount) changed.add('EVIDENCE');
+    if (finalizedCount > prior.finalizedCount) ['META_ALERT', 'FEATURES', 'ISOLATION_FOREST', 'DECISION'].forEach((id) => changed.add(id as PipelineStageId));
+    if (telegramCount > prior.telegramCount) changed.add('OUTPUT_SINK');
+    previous.current = { rawProcessed, evidenceCount, finalizedCount, telegramCount };
+    if (changed.size) { setProcessing(changed); const timer = window.setTimeout(() => setProcessing(new Set()), 600); return () => window.clearTimeout(timer); }
+  }, [isRunning, rawProcessed, evidenceCount, finalizedCount, telegramCount]);
 
   const phases = [
     {
@@ -227,6 +239,7 @@ export function ReplayPipelineVisualizer({
             <div className="space-y-2.5">
               {phase.stages.map((st, sIdx) => {
                 const isSelected = activeStage === st.id;
+                const isProcessing = processing.has(st.id);
                 const Icon = st.icon;
 
                 return (
@@ -272,10 +285,9 @@ export function ReplayPipelineVisualizer({
                         </div>
                       </div>
 
-                      {/* Active Pulse Indicator */}
-                      {isRunning && isSelected && (
+                      {isProcessing && (
                         <div
-                          className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"
+                          className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full bg-blue-500 motion-safe:animate-ping"
                           aria-hidden="true"
                         />
                       )}
