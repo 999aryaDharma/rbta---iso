@@ -25,7 +25,7 @@ export function ProcessingTrace({ trace }: ProcessingTraceProps) {
         </Badge>
       </div>
 
-      <div className="h-52 overflow-y-auto rounded-lg bg-kumo-recessed/30 border border-kumo-hairline p-3 space-y-1.5 font-mono text-[11px]">
+      <div className="rounded-lg bg-kumo-recessed/30 border border-kumo-hairline p-3 space-y-1.5 font-mono text-[11px]">
         {items.length > 0 ? (
           items.map((item, idx) => (
             <div key={`${item.timestamp}-${idx}`} className="flex items-start gap-2.5 py-0.5 leading-relaxed">
@@ -40,7 +40,7 @@ export function ProcessingTrace({ trace }: ProcessingTraceProps) {
             </div>
           ))
         ) : (
-          <div className="h-full flex items-center justify-center text-xs text-kumo-subtle italic">
+          <div className="min-h-32 flex items-center justify-center text-xs text-kumo-subtle italic">
             Trace buffer idle. Start or resume replay to observe live stream operations.
           </div>
         )}
