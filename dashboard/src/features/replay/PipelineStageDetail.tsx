@@ -48,8 +48,8 @@ export function PipelineStageDetail({
             Exact Seven-Dimensional Numerical Feature Vector extracted from the latest finalized MetaAlert (#{latestMeta?.meta_id ?? '—'}).
           </div>
           {latestMeta?.seven_features ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs font-mono border-collapse">
+            <div className="min-w-0">
+              <table className="w-full table-fixed text-xs font-mono border-collapse">
                 <thead>
                   <tr className="border-b border-kumo-hairline text-kumo-subtle text-[11px]">
                     <th className="py-1.5 px-2 text-left font-medium">Feature Key</th>
@@ -59,49 +59,49 @@ export function PipelineStageDetail({
                 </thead>
                 <tbody className="divide-y divide-kumo-hairline">
                   <tr>
-                    <td className="py-1.5 px-2 font-semibold text-kumo-default">max_severity</td>
+                    <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">max_severity</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
                       {latestMeta.seven_features['max_severity']?.toFixed(6) ?? '—'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Highest Wazuh rule level observed in cluster (1–15)</td>
                   </tr>
                   <tr>
-                    <td className="py-1.5 px-2 font-semibold text-kumo-default">mitre_tactic_count</td>
+                    <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">mitre_tactic_count</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
                       {latestMeta.seven_features['mitre_tactic_count']?.toFixed(6) ?? '—'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Distinct MITRE ATT&CK tactics involved</td>
                   </tr>
                   <tr>
-                    <td className="py-1.5 px-2 font-semibold text-kumo-default">critical_mitre_tactic_present</td>
+                    <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">critical_mitre_tactic_present</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
                       {latestMeta.seven_features['critical_mitre_tactic_present']?.toFixed(6) ?? '—'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Binary flag (1.0 = Exfiltration / Privilege Escalation / Impact present)</td>
                   </tr>
                   <tr>
-                    <td className="py-1.5 px-2 font-semibold text-kumo-default">alert_count_log</td>
+                    <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">alert_count_log</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
                       {latestMeta.seven_features['alert_count_log']?.toFixed(6) ?? '—'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Natural logarithm of cluster size: ln(1 + count)</td>
                   </tr>
                   <tr>
-                    <td className="py-1.5 px-2 font-semibold text-kumo-default">rule_diversity_shannon</td>
+                    <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">rule_diversity_shannon</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
                       {latestMeta.seven_features['rule_diversity_shannon']?.toFixed(6) ?? '—'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Shannon entropy of rule_id distribution in bucket</td>
                   </tr>
                   <tr>
-                    <td className="py-1.5 px-2 font-semibold text-kumo-default">severity_dispersion</td>
+                    <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">severity_dispersion</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
                       {latestMeta.seven_features['severity_dispersion']?.toFixed(6) ?? '—'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Normalized standard deviation of alert severities</td>
                   </tr>
                   <tr>
-                    <td className="py-1.5 px-2 font-semibold text-kumo-default">agent_criticality</td>
+                    <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">agent_criticality</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
                       {latestMeta.seven_features['agent_criticality']?.toFixed(6) ?? '—'}
                     </td>
@@ -231,7 +231,7 @@ export function PipelineStageDetail({
                   <span>{copied ? 'Copied' : 'Copy JSON'}</span>
                 </button>
               </div>
-              <pre className="p-3 rounded bg-kumo-recessed border border-kumo-hairline font-mono text-[11px] text-kumo-default overflow-x-auto">
+              <pre className="whitespace-pre-wrap break-all p-3 rounded bg-kumo-recessed border border-kumo-hairline font-mono text-[11px] text-kumo-default">
                 {JSON.stringify(telemetry.output.latest_payload, null, 2)}
               </pre>
             </div>

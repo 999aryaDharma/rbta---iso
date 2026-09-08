@@ -66,8 +66,8 @@ export function DeferredTelegramOutbox() {
           Loading recorded escalation payloads...
         </div>
       ) : payloads.length > 0 ? (
-        <div className="overflow-x-auto rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs">
-          <Table>
+        <div className="min-w-0 rounded-lg border border-kumo-hairline bg-kumo-canvas shadow-xs">
+          <Table className="w-full table-fixed">
             <Table.Header>
               <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
                 <Table.Head>Timestamp</Table.Head>
@@ -89,7 +89,7 @@ export function DeferredTelegramOutbox() {
                     </Table.Cell>
                     <Table.Cell className="font-semibold text-kumo-strong">
                       <div>#{p.meta_id}</div>
-                      <div className="text-[10px] text-kumo-subtle font-normal">{p.idempotency_key}</div>
+                      <div className="break-all text-[10px] text-kumo-subtle font-normal">{p.idempotency_key}</div>
                     </Table.Cell>
                     <Table.Cell>
                       <Badge variant="error">
@@ -97,7 +97,7 @@ export function DeferredTelegramOutbox() {
                       </Badge>
                     </Table.Cell>
                     <Table.Cell className="text-[11px]">
-                      <div className="font-medium text-kumo-strong">{p.rule_group_primary}</div>
+                      <div className="break-words font-medium text-kumo-strong">{p.rule_group_primary}</div>
                       <div className="text-kumo-subtle text-[10px]">{p.agent_name} ({p.agent_id})</div>
                     </Table.Cell>
                     <Table.Cell className="text-[11px]">

@@ -7,7 +7,7 @@ interface ProcessingTraceProps {
 }
 
 export function ProcessingTrace({ trace }: ProcessingTraceProps) {
-  const items = trace || [];
+  const items = (trace || []).slice(-10);
 
   return (
     <div className="rounded-xl border border-kumo-hairline bg-kumo-canvas p-6 shadow-xs space-y-4">
@@ -25,7 +25,7 @@ export function ProcessingTrace({ trace }: ProcessingTraceProps) {
         </Badge>
       </div>
 
-      <div className="rounded-lg bg-kumo-recessed/30 border border-kumo-hairline p-3 space-y-1.5 font-mono text-[11px]">
+      <div className="h-52 overflow-y-auto rounded-lg bg-kumo-recessed/30 border border-kumo-hairline p-3 space-y-1.5 font-mono text-[11px]">
         {items.length > 0 ? (
           items.map((item, idx) => (
             <div key={`${item.timestamp}-${idx}`} className="flex items-start gap-2.5 py-0.5 leading-relaxed">

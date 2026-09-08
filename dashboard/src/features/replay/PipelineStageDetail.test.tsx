@@ -54,8 +54,8 @@ describe('PipelineStageDetail component', () => {
     model_version: 'rbta-if-v1',
   };
 
-  it('renders 7-features table when activeStage is FEATURES', () => {
-    render(
+  it('renders 7-features table without an internal horizontal scroll area', () => {
+    const { container } = render(
       <PipelineStageDetail
         activeStage="FEATURES"
         telemetry={mockTelemetry}
@@ -67,6 +67,7 @@ describe('PipelineStageDetail component', () => {
     expect(screen.getByText('mitre_tactic_count')).toBeDefined();
     expect(screen.getByText('critical_mitre_tactic_present')).toBeDefined();
     expect(screen.getByText('alert_count_log')).toBeDefined();
+    expect(container.querySelector('.overflow-x-auto')).toBeNull();
   });
 
   it('renders model calibration and threshold margin when activeStage is DECISION', () => {
