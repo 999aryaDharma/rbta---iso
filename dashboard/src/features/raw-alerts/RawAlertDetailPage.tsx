@@ -36,7 +36,7 @@ export function RawAlertDetailPage() {
     enabled: Boolean(numericMetaId),
   });
 
-  const sourceIds = trace?.source_alert_ids || [];
+  const sourceIds = trace?.members.map((member) => member.wazuh_alert_id) || [];
   const currentIndex = alertId ? sourceIds.indexOf(alertId) : -1;
   const prevId = currentIndex > 0 ? sourceIds[currentIndex - 1] : null;
   const nextId = currentIndex >= 0 && currentIndex < sourceIds.length - 1 ? sourceIds[currentIndex + 1] : null;

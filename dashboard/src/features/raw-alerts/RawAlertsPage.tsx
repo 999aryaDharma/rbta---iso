@@ -12,6 +12,12 @@ import { Pagination } from '@cloudflare/kumo/components/pagination';
 import { MagnifyingGlass, ArrowLeft } from '@phosphor-icons/react';
 import { useEffect, useState } from 'react';
 
+const RAW_ALERT_PAGE_SIZE = 20;
+
+function ruleDescription(description: string, ruleId: string) {
+  return description.trim() || `Rule ${ruleId}`;
+}
+
 export function RawAlertsPage() {
   const { metaId } = useParams();
   const navigate = useNavigate();
@@ -47,7 +53,7 @@ export function RawAlertsPage() {
     queryFn: () =>
       fetchMetaAlertRawAlerts(id, {
         page,
-        page_size: 10,
+        page_size: RAW_ALERT_PAGE_SIZE,
         search: urlSearch || undefined,
         run_id: runId || undefined,
       }),
@@ -57,14 +63,14 @@ export function RawAlertsPage() {
 
   // Prefetch next page
   useEffect(() => {
-    const totalPages = data ? Math.ceil(data.filtered_total / 20) || 1 : 1;
+    const totalPages = data ? Math.ceil(data.filtered_total / RAW_ALERT_PAGE_SIZE) || 1 : 1;
     if (data && page < totalPages) {
       queryClient.prefetchQuery({
         queryKey: ['raw-alerts', id, page + 1, urlSearch, runId || 'live'],
         queryFn: () =>
           fetchMetaAlertRawAlerts(id, {
             page: page + 1,
-            page_size: 20,
+            page_size: RAW_ALERT_PAGE_SIZE,
             search: urlSearch || undefined,
             run_id: runId || undefined,
           }),
@@ -107,7 +113,7 @@ export function RawAlertsPage() {
             <InputGroup>
               <InputGroup.Addon align="start"><MagnifyingGlass size={14} className="text-kumo-subtle" /></InputGroup.Addon>
               <InputGroup.Input
-                placeholder="Search Alert ID, Rule Name, IP, Desc..."
+                placeholder="Cari Alert ID, Rule ID, signature, IP…"
                 value={localSearch}
                 onChange={(e) => setLocalSearch(e.target.value)}
               />
@@ -129,7 +135,7 @@ export function RawAlertsPage() {
               <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
                 <Table.Head>Timestamp</Table.Head>
                 <Table.Head>Wazuh Alert ID</Table.Head>
-                <Table.Head>Rule Name</Table.Head>
+                <Table.Head>Rule ID</Table.Head>
                 <Table.Head className="text-right">Level</Table.Head>
                 <Table.Head>Description</Table.Head>
                 <Table.Head>Source IP</Table.Head>
@@ -151,7 +157,7 @@ export function RawAlertsPage() {
                   </Table.Cell>
                   <Table.Cell className="font-mono text-xs text-kumo-default">{a.rule_id}</Table.Cell>
                   <Table.Cell className="text-xs text-right font-mono font-bold text-kumo-strong">{a.rule_level}</Table.Cell>
-                  <Table.Cell className="text-xs truncate max-w-[240px] text-kumo-default">{a.rule_description}</Table.Cell>
+                  <Table.Cell className="max-w-[320px] text-xs text-kumo-default"><span title={ruleDescription(a.rule_description, a.rule_id)} className="line-clamp-2">{ruleDescription(a.rule_description, a.rule_id)}</span></Table.Cell>
                   <Table.Cell className="font-mono text-xs text-kumo-subtle">{a.srcip || '—'}</Table.Cell>
                   <Table.Cell className="text-xs">
                     {a.mitre_tactics && a.mitre_tactics.length > 0 ? (
@@ -181,7 +187,7 @@ export function RawAlertsPage() {
                 params.set('page', String(p));
                 setSearchParams(params);
               }}
-              perPage={10}
+              perPage={RAW_ALERT_PAGE_SIZE}
               totalCount={data?.filtered_total ?? 0}
             >
               <Pagination.Info />
