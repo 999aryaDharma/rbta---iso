@@ -160,6 +160,13 @@ describe('Zod v4 Schema Validation & Contract Integrity', () => {
     expect(result.resolved_total).toBe(1);
   });
 
+  it('adapts the deployed legacy trace response into explicit unresolved members', () => {
+    const trace = TraceSchema.parse({ meta_id: 9, agent_id: '001', rule_group: 'ssh', decision: 'SUSPICIOUS', action: 'ESCALATE', model_version: 'legacy-v1', source_alert_ids: ['a', 'b'], count: 2 });
+    expect(trace.rule_group_primary).toBe('ssh');
+    expect(trace.unresolved_alert_ids).toEqual(['a', 'b']);
+    expect(trace.members).toHaveLength(2);
+  });
+
   it('parses valid RawAlert with optional fields defaults', () => {
     const valid = {
       wazuh_alert_id: 'alt-999',

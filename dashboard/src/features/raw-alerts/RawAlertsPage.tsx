@@ -135,9 +135,9 @@ export function RawAlertsPage() {
               <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
                 <Table.Head>Timestamp</Table.Head>
                 <Table.Head>Wazuh Alert ID</Table.Head>
-                <Table.Head>Rule ID</Table.Head>
+                <Table.Head>Detection Signature</Table.Head>
                 <Table.Head className="text-right">Level</Table.Head>
-                <Table.Head>Description</Table.Head>
+                <Table.Head>Rule Group</Table.Head>
                 <Table.Head>Source IP</Table.Head>
                 <Table.Head>MITRE Tactics</Table.Head>
               </Table.Row>
@@ -155,9 +155,9 @@ export function RawAlertsPage() {
                   <Table.Cell className="font-mono text-xs font-semibold text-kumo-strong truncate max-w-[140px]">
                     {a.wazuh_alert_id}
                   </Table.Cell>
-                  <Table.Cell className="font-mono text-xs text-kumo-default">{a.rule_id}</Table.Cell>
+                  <Table.Cell className="max-w-[320px] text-xs text-kumo-default"><span title={ruleDescription(a.rule_description, a.rule_id)} className="line-clamp-2">{ruleDescription(a.rule_description, a.rule_id)}</span><div className="mt-1 font-mono text-[10px] text-kumo-subtle">Rule ID: {a.rule_id}</div></Table.Cell>
                   <Table.Cell className="text-xs text-right font-mono font-bold text-kumo-strong">{a.rule_level}</Table.Cell>
-                  <Table.Cell className="max-w-[320px] text-xs text-kumo-default"><span title={ruleDescription(a.rule_description, a.rule_id)} className="line-clamp-2">{ruleDescription(a.rule_description, a.rule_id)}</span></Table.Cell>
+                  <Table.Cell className="max-w-[320px] text-xs text-kumo-default">{a.rule_group_primary}</Table.Cell>
                   <Table.Cell className="font-mono text-xs text-kumo-subtle">{a.srcip || '—'}</Table.Cell>
                   <Table.Cell className="text-xs">
                     {a.mitre_tactics && a.mitre_tactics.length > 0 ? (

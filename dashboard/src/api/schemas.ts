@@ -380,7 +380,28 @@ export const SystemInfoSchema = z.object({
 
 export type SystemInfo = z.infer<typeof SystemInfoSchema>;
 
-export const TraceSchema = z.object({
+const TraceMemberSchema = z.object({
+  wazuh_alert_id: z.string(),
+  resolved: z.boolean(),
+  timestamp: z.string().nullable(),
+  agent_id: z.string().nullable(),
+  agent_name: z.string().nullable(),
+  rule_id: z.string().nullable(),
+  rule_description: z.string().nullable(),
+  rule_group_primary: z.string().nullable(),
+  source_index: z.string().nullable(),
+  source_document_id: z.string().nullable(),
+  source_mode: z.string().nullable(),
+  canonical_fingerprint: z.string().nullable(),
+});
+
+export const TraceSchema = z.preprocess((input) => {
+  if (!input || typeof input !== 'object') return input;
+  const trace = input as Record<string, unknown>;
+  const sourceIds = Array.isArray(trace.source_alert_ids) ? trace.source_alert_ids.filter((id): id is string => typeof id === 'string') : [];
+  const legacyMembers = sourceIds.map((wazuh_alert_id) => ({ wazuh_alert_id, resolved: false, timestamp: null, agent_id: null, agent_name: null, rule_id: null, rule_description: null, rule_group_primary: null, source_index: null, source_document_id: null, source_mode: null, canonical_fingerprint: null }));
+  return { ...trace, rule_group_primary: trace.rule_group_primary ?? trace.rule_group, feature_schema_version: trace.feature_schema_version ?? 'unavailable (legacy response)', score_calibration_version: trace.score_calibration_version ?? 'unavailable (legacy response)', source_total: trace.source_total ?? trace.count ?? sourceIds.length, resolved_total: trace.resolved_total ?? 0, unresolved_alert_ids: trace.unresolved_alert_ids ?? sourceIds, members: trace.members ?? legacyMembers };
+}, z.object({
   meta_id: z.number(),
   agent_id: z.string(),
   rule_group_primary: z.string(),
@@ -392,21 +413,8 @@ export const TraceSchema = z.object({
   source_total: z.number().int().nonnegative(),
   resolved_total: z.number().int().nonnegative(),
   unresolved_alert_ids: z.array(z.string()),
-  members: z.array(z.object({
-    wazuh_alert_id: z.string(),
-    resolved: z.boolean(),
-    timestamp: z.string().nullable(),
-    agent_id: z.string().nullable(),
-    agent_name: z.string().nullable(),
-    rule_id: z.string().nullable(),
-    rule_description: z.string().nullable(),
-    rule_group_primary: z.string().nullable(),
-    source_index: z.string().nullable(),
-    source_document_id: z.string().nullable(),
-    source_mode: z.string().nullable(),
-    canonical_fingerprint: z.string().nullable(),
-  })),
-});
+  members: z.array(TraceMemberSchema),
+}));
 
 export type Trace = z.infer<typeof TraceSchema>;
 

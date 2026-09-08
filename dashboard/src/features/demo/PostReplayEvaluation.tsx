@@ -1,6 +1,8 @@
 import type { EvaluationStatus } from '@/api/schemas';
+import type { ReactElement } from 'react';
 import { Button } from '@cloudflare/kumo/components/button';
 import { DownloadSimple, Flask, Stop } from '@phosphor-icons/react';
+import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
 const labels: Record<string, string> = { time_only_fixed: 'Time-only fixed', contextual_fixed: 'Contextual fixed', contextual_adaptive: 'Contextual adaptive' };
 
@@ -8,6 +10,10 @@ export function PostReplayEvaluation({ replayStatus, evaluation, onStart, onCanc
   const running = evaluation?.status === 'RUNNING';
   const eligible = replayStatus === 'COMPLETED' || replayStatus === 'STOPPED';
   const silhouette = evaluation?.results.structural_silhouette;
+  const sensitivity = (evaluation?.results.sensitivity ?? []) as Array<Record<string, unknown>>;
+  const noise = (evaluation?.results.noise_robustness ?? []) as Array<Record<string, unknown>>;
+  const sensitivityRows = sensitivity.map((row) => ({ delta_t_min: Number(row.delta_t_min), n_meta: Number(row.n_meta), arr: Number(row.arr), execution_time_ms: Number(row.execution_time_ms) }));
+  const noiseRows = noise.map((row) => ({ noise_rate: Number(row.noise_rate) * 100, variant: String(row.variant), arr_degradation: Number(row.arr_degradation), noise_absorption_rate: Number(row.noise_absorption_rate), context_purity_percent: Number(row.context_purity_percent) }));
   return (
     <section className="rounded-2xl border border-kumo-hairline bg-kumo-canvas p-6 shadow-xs" aria-labelledby="post-eval-title">
       <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 id="post-eval-title" className="text-lg font-bold text-kumo-strong">Evaluasi lengkap RBTA & Isolation Forest</h2><p className="mt-1 max-w-3xl text-sm text-kumo-subtle">Dijalankan setelah replay: sensitivitas Δt, tiga ablation, lima tingkat noise, runtime 5×, frozen-model scoring, dan Silhouette 100 permutasi.</p></div><div className="flex gap-2">{running ? <Button size="sm" variant="outline" onClick={onCancel}><Stop size={14} className="mr-1" />Batalkan</Button> : <Button size="sm" variant="primary" disabled={!eligible} onClick={onStart}><Flask size={14} className="mr-1" />Jalankan evaluasi</Button>}{evaluation?.artifact_available && <Button size="sm" variant="outline" onClick={onDownload}><DownloadSimple size={14} className="mr-1" />Unduh artifact</Button>}</div></div>
@@ -20,7 +26,13 @@ export function PostReplayEvaluation({ replayStatus, evaluation, onStart, onCanc
         <div className="rounded-xl bg-kumo-recessed/50 p-3"><div className="text-[10px] font-semibold uppercase text-kumo-subtle">Frozen IF</div><div className="mt-1 text-sm font-bold text-kumo-strong">{evaluation.results.isolation_forest?.meta_alert_count ?? 0} meta-alert</div><div className="text-xs text-kumo-subtle">Refit: {evaluation.results.isolation_forest?.refit_performed ? 'ya' : 'tidak'}</div></div>
       </div>}
       {evaluation?.results.aggregation_ablation && <div className="mt-6 overflow-x-auto"><table className="w-full text-left text-xs"><thead><tr className="border-b border-kumo-hairline text-kumo-subtle"><th className="py-2">Skenario</th><th>Meta-alert</th><th>ARR</th><th>Context purity</th><th>Kontaminasi</th></tr></thead><tbody>{evaluation.results.aggregation_ablation.map(row => <tr key={row.variant} className="border-b border-kumo-hairline/50"><td className="py-3 font-semibold text-kumo-strong">{labels[row.variant] ?? row.variant}</td><td>{row.n_meta}</td><td>{row.arr.toFixed(2)}%</td><td>{row.context_purity_percent.toFixed(2)}%</td><td>{row.context_contamination_percent.toFixed(2)}%</td></tr>)}</tbody></table></div>}
+      {sensitivityRows.length > 0 && <div className="mt-6 grid gap-5 lg:grid-cols-2"><ChartCard title="Sensitivitas Δt — jumlah MetaAlert" question="Bagaimana ukuran agregat berubah ketika Δt diubah?" data={sensitivityRows}><Line dataKey="n_meta" stroke="#0055dc" name="MetaAlert" /></ChartCard><ChartCard title="Sensitivitas Δt — ARR" question="Berapa pengurangan unit triase untuk tiap Δt?" data={sensitivityRows}><Line dataKey="arr" stroke="#f6821f" name="ARR (%)" /></ChartCard></div>}
+      {noiseRows.length > 0 && <div className="mt-6 grid gap-5 lg:grid-cols-2"><ChartCard title="Noise robustness — degradasi ARR" question="Seberapa banyak ARR berubah setelah noise benign sintetis?" data={noiseRows} xKey="noise_rate"><Line dataKey="arr_degradation" stroke="#b86500" name="Degradasi ARR (%)" /></ChartCard><ChartCard title="Noise robustness — absorption" question="Berapa noise sintetis terserap bersama alert bersih?" data={noiseRows} xKey="noise_rate"><Line dataKey="noise_absorption_rate" stroke="#0055dc" name="Noise absorption (%)" /></ChartCard></div>}
       {silhouette && <p className="mt-5 rounded-xl bg-kumo-recessed/50 p-4 text-xs leading-5 text-kumo-default"><strong>Silhouette {silhouette.is_calculable ? Number(silhouette.observed_silhouette).toFixed(4) : 'tidak dapat dihitung'}.</strong> Nilai ini menilai pemisahan struktural internal terhadap permutasi acak, bukan akurasi atau kebenaran serangan.</p>}
     </section>
   );
+}
+
+function ChartCard({ title, question, data, xKey = 'delta_t_min', children }: { title: string; question: string; data: Array<Record<string, number | string>>; xKey?: string; children: ReactElement }) {
+  return <div className="rounded-xl border border-kumo-hairline p-4"><h3 className="text-sm font-semibold text-kumo-strong">{title}</h3><p className="mt-1 text-xs text-kumo-subtle">{question} Sumbu x: {xKey === 'noise_rate' ? 'noise rate (%)' : 'Δt (menit)'}; sumbu y sesuai legenda.</p><div className="mt-4 h-64"><ResponsiveContainer width="100%" height="100%"><LineChart data={data}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey={xKey} /><YAxis /><Tooltip /><Legend />{children}</LineChart></ResponsiveContainer></div></div>;
 }
