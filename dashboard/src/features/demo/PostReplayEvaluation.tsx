@@ -40,8 +40,6 @@ export function PostReplayEvaluation({ replayStatus, evaluation, onStart, onCanc
   );
 }
 
-function histogram(values: number[], bins: number) { if (!values.length) return []; const min = Math.min(...values); const max = Math.max(...values); const width = (max - min || 1) / bins; return Array.from({ length: bins }, (_, index) => ({ score: (min + width * (index + .5)).toFixed(3), count: values.filter((value) => index === bins - 1 ? value >= min + width * index : value >= min + width * index && value < min + width * (index + 1)).length })); }
-
 function ChartCard({ title, question, data, xKey = 'delta_t_min', children }: { title: string; question: string; data: Array<Record<string, number | string | null>>; xKey?: string; children: ReactNode }) {
   return <div className="rounded-xl border border-kumo-hairline p-4"><h3 className="text-sm font-semibold text-kumo-strong">{title}</h3><p className="mt-1 text-xs text-kumo-subtle">{question} Sumbu x: {xKey === 'noise_rate' ? 'noise rate (%)' : 'Δt (menit)'}; sumbu y sesuai legenda.</p><div className="mt-4 h-64"><ResponsiveContainer width="100%" height="100%"><LineChart data={data}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey={xKey} /><YAxis /><Tooltip /><Legend />{children}</LineChart></ResponsiveContainer></div></div>;
 }
