@@ -94,7 +94,7 @@ export function ReplayPage() {
   const isIdle = !status || status.status === 'IDLE' || status.status === 'COMPLETED' || status.status === 'ERROR' || status.status === 'STOPPED';
   const isRunning = status?.status === 'RUNNING';
   const isPaused = status?.status === 'PAUSED';
-  const progressPercent = status && status.total_count > 0 ? (status.processed_count / status.total_count) * 100 : 0;
+  const progressPercent = status ? status.progress * 100 : 0;
 
   const withRunId = (path: string) => (status?.run_id ? `${path}${path.includes('?') ? '&' : '?'}run_id=${encodeURIComponent(status.run_id)}` : path);
 
@@ -227,16 +227,16 @@ export function ReplayPage() {
           </div>
 
           {/* Progress Bar */}
-          {status && status.total_count > 0 && (
+          {status && (
             <div className="pt-4 border-t border-kumo-hairline">
               <div className="flex justify-between text-xs mb-2 font-mono">
-                <span className="text-kumo-subtle">Progres demo</span>
-                <span className="font-semibold text-kumo-strong">{progressPercent.toFixed(1)}% ({formatNumber(status.processed_count)} / {formatNumber(status.total_count)})</span>
+                <span className="text-kumo-subtle">Progres demo {status.total_count <= 0 ? '(menunggu total)' : ''}</span>
+                <span className="font-semibold text-kumo-strong">{status.total_count > 0 ? `${progressPercent.toFixed(1)}% (${formatNumber(status.processed_count)} / ${formatNumber(status.total_count)})` : `${formatNumber(status.processed_count)} diproses`}</span>
               </div>
               <div className="w-full h-2.5 rounded-full overflow-hidden bg-kumo-recessed">
                 <div
                   className="h-full bg-kumo-strong transition-all duration-300 rounded-full"
-                  style={{ width: `${progressPercent}%` }}
+                  style={{ width: status.total_count > 0 ? `${progressPercent}%` : '100%' }}
                 />
               </div>
             </div>

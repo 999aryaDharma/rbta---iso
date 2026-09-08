@@ -130,7 +130,8 @@ describe('Zod v4 Schema Validation & Contract Integrity', () => {
       dataset: 'eval.jsonl',
       processed_count: 500,
       total_count: 1000,
-      progress: 50.0,
+      progress: 0.5,
+      updated_at: '2026-08-29T12:00:00Z',
       current_event_time: '2026-08-29T12:00:00Z',
       wall_clock_elapsed_seconds: 12.5,
       speed: 'MAX',
@@ -140,6 +141,10 @@ describe('Zod v4 Schema Validation & Contract Integrity', () => {
     const result = ReplayStatusSchema.parse(valid);
     expect(result.speed).toBe('MAX');
     expect(result.status).toBe('RUNNING');
+  });
+
+  it('rejects a percentage in the normalized replay progress field', () => {
+    expect(() => ReplayStatusSchema.parse({ run_id: null, status: 'RUNNING', dataset: 'x.jsonl', processed_count: 500, total_count: 1000, progress: 50, updated_at: '2026-08-29T12:00:00Z', current_event_time: null, wall_clock_elapsed_seconds: 1, speed: 'MAX', events_per_second: 1, model_version: 'v1' })).toThrow();
   });
 
   it('parses resolved and unresolved provenance members without a legacy rule_group alias', () => {

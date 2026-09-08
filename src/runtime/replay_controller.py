@@ -724,6 +724,7 @@ class ReplayController:
                 "processed_count": self.processed_count,
                 "total_count": self.total_count,
                 "progress": round(progress, 4),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
                 "current_event_time": self.current_event_time,
                 "wall_clock_elapsed_seconds": round(elapsed, 2),
                 "events_per_second": round(eps, 2),
