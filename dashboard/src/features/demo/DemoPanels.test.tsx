@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { LiveEvaluationPanel } from './LiveEvaluationPanel';
 import { PostReplayEvaluation } from './PostReplayEvaluation';
+import { getSilhouetteChartBounds } from './silhouetteChart';
 import { ResearchBoundaryCard } from './ResearchBoundaryCard';
 import { DatasetCatalogPanel } from './DatasetCatalogPanel';
 
@@ -34,7 +35,26 @@ const live = {
   },
 };
 
+class ResizeObserverMock {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+
 describe('thesis Demo explanation panels', () => {
+  it('keeps the silhouette bars and reference markers inside padded chart bounds', () => {
+    const bounds = getSilhouetteChartBounds([
+      { x: -0.003, count: 45 },
+      { x: 0.031, count: 1 },
+    ], 0.042, 0.001);
+
+    expect(bounds.xDomain[0]).toBeLessThan(-0.003);
+    expect(bounds.xDomain[1]).toBeGreaterThan(0.042);
+    expect(bounds.yDomain).toEqual([0, 50]);
+  });
+
   it('explains dataset indexing and sidecar exclusion', () => {
     render(<DatasetCatalogPanel status={{
       status: 'RUNNING', total_files: 142, completed_files: 38, failed_files: 0, invalid_files: 0,
@@ -79,7 +99,7 @@ describe('thesis Demo explanation panels', () => {
               { variant: 'contextual_fixed', n_raw: 100, n_meta: 10, arr: 90, context_purity_percent: 100, context_contamination_percent: 0 },
               { variant: 'contextual_adaptive', n_raw: 100, n_meta: 8, arr: 92, context_purity_percent: 100, context_contamination_percent: 0 },
             ],
-            structural_silhouette: { is_calculable: true, observed_silhouette: 0.42, empirical_p_value: 0.0198, n_valid_permutations: 100 },
+            structural_silhouette: { is_calculable: true, observed_silhouette: 0.42, random_mean: 0.01, empirical_p_value: 0.0198, n_valid_permutations: 100, null_histogram: { bin_edges: [-0.04, -0.02, 0, 0.02, 0.04], counts: [3, 17, 42, 38] } },
           },
         }}
         onStart={vi.fn()}
@@ -90,6 +110,7 @@ describe('thesis Demo explanation panels', () => {
     expect(screen.getByText(/evaluasi lengkap rbta/i)).toBeInTheDocument();
     expect(screen.getByText(/time-only fixed/i)).toBeInTheDocument();
     expect(screen.getByText(/pemisahan struktural internal/i)).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /histogram distribusi null permutation silhouette/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /unduh artifact/i })).toBeInTheDocument();
   });
 });
