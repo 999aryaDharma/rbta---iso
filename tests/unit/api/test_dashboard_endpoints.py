@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
 import pytest
@@ -163,6 +164,37 @@ def test_meta_alerts_raw_alerts_resolution_and_unresolved(test_setup):
         assert "filtered_total" in data
         assert "unresolved_alert_ids" in data
         assert isinstance(data["items"], list)
+
+
+def test_meta_alert_trace_uses_evidence_resolution_contract(test_setup):
+    client, headers, service, evidence_store, _, _ = test_setup
+    alert = CanonicalRawAlert(
+        wazuh_alert_id="trace-resolved",
+        timestamp=datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc),
+        agent_id="001", agent_name="agent-ubuntu", rule_group_primary="auth",
+        rule_level=8, rule_id="5710", mitre_tactics=(), srcip=None,
+        agent_criticality=1.0,
+        metadata=MappingProxyType({"rule_description": "SSH authentication failed"}),
+    )
+    evidence_store.store(alert)
+    service.ingest_alert(alert)
+    flushed = service.engine.flush_idle(datetime(2026, 8, 29, 14, 0, tzinfo=timezone.utc))
+    service.pending_scoring.extend(flushed)
+    scored = service._drain_pending_scoring()[0]
+    # Preserve a missing source reference to ensure it is visible, not dropped.
+    scored = replace(scored, source_alert_ids=("trace-resolved", "trace-missing"))
+    service.finalized_history[-1] = scored
+
+    response = client.get(f"/api/v1/meta-alerts/{scored.meta_id}/trace", headers=headers)
+    assert response.status_code == 200
+    trace = response.json()
+    assert trace["rule_group_primary"] == "auth"
+    assert trace["source_total"] == 2
+    assert trace["resolved_total"] == 1
+    assert trace["unresolved_alert_ids"] == ["trace-missing"]
+    assert [member["wazuh_alert_id"] for member in trace["members"]] == ["trace-resolved", "trace-missing"]
+    assert trace["members"][0]["canonical_fingerprint"]
+    assert trace["members"][1]["resolved"] is False
 
 
 def test_raw_alert_detail_redaction(test_setup):

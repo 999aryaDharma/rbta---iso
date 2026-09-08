@@ -7,6 +7,7 @@ import {
   ReplayStatusSchema,
   DatasetCatalogStatusSchema,
   SystemInfoSchema,
+  TraceSchema,
 } from './schemas';
 
 describe('Zod v4 Schema Validation & Contract Integrity', () => {
@@ -139,6 +140,19 @@ describe('Zod v4 Schema Validation & Contract Integrity', () => {
     const result = ReplayStatusSchema.parse(valid);
     expect(result.speed).toBe('MAX');
     expect(result.status).toBe('RUNNING');
+  });
+
+  it('parses resolved and unresolved provenance members without a legacy rule_group alias', () => {
+    const result = TraceSchema.parse({
+      meta_id: 7, agent_id: '001', rule_group_primary: 'auth', decision: 'SUSPICIOUS', action: 'ESCALATE',
+      model_version: 'frozen-v1', feature_schema_version: '7f-v1', score_calibration_version: 'tukey-v1',
+      source_total: 2, resolved_total: 1, unresolved_alert_ids: ['missing'],
+      members: [
+        { wazuh_alert_id: 'found', resolved: true, timestamp: '2026-01-01T00:00:00Z', agent_id: '001', agent_name: 'host', rule_id: '5710', rule_description: 'SSH fail', rule_group_primary: 'auth', source_index: 'idx', source_document_id: 'doc', source_mode: 'REPLAY', canonical_fingerprint: 'a'.repeat(64) },
+        { wazuh_alert_id: 'missing', resolved: false, timestamp: null, agent_id: null, agent_name: null, rule_id: null, rule_description: null, rule_group_primary: null, source_index: null, source_document_id: null, source_mode: null, canonical_fingerprint: null },
+      ],
+    });
+    expect(result.resolved_total).toBe(1);
   });
 
   it('parses valid RawAlert with optional fields defaults', () => {

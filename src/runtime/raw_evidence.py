@@ -355,6 +355,40 @@ class RawAlertEvidenceStore:
                     results[rec["wazuh_alert_id"]] = rec
         return results
 
+    def resolve_provenance_members(self, source_alert_ids: List[str]) -> Dict[str, Any]:
+        """Resolve every source member in canonical order for a MetaAlert trace.
+
+        Missing evidence is deliberately represented as an unresolved member so
+        the API never turns a partial trace into an apparently complete one.
+        The selected fields are the safe audit projection; raw payloads and
+        credentials are never returned from this method.
+        """
+        resolved_map = self.get_many(source_alert_ids, redact=True)
+        members: List[Dict[str, Any]] = []
+        unresolved: List[str] = []
+        fields = (
+            "timestamp", "agent_id", "agent_name", "rule_id", "rule_description",
+            "rule_group_primary", "source_index", "source_document_id", "source_mode",
+            "canonical_fingerprint",
+        )
+        for alert_id in source_alert_ids:
+            evidence = resolved_map.get(alert_id)
+            if evidence is None:
+                unresolved.append(alert_id)
+                members.append({"wazuh_alert_id": alert_id, "resolved": False, **{field: None for field in fields}})
+                continue
+            members.append({
+                "wazuh_alert_id": alert_id,
+                "resolved": True,
+                **{field: evidence.get(field) for field in fields},
+            })
+        return {
+            "source_total": len(source_alert_ids),
+            "resolved_total": len(resolved_map),
+            "unresolved_alert_ids": unresolved,
+            "members": members,
+        }
+
     def get_meta_alert_raw_alerts(
         self,
         source_alert_ids: List[str],

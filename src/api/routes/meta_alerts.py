@@ -53,7 +53,7 @@ def list_meta_alerts(
     resolver: DashboardRuntimeResolver = Depends(_get_resolver),
     api_key: str = Depends(get_api_key),
 ) -> Dict[str, Any]:
-    service, _, _ = resolver.resolve(run_id)
+    service, evidence_store, _ = resolver.resolve(run_id)
     history, total = service.query_history(
         page=page,
         page_size=page_size,
@@ -81,7 +81,7 @@ def get_meta_alert_detail(
     resolver: DashboardRuntimeResolver = Depends(_get_resolver),
     api_key: str = Depends(get_api_key),
 ) -> Dict[str, Any]:
-    service, _, _ = resolver.resolve(run_id)
+    service, evidence_store, _ = resolver.resolve(run_id)
     m = service.get_meta_detail(meta_id)
     if m is not None:
         return _scored_alert_to_dict(m)
@@ -95,18 +95,20 @@ def get_meta_alert_trace(
     resolver: DashboardRuntimeResolver = Depends(_get_resolver),
     api_key: str = Depends(get_api_key),
 ) -> Dict[str, Any]:
-    service, _, _ = resolver.resolve(run_id)
+    service, evidence_store, _ = resolver.resolve(run_id)
     m = service.get_meta_detail(meta_id)
     if m is not None:
+        resolution = evidence_store.resolve_provenance_members(list(m.source_alert_ids))
         return {
             "meta_id": m.meta_id,
             "agent_id": m.agent_id,
-            "rule_group": m.rule_group_primary,
-            "source_alert_ids": list(m.source_alert_ids),
-            "count": len(m.source_alert_ids),
+            "rule_group_primary": m.rule_group_primary,
             "model_version": m.model_version,
+            "feature_schema_version": m.feature_schema_version,
+            "score_calibration_version": m.score_calibration_version,
             "decision": m.decision,
             "action": m.action,
+            **resolution,
         }
     raise HTTPException(status_code=404, detail=f"MetaAlert #{meta_id} trace not found")
 

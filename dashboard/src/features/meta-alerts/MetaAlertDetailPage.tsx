@@ -7,7 +7,7 @@ import { DecisionBadge } from '@/components/shared/DecisionBadge';
 import { formatDateTime, formatScore } from '@/lib/formatters';
 import { Tabs } from '@cloudflare/kumo/components/tabs';
 import { Button } from '@cloudflare/kumo/components/button';
-import { ArrowRight } from '@phosphor-icons/react';
+import { ArrowRight, Copy, WarningCircle } from '@phosphor-icons/react';
 
 const SEVEN_FEATURE_KEYS = [
   'max_severity',
@@ -34,7 +34,7 @@ export function MetaAlertDetailPage() {
     queryFn: () => fetchMetaAlert(id, runId || undefined),
   });
 
-  const { data: trace } = useQuery({
+  const { data: trace, isLoading: isTraceLoading, isError: isTraceError, error: traceError, refetch: refetchTrace } = useQuery({
     queryKey: ['meta-alert-trace', id, runId || 'live'],
     queryFn: () => fetchMetaAlertTrace(id, runId || undefined),
   });
@@ -176,28 +176,21 @@ export function MetaAlertDetailPage() {
         )}
 
         {/* Tab 3: Provenance Trace */}
-        {activeTab === 'provenance' && trace && (
+        {activeTab === 'provenance' && (
           <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-5">
             <div>
               <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong pb-2 border-b border-kumo-hairline">
-                Cryptographic Audit Provenance Trace ({trace.source_alert_ids.length} member alerts)
+                Provenance Trace {trace ? `(${trace.resolved_total}/${trace.source_total} evidence ter-resolve)` : ''}
               </h3>
               <p className="text-xs text-kumo-subtle mt-1.5">
-                Every raw Wazuh event aggregated into this MetaAlert is cryptographically hashed and indexed in SQLite evidence storage
+                Jejak asal-usul MetaAlert ke bukti alert Wazuh yang tersimpan, termasuk fingerprint integritas setiap evidence.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2.5 max-h-80 overflow-y-auto p-4 rounded-xl border border-kumo-hairline bg-kumo-recessed/20">
-              {trace.source_alert_ids.map((aid, i) => (
-                <button
-                  key={aid}
-                  onClick={() => navigate(withRunId(`/meta-alerts/${id}/raw-alerts/${encodeURIComponent(aid)}`))}
-                  className="px-3 py-1.5 text-xs font-mono rounded-lg border border-kumo-hairline bg-kumo-canvas text-kumo-default hover:border-kumo-strong hover:text-kumo-strong transition-all cursor-pointer shadow-2xs"
-                >
-                  <span className="text-[10px] mr-1.5 text-kumo-subtle">#{i + 1}</span>
-                  {aid}
-                </button>
-              ))}
-            </div>
+            {isTraceLoading && <div className="rounded-lg border border-kumo-hairline bg-kumo-recessed/30 p-6 text-sm text-kumo-subtle">Memuat provenance evidence…</div>}
+            {isTraceError && <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-kumo-default">Provenance tidak dapat dimuat: {traceError.message}. <button className="underline" onClick={() => refetchTrace()}>Coba lagi</button></div>}
+            {trace && trace.unresolved_alert_ids.length > 0 && <div className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-kumo-default"><WarningCircle size={16} /> Evidence parsial: {trace.resolved_total} dari {trace.source_total} member tersedia; ID yang tidak ter-resolve tetap ditampilkan.</div>}
+            {trace && trace.members.length === 0 && <div className="rounded-lg border border-kumo-hairline bg-kumo-recessed/30 p-6 text-sm text-kumo-subtle">MetaAlert ini tidak memiliki member source.</div>}
+            {trace && trace.members.length > 0 && <div className="overflow-x-auto rounded-lg border border-kumo-hairline"><table className="w-full min-w-[760px] text-left text-xs"><thead className="bg-kumo-recessed/50 text-kumo-subtle"><tr><th className="p-3">Evidence</th><th>Rule ID / Detection Signature</th><th>Agent</th><th>Source</th><th>Integrity fingerprint</th><th /></tr></thead><tbody>{trace.members.map((member) => <tr key={member.wazuh_alert_id} className="border-t border-kumo-hairline/60"><td className="p-3 font-mono text-kumo-strong">{member.wazuh_alert_id}<div className="text-[10px] text-kumo-subtle">{member.resolved ? 'resolved' : 'unresolved'}</div></td><td>{member.rule_id ? <><span className="font-mono">{member.rule_id}</span><div className="mt-1 max-w-[260px] break-words text-kumo-subtle">{member.rule_description || `Rule ${member.rule_id}`}</div></> : '—'}</td><td>{member.agent_name || '—'}<div className="font-mono text-kumo-subtle">{member.agent_id || ''}</div></td><td>{member.source_mode || '—'}<div className="font-mono text-kumo-subtle">{member.source_index || member.source_document_id || ''}</div></td><td className="max-w-[180px] break-all font-mono text-[10px] text-kumo-subtle">{member.canonical_fingerprint || '—'}</td><td className="p-3"><div className="flex gap-2">{member.resolved && <Button size="sm" variant="outline" onClick={() => navigate(withRunId(`/meta-alerts/${id}/raw-alerts/${encodeURIComponent(member.wazuh_alert_id)}`))}>Buka evidence</Button>}{member.canonical_fingerprint && <button aria-label="Salin fingerprint" onClick={() => navigator.clipboard?.writeText(member.canonical_fingerprint!)}><Copy size={15} /></button>}</div></td></tr>)}</tbody></table></div>}
           </div>
         )}
       </div>

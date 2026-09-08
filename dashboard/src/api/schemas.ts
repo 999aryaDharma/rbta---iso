@@ -381,12 +381,30 @@ export type SystemInfo = z.infer<typeof SystemInfoSchema>;
 
 export const TraceSchema = z.object({
   meta_id: z.number(),
-  source_alert_ids: z.array(z.string()),
   agent_id: z.string(),
   rule_group_primary: z.string(),
   decision: z.string(),
   action: z.string(),
   model_version: z.string(),
+  feature_schema_version: z.string(),
+  score_calibration_version: z.string(),
+  source_total: z.number().int().nonnegative(),
+  resolved_total: z.number().int().nonnegative(),
+  unresolved_alert_ids: z.array(z.string()),
+  members: z.array(z.object({
+    wazuh_alert_id: z.string(),
+    resolved: z.boolean(),
+    timestamp: z.string().nullable(),
+    agent_id: z.string().nullable(),
+    agent_name: z.string().nullable(),
+    rule_id: z.string().nullable(),
+    rule_description: z.string().nullable(),
+    rule_group_primary: z.string().nullable(),
+    source_index: z.string().nullable(),
+    source_document_id: z.string().nullable(),
+    source_mode: z.string().nullable(),
+    canonical_fingerprint: z.string().nullable(),
+  })),
 });
 
 export type Trace = z.infer<typeof TraceSchema>;
