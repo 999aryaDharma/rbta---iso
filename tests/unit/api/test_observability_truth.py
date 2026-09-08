@@ -11,6 +11,7 @@ from src.model.scoring_pipeline import train_reference_pipeline
 from src.runners.batch_runner import BatchResearchRunner
 from src.runtime.durable_state import DurableStateManager
 from src.runtime.observability import (
+    get_dashboard_agents,
     get_dashboard_integrations,
     get_dashboard_summary,
     get_dashboard_system,
@@ -223,6 +224,24 @@ def test_timeseries_counts_active_buckets_as_raw_evidence(tmp_path: Path, test_s
     assert target_bin_after is not None
     assert target_bin_after["raw_alerts"] == 2
     assert target_bin_after["meta_alerts"] == 1
+
+
+def test_dashboard_agents_resolves_legacy_unknown_name_from_canonical_evidence(tmp_path: Path):
+    """Completed legacy runs retain a host name even after their buckets drain."""
+    from types import SimpleNamespace
+    from src.rbta.engine import RBTAEngine
+
+    store = RawAlertEvidenceStore(tmp_path / "evidence.sqlite3")
+    alert = _make_test_alert(99, datetime(2026, 8, 29, 10, 0, tzinfo=timezone.utc))
+    engine = RBTAEngine()
+    store.store(alert)
+    engine.process(alert)
+    engine.drain()
+    # Simulate a state file written before agent_name was persisted.
+    engine._temporal_states[alert.agent_id].agent_name = "unknown"
+
+    agents = get_dashboard_agents(SimpleNamespace(engine=engine), store)
+    assert agents[0]["agent_name"] == alert.agent_name
 
 
 def test_replay_run_provenance_uses_exact_model_version(tmp_path: Path, test_scoring_pipeline):

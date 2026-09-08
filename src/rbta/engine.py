@@ -199,6 +199,10 @@ class RBTAEngine:
         # ── 3. Transactional Candidate State Evaluation ───────────────────────
         current_agent_state = self._get_agent_state(alert.agent_id)
         candidate_state = current_agent_state.snapshot()
+        # Keep presentation metadata with the per-agent temporal state so a
+        # finalized/drained bucket cannot erase the dashboard host name.
+        if alert.agent_name and (candidate_state.agent_name == "unknown" or alert.agent_name != "unknown"):
+            candidate_state.agent_name = alert.agent_name
         current_delta_t = candidate_state.observe(alert.timestamp)
 
         finalized_list: List[MetaAlert] = []
@@ -356,7 +360,7 @@ class RBTAEngine:
             ]
             result.append({
                 "agent_id": agent_id,
-                "agent_name": agent_buckets[0][1].agent_name if agent_buckets else "unknown",
+                "agent_name": state.agent_name,
                 "event_count": state.warmup_event_count,
                 "warmup_required": 100,
                 "warmup_progress": min(state.warmup_event_count, 100),

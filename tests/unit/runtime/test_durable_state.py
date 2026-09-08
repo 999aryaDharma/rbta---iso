@@ -66,6 +66,7 @@ def test_durable_state_save_and_restore_engine(tmp_path: Path):
     assert bucket_001.alert_count == 2
     assert bucket_001.wazuh_alert_ids == ["alert_1", "alert_2"]
     assert bucket_001.end_time == base_t + timedelta(minutes=5)
+    assert restored_engine.snapshot_agents()[0]["agent_name"] == "soc-001"
 
     # Processing duplicate alert_1 in restored engine is idempotent
     assert restored_engine.process(a1) == []

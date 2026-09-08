@@ -39,6 +39,33 @@ def test_snapshot_agents_returns_agent_state():
     assert agents[0]["status"] == "WARMUP"
     assert agents[0]["active_bucket_count"] == 1
 
+
+def test_snapshot_agents_keeps_canonical_name_after_bucket_is_finalized():
+    """Agent telemetry must not lose its name when no bucket remains open."""
+    engine = RBTAEngine()
+    alert = CanonicalRawAlert(
+        wazuh_alert_id="alert-finalized",
+        timestamp=datetime.now(timezone.utc),
+        agent_id="042",
+        agent_name="workstation-akademik",
+        rule_group_primary="syslog",
+        rule_level=3,
+        rule_id="1000",
+        mitre_tactics=(),
+        srcip=None,
+        agent_criticality=1,
+        metadata={"rule_description": "Test alert", "rule_groups_all": ["syslog"]},
+    )
+
+    engine.process(alert)
+    engine.drain()
+
+    agents = engine.snapshot_agents()
+    assert len(agents) == 1
+    assert agents[0]["agent_id"] == "042"
+    assert agents[0]["agent_name"] == "workstation-akademik"
+    assert agents[0]["active_bucket_count"] == 0
+
 def test_snapshot_buckets_returns_active_buckets():
     engine = RBTAEngine()
 

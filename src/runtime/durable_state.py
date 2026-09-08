@@ -185,6 +185,7 @@ class DurableStateManager:
         for agent_id, state in engine._temporal_states.items():
             temporal_states_data[agent_id] = {
                 "agent_id": state.agent_id,
+                "agent_name": state.agent_name,
                 "base_delta_t_sec": state.base_delta_t.total_seconds(),
                 "adaptive": state.adaptive,
                 "last_timestamp": state.last_timestamp.isoformat() if state.last_timestamp else None,
@@ -269,6 +270,7 @@ class DurableStateManager:
             from datetime import timedelta
             state = AgentTemporalState(
                 agent_id=agent_id,
+                agent_name=state_dict.get("agent_name", "unknown"),
                 base_delta_t=timedelta(seconds=state_dict["base_delta_t_sec"]),
                 adaptive=state_dict["adaptive"],
             )
@@ -305,6 +307,11 @@ class DurableStateManager:
 
             key = (bucket.agent_id, bucket.rule_group_primary)
             engine._active_buckets[key] = bucket
+            # Backward compatibility for state files created before agent_name
+            # was persisted with temporal state metadata.
+            state = engine._temporal_states.get(bucket.agent_id)
+            if state and state.agent_name == "unknown" and bucket.agent_name:
+                state.agent_name = bucket.agent_name
 
         legacy_history = data.get("finalized_history", [])
         if legacy_history:

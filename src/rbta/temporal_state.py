@@ -51,6 +51,8 @@ class AgentTemporalState:
     """
 
     agent_id: str
+    # Observational metadata only: never used by the RBTA bucket key or ETW math.
+    agent_name: str = "unknown"
     base_delta_t: timedelta = DEFAULT_BASE_DELTA_T
     adaptive: bool = True
     last_timestamp: datetime | None = None
@@ -72,6 +74,7 @@ class AgentTemporalState:
         """Create an isolated defensive copy of this temporal state for transactional operations."""
         copied = AgentTemporalState(
             agent_id=self.agent_id,
+            agent_name=self.agent_name,
             base_delta_t=self.base_delta_t,
             adaptive=self.adaptive,
         )

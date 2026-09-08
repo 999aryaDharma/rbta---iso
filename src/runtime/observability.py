@@ -78,9 +78,22 @@ def get_dashboard_summary(
     }
 
 
-def get_dashboard_agents(service: LiveRBTAService) -> List[Dict[str, Any]]:
-    """Build pure snapshot of all per-agent temporal states."""
-    return service.engine.snapshot_agents()
+def get_dashboard_agents(
+    service: LiveRBTAService,
+    evidence_store: Optional[RawAlertEvidenceStore] = None,
+) -> List[Dict[str, Any]]:
+    """Build a temporal-state snapshot with canonical names for legacy runs."""
+    agents = service.engine.snapshot_agents()
+    if evidence_store is None:
+        return agents
+
+    names_by_id = evidence_store.latest_agent_names()
+    return [
+        {**agent, "agent_name": names_by_id.get(agent["agent_id"], agent["agent_name"])}
+        if not agent.get("agent_name") or agent["agent_name"].casefold() == "unknown"
+        else agent
+        for agent in agents
+    ]
 
 
 def get_dashboard_buckets(service: LiveRBTAService) -> List[Dict[str, Any]]:

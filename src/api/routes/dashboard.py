@@ -35,8 +35,8 @@ def dashboard_agents(
     resolver: DashboardRuntimeResolver = Depends(_get_resolver),
     api_key: str = Depends(get_api_key),
 ) -> List[Dict[str, Any]]:
-    service, _, _ = resolver.resolve(run_id)
-    return get_dashboard_agents(service)
+    service, evidence_store, _ = resolver.resolve(run_id)
+    return get_dashboard_agents(service, evidence_store)
 
 
 @router.get("/buckets")

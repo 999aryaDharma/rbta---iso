@@ -508,6 +508,30 @@ class RawAlertEvidenceStore:
             self._cached_count = int(row["total"]) if row else 0
             return self._cached_count
 
+    def latest_agent_names(self) -> Dict[str, str]:
+        """Return the latest non-placeholder canonical name for each agent.
+
+        This narrow projection supports legacy replay telemetry without exposing
+        raw alert payloads.  It is intentionally read-only and does not affect
+        canonical evidence or RBTA aggregation.
+        """
+        self.flush()
+        with self._lock:
+            rows = self._get_conn().execute(
+                """
+                SELECT agent_id, agent_name FROM (
+                    SELECT agent_id, agent_name,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY agent_id
+                               ORDER BY timestamp DESC, wazuh_alert_id DESC
+                           ) AS row_number
+                    FROM raw_alert_evidence
+                    WHERE trim(agent_name) <> '' AND lower(agent_name) <> 'unknown'
+                ) WHERE row_number = 1
+                """
+            ).fetchall()
+        return {str(row["agent_id"]): str(row["agent_name"]) for row in rows}
+
     def export_canonical_alerts(self) -> List[CanonicalRawAlert]:
         """Export the isolated run evidence as canonical alerts in event-time order."""
         self.flush()

@@ -10,7 +10,7 @@ import threading
 from typing import Any, Dict, List, Optional, Set
 
 from src.contracts.scored_meta_alert import ScoredMetaAlert
-from src.api.telegram_formatter import format_telegram_alert
+from src.runtime.telegram_formatter import format_telegram_alert
 
 logger = logging.getLogger(__name__)
 
