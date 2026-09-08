@@ -5,12 +5,15 @@ import { Table } from '@cloudflare/kumo/components/table';
 import { Badge } from '@cloudflare/kumo/components/badge';
 import { Pagination } from '@cloudflare/kumo/components/pagination';
 import { PaperPlaneRight, Copy, Check, ArrowClockwise } from '@phosphor-icons/react';
+import { DialogRoot, Dialog, DialogTitle, DialogDescription } from '@cloudflare/kumo/components/dialog';
+import type { TelegramPayload } from '@/api/schemas';
 
 const PAGE_SIZE = 10;
 
 export function DeferredTelegramOutbox() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
+  const [selectedPayload, setSelectedPayload] = useState<TelegramPayload | null>(null);
   const { data, isLoading, refetch } = useQuery({
     queryKey: ['telegram-payloads'],
     queryFn: () => fetchTelegramPayloads(50),
@@ -79,7 +82,7 @@ export function DeferredTelegramOutbox() {
               {paginatedPayloads.map((p) => {
                 const isCopied = copiedId === p.idempotency_key;
                 return (
-                  <Table.Row key={p.idempotency_key} className="font-mono text-xs hover:bg-kumo-recessed/40 transition-colors">
+                  <Table.Row key={p.idempotency_key} className="font-mono text-xs hover:bg-kumo-recessed/40 transition-colors cursor-pointer" onClick={() => setSelectedPayload(p)}>
                     <Table.Cell className="text-kumo-subtle text-[11px] whitespace-nowrap">
                       {p.timestamp.replace('T', ' ').substring(0, 19)}
                     </Table.Cell>
@@ -106,7 +109,7 @@ export function DeferredTelegramOutbox() {
                     <Table.Cell className="text-right">
                       <button
                         type="button"
-                        onClick={() => handleCopy(p.idempotency_key, p.message)}
+                        onClick={(event) => { event.stopPropagation(); handleCopy(p.idempotency_key, p.message); }}
                         className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-mono border border-kumo-hairline bg-kumo-canvas text-kumo-subtle hover:text-kumo-strong hover:bg-kumo-recessed transition-colors cursor-pointer"
                         title="Copy Telegram message"
                       >
@@ -140,6 +143,7 @@ export function DeferredTelegramOutbox() {
           No ESCALATE payloads recorded yet in this replay run.
         </div>
       )}
+      <DialogRoot open={Boolean(selectedPayload)} onOpenChange={(open) => { if (!open) setSelectedPayload(null); }}><Dialog className="w-full max-w-2xl rounded-xl border border-kumo-hairline bg-kumo-canvas p-6 shadow-2xl"><DialogTitle>Detail Telegram payload</DialogTitle><DialogDescription className="mt-1 text-xs text-kumo-subtle">Read-only payload yang akan dikirim dengan parse mode HTML.</DialogDescription>{selectedPayload && <div className="mt-4 space-y-3"><dl className="grid grid-cols-2 gap-2 text-xs"><div><dt className="text-kumo-subtle">Run ID</dt><dd className="font-mono">{selectedPayload.run_id}</dd></div><div><dt className="text-kumo-subtle">Idempotency key</dt><dd className="font-mono">{selectedPayload.idempotency_key}</dd></div><div><dt className="text-kumo-subtle">Decision / Action</dt><dd>{selectedPayload.decision} / {selectedPayload.action}</dd></div><div><dt className="text-kumo-subtle">Score / Threshold</dt><dd>{selectedPayload.anomaly_score.toFixed(4)} / {selectedPayload.threshold.toFixed(4)}</dd></div></dl><pre className="max-h-80 overflow-auto rounded-lg bg-kumo-recessed p-3 text-xs whitespace-pre-wrap">{selectedPayload.message}</pre></div>}</Dialog></DialogRoot>
     </div>
   );
 }
