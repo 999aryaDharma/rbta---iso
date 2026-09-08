@@ -27,6 +27,7 @@ class StructuralSilhouetteResult:
     empirical_p_value: Optional[float] = None
     n_valid_permutations: int = 0
     null_scores: Optional[List[float]] = None
+    null_histogram: Optional[Dict[str, Any]] = None
     random_seed: int = 42
 
 
@@ -118,6 +119,7 @@ def run_structural_silhouette_evaluation(
     # p = (count(null >= obs) + 1) / (N + 1)
     k_greater_equal = int(np.sum(null_arr >= obs_sil))
     empirical_p = float((k_greater_equal + 1) / (len(null_scores) + 1))
+    counts, edges = np.histogram(null_arr, bins=min(12, len(null_scores)))
 
     return StructuralSilhouetteResult(
         is_calculable=True,
@@ -131,5 +133,6 @@ def run_structural_silhouette_evaluation(
         empirical_p_value=empirical_p,
         n_valid_permutations=len(null_scores),
         null_scores=[float(score) for score in null_scores[:100]],
+        null_histogram={"bin_edges": [float(edge) for edge in edges], "counts": [int(count) for count in counts]},
         random_seed=random_seed,
     )

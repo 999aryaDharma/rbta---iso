@@ -353,6 +353,7 @@ export const EvaluationStatusSchema = z.object({
       empirical_p_value: z.number().nullable().optional(),
       n_valid_permutations: z.number().optional(),
       null_scores: z.array(z.number()).optional(),
+      null_histogram: z.object({ bin_edges: z.array(z.number()).min(2), counts: z.array(z.number().int().nonnegative()).min(1) }).optional(),
     }).passthrough().optional(),
   }).passthrough().default({}),
 });

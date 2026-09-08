@@ -58,6 +58,8 @@ def test_structural_silhouette_and_permutation_baseline():
         assert 0.0 <= result.empirical_p_value <= 1.0
         assert result.random_mean is not None
         assert result.random_std is not None
+        assert result.null_histogram is not None
+        assert sum(result.null_histogram["counts"]) == result.n_valid_permutations
     else:
         # If partition only had 1 class, is_calculable is False
         assert result.uncalculable_reason is not None
