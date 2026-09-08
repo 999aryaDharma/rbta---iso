@@ -26,6 +26,7 @@ class StructuralSilhouetteResult:
     z_score: Optional[float] = None
     empirical_p_value: Optional[float] = None
     n_valid_permutations: int = 0
+    null_scores: Optional[List[float]] = None
     random_seed: int = 42
 
 
@@ -129,5 +130,6 @@ def run_structural_silhouette_evaluation(
         z_score=z_score,
         empirical_p_value=empirical_p,
         n_valid_permutations=len(null_scores),
+        null_scores=[float(score) for score in null_scores[:100]],
         random_seed=random_seed,
     )

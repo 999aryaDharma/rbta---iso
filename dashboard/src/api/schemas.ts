@@ -347,8 +347,12 @@ export const EvaluationStatusSchema = z.object({
     structural_silhouette: z.object({
       is_calculable: z.boolean(),
       observed_silhouette: z.number().nullable().optional(),
+      random_mean: z.number().nullable().optional(),
+      observed_percentile: z.number().nullable().optional(),
+      z_score: z.number().nullable().optional(),
       empirical_p_value: z.number().nullable().optional(),
       n_valid_permutations: z.number().optional(),
+      null_scores: z.array(z.number()).optional(),
     }).passthrough().optional(),
   }).passthrough().default({}),
 });

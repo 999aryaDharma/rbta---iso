@@ -133,7 +133,7 @@ def run_noise_robustness_evaluation(
                 baseline_arr[variant] = arr
                 degradation = 0.0
                 absorption_count = 0
-                absorption_rate = 100.0
+                absorption_rate = None
             else:
                 degradation = float(baseline_arr.get(variant, arr) - arr)
                 absorption_count = 0
