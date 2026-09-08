@@ -277,34 +277,34 @@ export function ReplayPage() {
           </Banner>
         )}
 
-        <section aria-labelledby="demo-replay-heading"><div className="mb-3"><h2 id="demo-replay-heading" className="text-lg font-bold text-kumo-strong">1. Jalankan dan amati proses</h2><p className="text-sm text-kumo-subtle">Klik satu langkah untuk melihat penjelasannya. Animasi hanya menunjukkan pembaruan data terbaru.</p></div>
+        {/* Alur pemrosesan */}
         <ReplayPipelineVisualizer
           status={status}
           telemetry={telemetry}
           activeStage={activeStage}
           onSelectStage={setActiveStage}
-        /></section>
+        />
 
         {/* Current Scored MetaAlert Card */}
-        <section aria-labelledby="demo-result-heading"><div className="mb-3"><h2 id="demo-result-heading" className="text-lg font-bold text-kumo-strong">2. Periksa hasil terbaru</h2><p className="text-sm text-kumo-subtle">Lihat kelompok alert yang baru selesai dan alasan prioritasnya.</p></div><CurrentMetaAlertCard
+        <CurrentMetaAlertCard
           latestMeta={latestMeta}
           rawProcessed={rawProcessed}
           metaFinalized={metaFinalized}
           decisionCounts={decisionCounts}
-        /></section>
+        />
 
         <LiveEvaluationPanel live={telemetry?.evaluation_live} eventsPerSecond={status?.events_per_second ?? 0} />
 
-        <section aria-labelledby="demo-evaluation-heading"><div className="mb-3"><h2 id="demo-evaluation-heading" className="text-lg font-bold text-kumo-strong">3. Lihat hasil evaluasi</h2><p className="text-sm text-kumo-subtle">Evaluasi membantu menilai pengelompokan dan waktu proses, bukan membuktikan serangan.</p></div><PostReplayEvaluation
+        <PostReplayEvaluation
           replayStatus={status?.status}
           evaluation={evaluation}
           onStart={() => void handleAction(startEvaluation)}
           onCancel={() => void handleAction(cancelEvaluation)}
           onDownload={() => void downloadEvaluationArtifact()}
-        /></section>
+        />
 
         {/* Selected Pipeline Stage Deep Inspector */}
-        <section aria-labelledby="demo-detail-heading"><div className="mb-3"><h2 id="demo-detail-heading" className="text-lg font-bold text-kumo-strong">4. Lihat rincian dan bukti</h2><p className="text-sm text-kumo-subtle">Gunakan bagian ini ketika audiens ingin membahas satu langkah atau isi pesan yang disiapkan.</p></div><PipelineStageDetail
+        <PipelineStageDetail
           activeStage={inspectedStage}
           telemetry={telemetry}
           status={status}
@@ -314,7 +314,7 @@ export function ReplayPage() {
         <ProcessingTrace trace={telemetry?.trace} />
 
         {/* Deferred Telegram Payload Outbox */}
-        <DeferredTelegramOutbox /></section>
+        <DeferredTelegramOutbox />
 
         {/* Telemetry KPI Metrics */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
