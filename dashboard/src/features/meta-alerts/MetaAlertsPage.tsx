@@ -9,7 +9,10 @@ import { InputGroup } from '@cloudflare/kumo/components/input-group';
 import { Select } from '@cloudflare/kumo/components/select';
 import { Table } from '@cloudflare/kumo/components/table';
 import { Pagination } from '@cloudflare/kumo/components/pagination';
-import { MagnifyingGlass } from '@phosphor-icons/react';
+import { MagnifyingGlass, CaretDown, CaretUp, CaretUpDown } from '@phosphor-icons/react';
+import { nextAlertScoreSort, type MetaAlertSortOrder } from './metaAlertSort';
+
+const META_ALERT_PAGE_SIZE = 10;
 
 export function MetaAlertsPage() {
   const navigate = useNavigate();
@@ -20,6 +23,8 @@ export function MetaAlertsPage() {
   const action = searchParams.get('action') || '';
   const urlSearch = searchParams.get('search') || '';
   const runId = searchParams.get('run_id');
+  const sortBy = searchParams.get('sort_by') || 'end_time';
+  const sortOrder = searchParams.get('sort_order') === 'asc' ? 'asc' : 'desc';
   const [localSearch, setLocalSearch] = useState(urlSearch);
 
   const withRunId = useCallback(
@@ -45,16 +50,16 @@ export function MetaAlertsPage() {
   }, [localSearch, urlSearch, searchParams, setSearchParams]);
 
   const { data, isFetching, isPlaceholderData } = useQuery({
-    queryKey: ['meta-alerts', page, decision, action, urlSearch, runId || 'live'],
+    queryKey: ['meta-alerts', page, decision, action, urlSearch, sortBy, sortOrder, runId || 'live'],
     queryFn: () =>
       fetchMetaAlerts({
         page,
-        page_size: 10,
+        page_size: META_ALERT_PAGE_SIZE,
         decision: decision || undefined,
         action: action || undefined,
         search: urlSearch || undefined,
-        sort_by: 'end_time',
-        sort_order: 'desc',
+        sort_by: sortBy,
+        sort_order: sortOrder,
         run_id: runId || undefined,
       }),
     placeholderData: keepPreviousData,
@@ -63,25 +68,25 @@ export function MetaAlertsPage() {
 
   // Prefetch next page
   useEffect(() => {
-    const totalPages = data ? Math.ceil(data.total / 20) || 1 : 1;
+    const totalPages = data ? Math.ceil(data.total / META_ALERT_PAGE_SIZE) || 1 : 1;
     if (data && page < totalPages) {
       queryClient.prefetchQuery({
-        queryKey: ['meta-alerts', page + 1, decision, action, urlSearch, runId || 'live'],
+        queryKey: ['meta-alerts', page + 1, decision, action, urlSearch, sortBy, sortOrder, runId || 'live'],
         queryFn: () =>
           fetchMetaAlerts({
             page: page + 1,
-            page_size: 20,
+            page_size: META_ALERT_PAGE_SIZE,
             decision: decision || undefined,
             action: action || undefined,
             search: urlSearch || undefined,
-            sort_by: 'end_time',
-            sort_order: 'desc',
+            sort_by: sortBy,
+            sort_order: sortOrder,
             run_id: runId || undefined,
           }),
         staleTime: 5000,
       });
     }
-  }, [data, page, decision, action, urlSearch, runId, queryClient]);
+  }, [data, page, decision, action, urlSearch, sortBy, sortOrder, runId, queryClient]);
 
   const setFilterParam = useCallback((key: string, val: string) => {
     const params = new URLSearchParams(searchParams);
@@ -90,6 +95,15 @@ export function MetaAlertsPage() {
     params.set('page', '1');
     setSearchParams(params);
   }, [searchParams, setSearchParams]);
+
+  const toggleAlertScoreSort = () => {
+    const next = nextAlertScoreSort(sortBy, sortOrder as MetaAlertSortOrder);
+    const params = new URLSearchParams(searchParams);
+    params.set('sort_by', next.sortBy);
+    params.set('sort_order', next.sortOrder);
+    params.set('page', '1');
+    setSearchParams(params);
+  };
 
   return (
     <>
@@ -160,7 +174,17 @@ export function MetaAlertsPage() {
                 <Table.Head>Rule Name</Table.Head>
                 <Table.Head className="text-right">Alert Count</Table.Head>
                 <Table.Head className="text-right">Max Sev</Table.Head>
-                <Table.Head className="text-right">Anomaly Score</Table.Head>
+                <Table.Head className="text-right">
+                  <button
+                    type="button"
+                    onClick={toggleAlertScoreSort}
+                    className="inline-flex items-center gap-1 rounded text-right hover:text-kumo-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand"
+                    aria-label={`Urutkan Alert Score ${sortBy === 'anomaly_score' && sortOrder === 'desc' ? 'terendah ke tertinggi' : 'tertinggi ke terendah'}`}
+                  >
+                    Alert Score
+                    {sortBy !== 'anomaly_score' ? <CaretUpDown size={13} /> : sortOrder === 'desc' ? <CaretDown size={13} /> : <CaretUp size={13} />}
+                  </button>
+                </Table.Head>
                 <Table.Head>SOC Decision</Table.Head>
               </Table.Row>
             </Table.Header>
