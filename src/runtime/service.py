@@ -3,6 +3,8 @@
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import logging
+from functools import wraps
+from threading import RLock
 from typing import Any, Dict, List, Optional
 
 from src.config.research import DEFAULT_BASE_DELTA_T
@@ -14,6 +16,15 @@ from src.rbta.engine import RBTAEngine
 from src.runtime.durable_state import DurableStateManager
 
 logger = logging.getLogger(__name__)
+
+
+def _serialized(method):
+    """Serialize a complete service mutation, including its durable commit."""
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapped
 
 
 def _serialize_meta_alert(meta: MetaAlert) -> Dict[str, Any]:
@@ -130,6 +141,7 @@ class LiveRBTAService:
         self.escalation_sink = escalation_sink
         self.run_id = run_id
         self.auto_persist = auto_persist
+        self._lock = RLock()
 
         self.engine: RBTAEngine = RBTAEngine(base_delta_t=self.base_delta_t, adaptive=self.adaptive)
         self.pending_scoring: List[MetaAlert] = []
@@ -201,8 +213,11 @@ class LiveRBTAService:
         if self.scoring_pipeline and self.pending_scoring:
             self._drain_pending_scoring()
 
+    @_serialized
     def _persist_to_disk(self) -> None:
         """Persist current state, pending scoring, and outbox to disk."""
+        if self.raw_evidence_store is not None and hasattr(self.raw_evidence_store, "flush"):
+            self.raw_evidence_store.flush()
         pending_payload = [_serialize_meta_alert(item) for item in self.pending_scoring]
         outbox_payload = [_serialize_scored_alert(item) for item in self.outbox]
         
@@ -224,10 +239,9 @@ class LiveRBTAService:
             self.finalized_history = self.finalized_history[-self.RECENT_HISTORY_LIMIT:]
         self._last_persisted_history_idx = len(self.finalized_history)
 
+    @_serialized
     def checkpoint(self) -> None:
         """Explicitly persist current durable state to disk."""
-        if self.raw_evidence_store is not None and hasattr(self.raw_evidence_store, "flush"):
-            self.raw_evidence_store.flush()
         self._persist_to_disk()
 
     def _drain_pending_scoring(self, auto_persist: Optional[bool] = None) -> List[ScoredMetaAlert]:
@@ -251,6 +265,7 @@ class LiveRBTAService:
                 self._persist_to_disk()
         return new_scored
 
+    @_serialized
     def ingest_alert(
         self,
         alert: CanonicalRawAlert,
@@ -280,6 +295,8 @@ class LiveRBTAService:
                 source_mode=self.source_mode,
                 skip_conflict_check=(self.source_mode == "REPLAY")
             )
+            if should_persist and hasattr(self.raw_evidence_store, "flush"):
+                self.raw_evidence_store.flush()
 
         if self.state_manager.has_seen_alert_id(alert.wazuh_alert_id):
             return []
@@ -292,6 +309,7 @@ class LiveRBTAService:
             self._persist_to_disk()
         return self._drain_pending_scoring(auto_persist=should_persist)
 
+    @_serialized
     def check_idle_flush(self, current_event_time: datetime, auto_persist: Optional[bool] = None) -> List[ScoredMetaAlert]:
         """Flush and score active buckets whose idle duration strictly exceeds delta_t.
 
@@ -320,11 +338,13 @@ class LiveRBTAService:
         """Retrieve unacknowledged scored meta-alerts in the outbox."""
         return list(self.outbox)
 
+    @_serialized
     def acknowledge_outbox(self, meta_id: int) -> None:
         """Acknowledge and remove a scored meta-alert from the outbox."""
         self.outbox = [item for item in self.outbox if item.meta_id != meta_id]
         self._persist_to_disk()
 
+    @_serialized
     def commit_outbox(self, meta_ids: List[int]) -> int:
         """Acknowledge and remove multiple scored meta-alerts from the outbox."""
         initial = len(self.outbox)
@@ -352,6 +372,7 @@ class LiveRBTAService:
         in_memory = self.engine.has_seen_alert(wazuh_alert_id) if hasattr(self.engine, "has_seen_alert") else (wazuh_alert_id in self.engine._seen_alert_ids)
         return in_memory or self.state_manager.has_seen_alert_id(wazuh_alert_id)
 
+    @_serialized
     def drain_and_score(self) -> List[ScoredMetaAlert]:
         """Drain all currently active engine buckets, score them, and persist."""
         drained_metas = self.engine.drain()
@@ -365,11 +386,13 @@ class LiveRBTAService:
         """Retrieve copy of durable live source transport state."""
         return dict(self.source_checkpoint)
 
+    @_serialized
     def update_live_source_state(self, state: Dict[str, Any]) -> None:
         """Update and atomically persist live source transport state."""
         self.source_checkpoint.update(state)
         self._persist_to_disk()
 
+    @_serialized
     def shutdown(self, drain: bool = False) -> List[ScoredMetaAlert]:
         """Perform a controlled shutdown, optionally draining active buckets.
 

@@ -29,6 +29,36 @@ def make_hit(idx: int, ts_str: str = "2026-08-28T10:00:00.000+0000") -> dict:
     }
 
 
+def test_search_allows_missing_daily_indices_but_disallows_partial_results():
+    client = MagicMock(spec=WazuhIndexerClient)
+    client._request.return_value.json.return_value = {"hits": {"hits": []}}
+    poller = WazuhIndexerLivePoller(client=client)
+    assert poller.poll_recent(datetime(2026, 9, 28, tzinfo=timezone.utc)) == []
+    assert client._request.call_args.kwargs["params"] == {
+        "ignore_unavailable": "true", "allow_no_indices": "true",
+        "allow_partial_search_results": "false",
+    }
+
+
+@pytest.mark.parametrize("status", [{"timed_out": True}, {"_shards": {"failed": 1}}, {"terminated_early": True}])
+def test_partial_search_is_not_a_successful_empty_poll(status):
+    client = MagicMock(spec=WazuhIndexerClient)
+    client._request.return_value.json.return_value = {**status, "hits": {"hits": []}}
+    with pytest.raises(LiveSourceIntegrityError):
+        WazuhIndexerLivePoller(client=client).poll_recent()
+
+
+def test_repeated_full_page_cursor_fails_instead_of_looping():
+    client = MagicMock(spec=WazuhIndexerClient)
+    page = MagicMock()
+    page.json.return_value = {"hits": {"hits": [make_hit(1)]}}
+    empty = MagicMock()
+    empty.json.return_value = {"hits": {"hits": []}}
+    client._request.side_effect = [page, page, empty]
+    with pytest.raises(LiveSourceIntegrityError, match="cursor"):
+        WazuhIndexerLivePoller(client=client, page_size=1).poll_recent()
+
+
 def test_derive_daily_indices_midnight_spanning():
     """Deriving daily indices across midnight spans exactly the two UTC dates without wildcard."""
     t_start = datetime(2026, 8, 28, 23, 55, 0, tzinfo=timezone.utc)

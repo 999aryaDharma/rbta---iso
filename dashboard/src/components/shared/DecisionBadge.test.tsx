@@ -12,7 +12,7 @@ describe('DecisionBadge Component', () => {
 
   it('renders SUPPRESS action badge', () => {
     render(<DecisionBadge action="SUPPRESS" />);
-    const badge = screen.getByText('SUPPRESS');
+    const badge = screen.getByText('Action: SUPPRESS');
     expect(badge).toBeDefined();
   });
 });

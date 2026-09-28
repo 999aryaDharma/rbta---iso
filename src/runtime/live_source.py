@@ -125,7 +125,10 @@ class WazuhIndexerLivePoller:
             if search_after_cursor is not None:
                 current_body["search_after"] = search_after_cursor
 
-            resp = self.client._request("POST", target_endpoint, json_data=current_body)
+            resp = self.client._request("POST", target_endpoint, json_data=current_body, params={
+                "ignore_unavailable": "true", "allow_no_indices": "true",
+                "allow_partial_search_results": "false",
+            })
             try:
                 data = resp.json()
             except Exception as exc:
@@ -136,6 +139,11 @@ class WazuhIndexerLivePoller:
                 raise LiveSourceIntegrityError(
                     f"Malformed Indexer response: expected JSON object, got {type(data).__name__}"
                 )
+            if data.get("timed_out") or data.get("terminated_early"):
+                raise LiveSourceIntegrityError("Incomplete Indexer search response")
+            shards = data.get("_shards", {})
+            if not isinstance(shards, dict) or shards.get("failed", 0) != 0:
+                raise LiveSourceIntegrityError("Invalid or failed Indexer shards")
             if "hits" not in data or not isinstance(data["hits"], dict):
                 raise LiveSourceIntegrityError(
                     "Malformed Indexer response: missing or invalid 'hits' dictionary"
@@ -170,11 +178,19 @@ class WazuhIndexerLivePoller:
                     f"Full page ({len(hits)} items) missing 'sort' field in final hit for search_after pagination"
                 )
 
-            search_after_cursor = last_hit["sort"]
-            if not isinstance(search_after_cursor, (list, tuple)) or len(search_after_cursor) < 2:
+            next_cursor = last_hit["sort"]
+            if not isinstance(next_cursor, (list, tuple)) or len(next_cursor) != 2:
                 raise LiveSourceIntegrityError(
-                    f"Full page final hit has invalid 'sort' cursor: {search_after_cursor}"
+                    "Full page final hit has invalid 'sort' cursor"
                 )
+            if search_after_cursor is not None:
+                try:
+                    advancing = tuple(next_cursor) > tuple(search_after_cursor)
+                except TypeError:
+                    advancing = False
+                if not advancing:
+                    raise LiveSourceIntegrityError("Pagination cursor did not advance")
+            search_after_cursor = next_cursor
 
         return new_alerts
 

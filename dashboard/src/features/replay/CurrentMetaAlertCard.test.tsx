@@ -34,7 +34,7 @@ describe('CurrentMetaAlertCard component', () => {
     expect(screen.getByText('syscheck')).toBeDefined();
     expect(screen.getByText(/17/)).toBeDefined();
     expect(screen.getByText(/93.4%/)).toBeDefined();
-    expect(screen.getByText(/ESCALATE: 238/)).toBeDefined();
+    expect(screen.getByText(/Perlu perhatian: 238/)).toBeDefined();
   });
 
   it('renders waiting placeholder when no meta is finalized yet', () => {
@@ -46,6 +46,6 @@ describe('CurrentMetaAlertCard component', () => {
       />
     );
 
-    expect(screen.getByText(/Awaiting first finalized bucket/i)).toBeDefined();
+    expect(screen.getByText(/Menunggu kelompok alert pertama selesai diproses/i)).toBeDefined();
   });
 });

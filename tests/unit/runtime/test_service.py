@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 import pytest
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 from src.contracts.raw_alert import CanonicalRawAlert
 from src.contracts.scored_meta_alert import ScoredMetaAlert
@@ -25,6 +27,46 @@ def make_alert(idx: int, ts: datetime, group: str = "pam", level: int = 3, crit:
         srcip=None,
         agent_criticality=crit,
     )
+
+
+def test_concurrent_ingress_serializes_core_mutations_and_recovers_all_ids(tmp_path, monkeypatch):
+    service = LiveRBTAService(None, state_manager=DurableStateManager(tmp_path / "state.json"))
+    first_entered = Event()
+    second_requested = Event()
+    overlapped = Event()
+    process = service.engine.process
+    active = False
+
+    def guarded_process(alert):
+        nonlocal active
+        if active:
+            overlapped.set()
+        active = True
+        if alert.wazuh_alert_id == "alert_1":
+            first_entered.set()
+            assert second_requested.wait(2)
+            overlapped.wait(0.2)
+        result = process(alert)
+        active = False
+        return result
+
+    monkeypatch.setattr(service.engine, "process", guarded_process)
+    now = datetime(2026, 9, 28, tzinfo=timezone.utc)
+
+    def second():
+        second_requested.set()
+        service.ingest_alert(make_alert(2, now))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(service.ingest_alert, make_alert(1, now))
+        assert first_entered.wait(2)
+        other = pool.submit(second)
+        first.result(timeout=5)
+        other.result(timeout=5)
+    assert not overlapped.is_set()
+    recovered = LiveRBTAService(None, state_manager=DurableStateManager(tmp_path / "state.json"))
+    assert recovered.engine._active_buckets[("001", "pam")].wazuh_alert_ids == ["alert_1", "alert_2"]
+    assert recovered.is_seen("alert_1") and recovered.is_seen("alert_2")
 
 
 def test_live_service_ingestion_scoring_and_idle_flush(tmp_path: Path):

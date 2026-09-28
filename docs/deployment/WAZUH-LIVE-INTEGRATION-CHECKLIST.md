@@ -1,5 +1,10 @@
 # Wazuh Live Integration Operational Checklist
 
+> **2026-09-28 update:** The researcher selected the campus VPS as the deployment
+> target. See [the current topology decision](LIVE-TOPOLOGY-DECISION.md).
+> The ASUS references below describe the earlier topology. OS, private Indexer
+> access, and credentials are still unconfirmed; no real smoke test is claimed.
+
 This checklist tracks infrastructure, network, and scheduling parameters for the future live deployment session connecting the ASUS deployment instance to the campus Wazuh SIEM cluster.
 
 > **Current Status:** All live integration fields remain **UNKNOWN** and **DEFERRED** until the physical deployment session. No live values are assumed or hardcoded into the application codebase.

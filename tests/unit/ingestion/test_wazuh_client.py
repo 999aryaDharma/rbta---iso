@@ -19,6 +19,26 @@ def test_wazuh_client_init_and_secure_tls_defaults():
     assert client.timeout == (5.0, 30.0)
 
 
+def test_tls_environment_uses_ca_and_rejects_invalid_boolean(monkeypatch, tmp_path):
+    ca = tmp_path / "campus-ca.pem"
+    ca.write_text("test certificate placeholder", encoding="utf-8")
+    monkeypatch.setenv("WAZUH_INDEXER_CA_PATH", str(ca))
+    monkeypatch.setenv("WAZUH_INDEXER_VERIFY_TLS", "true")
+    assert WazuhIndexerClient().verify_tls == str(ca)
+    monkeypatch.setenv("WAZUH_INDEXER_VERIFY_TLS", "typo")
+    with pytest.raises(ValueError, match="WAZUH_INDEXER_VERIFY_TLS"):
+        WazuhIndexerClient()
+
+
+def test_error_does_not_expose_indexer_response_body():
+    client = WazuhIndexerClient(base_url="https://wazuh-indexer:9200")
+    response = MagicMock(status_code=401, text="sensitive-response-marker")
+    with patch.object(client._session, "request", return_value=response):
+        with pytest.raises(WazuhAuthError) as error:
+            client.list_indices()
+    assert "sensitive-response-marker" not in str(error.value)
+
+
 def test_wazuh_client_401_403_fails_fast_without_retry():
     """HTTP 401/403 status codes raise WazuhAuthError immediately without retrying."""
     client = WazuhIndexerClient(base_url="https://wazuh-indexer:9200", username="user", password="bad")

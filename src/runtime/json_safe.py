@@ -65,8 +65,17 @@ def compute_canonical_fingerprint(
     agent_criticality: float,
     mitre_tactics: Any,
     metadata: Any,
+    version: int = 2,
 ) -> str:
-    """Compute deterministic SHA-256 fingerprint over canonical alert fields."""
+    """Hash canonical evidence; v2 excludes transport envelope fields only."""
+    if version not in (1, 2):
+        raise ValueError("Unsupported canonical fingerprint version")
+    if version == 2:
+        transport_fields = {
+            "source_index", "source_document_id", "source_sort", "fetched_at",
+            "source_mode", "timestamp_received", "opensearch_index", "opensearch_document_id",
+        }
+        metadata = {key: value for key, value in metadata.items() if key not in transport_fields}
     ts_str = timestamp.isoformat() if isinstance(timestamp, datetime) else str(timestamp)
     canonical_dict = {
         "wazuh_alert_id": str(wazuh_alert_id),

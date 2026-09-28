@@ -44,7 +44,7 @@ class WazuhIndexerClient:
         base_url: Optional[str] = None,
         username: Optional[str] = None,
         password: Optional[str] = None,
-        verify_tls: Union[bool, str] = True,
+        verify_tls: Optional[Union[bool, str]] = None,
         timeout: Tuple[float, float] = (5.0, 30.0),
         max_retries: int = 3,
         sleep_fn=None,
@@ -53,6 +53,11 @@ class WazuhIndexerClient:
         self.base_url: str = (base_url or os.getenv("WAZUH_INDEXER_URL", "https://localhost:9200")).rstrip("/")
         self.username: Optional[str] = username or os.getenv("WAZUH_INDEXER_USERNAME")
         self.password: Optional[str] = password or os.getenv("WAZUH_INDEXER_PASSWORD")
+        if verify_tls is None:
+            tls_setting = os.getenv("WAZUH_INDEXER_VERIFY_TLS", "true").strip().lower()
+            if tls_setting not in ("true", "false"):
+                raise ValueError("WAZUH_INDEXER_VERIFY_TLS must be true or false")
+            verify_tls = (os.getenv("WAZUH_INDEXER_CA_PATH") or True) if tls_setting == "true" else False
         self.verify_tls: Union[bool, str] = verify_tls
         self.timeout: Tuple[float, float] = timeout
         self.max_retries: int = max_retries
@@ -90,7 +95,7 @@ class WazuhIndexerClient:
                 # 401 / 403 Fail Fast
                 if resp.status_code in (401, 403):
                     raise WazuhAuthError(
-                        f"Authentication failed ({resp.status_code}) against Wazuh Indexer at '{self.base_url}': {resp.text}"
+                        f"Authentication failed ({resp.status_code}) against Wazuh Indexer"
                     )
 
                 # Transient server errors (429, 502, 503, 504) -> retry
@@ -102,17 +107,17 @@ class WazuhIndexerClient:
                 resp.raise_for_status()
                 return resp
 
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
                 if attempt >= self.max_retries:
-                    raise WazuhClientError(f"Network failure calling '{url}' after {self.max_retries} attempts: {exc}") from exc
+                    raise WazuhClientError(f"Network failure calling Wazuh Indexer after {self.max_retries} attempts") from None
                 delay = min(30.0, (2 ** (attempt - 1)) * 0.5) + self._random_fn() * 0.5
                 self._sleep_fn(delay)
             except WazuhAuthError:
                 raise
-            except requests.exceptions.HTTPError as exc:
-                raise WazuhClientError(f"HTTP error ({resp.status_code}) calling '{url}': {resp.text}") from exc
+            except requests.exceptions.HTTPError:
+                raise WazuhClientError(f"HTTP error ({resp.status_code}) calling Wazuh Indexer") from None
 
-        raise WazuhClientError(f"Exceeded max retries calling '{url}'")
+        raise WazuhClientError("Exceeded max retries calling Wazuh Indexer")
 
     def list_indices(self, pattern: str = "wazuh-alerts-*") -> List[str]:
         """List cluster index names matching the pattern.

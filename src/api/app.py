@@ -64,7 +64,7 @@ def create_app(
         content_length = request.headers.get("content-length")
         if content_length and content_length.isdigit() and int(content_length) > max_request_bytes:
             response = JSONResponse(
-                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 content={"detail": f"Request body exceeds {max_request_bytes} bytes"},
             )
         else:

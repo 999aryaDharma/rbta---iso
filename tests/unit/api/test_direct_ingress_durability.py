@@ -2,6 +2,7 @@
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import sqlite3
 from fastapi.testclient import TestClient
 import pytest
 
@@ -12,6 +13,7 @@ from src.model.scoring_pipeline import ScoringPipeline, train_reference_pipeline
 from src.runners.batch_runner import BatchResearchRunner
 from src.runtime.durable_state import DurableStateManager
 from src.runtime.service import LiveRBTAService
+from src.runtime.raw_evidence import RawAlertEvidenceStore
 
 
 def make_raw_alert(idx: int, ts: datetime) -> CanonicalRawAlert:
@@ -49,6 +51,7 @@ def test_direct_ingress_persists_active_bucket_and_seen_id_before_http_return(tm
         "RBTA_MODEL_REGISTRY_DIR": str(reg_dir),
         "RBTA_MODEL_VERSION": "dur-v1",
         "RBTA_STATE_FILE": str(state_file),
+        "RBTA_RAW_EVIDENCE_DB": str(tmp_path / "evidence.sqlite3"),
     }
 
     # 1. Ingest alert A via HTTP API
@@ -133,3 +136,22 @@ def test_graceful_shutdown_drain_false_preserves_active_bucket_without_forced_fi
     assert len(service2.engine._active_buckets) == 1
     assert len(service2.get_history()) == 0
     assert service2.is_seen("durability_alert_1")
+
+
+@pytest.mark.parametrize("auto_persist", [True, False])
+def test_committed_state_has_raw_evidence_visible_to_another_process(tmp_path, auto_persist):
+    evidence_path = tmp_path / "evidence.sqlite3"
+    service = LiveRBTAService(
+        scoring_pipeline=None,
+        state_manager=DurableStateManager(tmp_path / "state.json"),
+        raw_evidence_store=RawAlertEvidenceStore(evidence_path),
+        auto_persist=auto_persist,
+    )
+    alert = make_raw_alert(1, datetime(2026, 9, 28, tzinfo=timezone.utc))
+    service.ingest_alert(alert)
+    if not auto_persist:
+        service.shutdown(drain=False)
+    with sqlite3.connect(evidence_path) as conn:
+        row = conn.execute("SELECT wazuh_alert_id FROM raw_alert_evidence").fetchone()
+    assert row == (alert.wazuh_alert_id,)
+    assert service.state_manager.has_seen_alert_id(alert.wazuh_alert_id)

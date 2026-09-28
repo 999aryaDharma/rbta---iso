@@ -2,9 +2,13 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import MappingProxyType
 import pytest
+import sqlite3
+import hashlib
 
 from src.contracts.raw_alert import CanonicalRawAlert
 from src.runtime.raw_evidence import RawAlertEvidenceStore, RawEvidenceConflictError
+from src.etl.wazuh_canonicalizer import canonicalize_wazuh_alert
+from src.runtime.json_safe import deterministic_json_dumps
 
 
 @pytest.fixture
@@ -74,6 +78,42 @@ def test_store_idempotent_identical_duplicate(store: RawAlertEvidenceStore):
     # Re-storing exact same alert is safe NO-OP
     assert store.store(alert) is False
     assert store.count() == 1
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_transport_envelope_does_not_change_evidence_identity(tmp_path, legacy):
+    payload = {
+        "id": "transport-parity", "timestamp": "2026-09-28T00:00:00Z",
+        "agent": {"id": "001", "name": "campus"},
+        "rule": {"id": "5501", "level": 3, "groups": ["pam"]},
+    }
+    hit = {"_source": payload, "_index": "wazuh-alerts-4.x-2026.09.28", "_id": "doc", "sort": [1, "transport-parity"]}
+    alert = canonicalize_wazuh_alert(hit)
+    path = tmp_path / "evidence.sqlite3"
+    store = RawAlertEvidenceStore(path)
+    assert store.store(alert)
+    store.flush()
+    original_hash = store.get(alert.wazuh_alert_id)["canonical_fingerprint"]
+    if legacy:
+        fields = {name: getattr(alert, name) for name in (
+            "wazuh_alert_id", "timestamp", "agent_id", "agent_name", "rule_id", "rule_level",
+            "rule_group_primary", "srcip", "agent_criticality", "mitre_tactics", "metadata",
+        )}
+        fields["srcip"] = fields["srcip"] or ""
+        fields["agent_criticality"] = float(fields["agent_criticality"])
+        original_hash = hashlib.sha256(deterministic_json_dumps(fields).encode()).hexdigest()
+        with sqlite3.connect(path) as conn:
+            # Reproduce a database created before fingerprint versioning existed.
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(raw_alert_evidence)")}
+            if "fingerprint_version" in columns:
+                conn.execute("UPDATE raw_alert_evidence SET fingerprint_version = 1")
+            conn.execute("UPDATE raw_alert_evidence SET canonical_fingerprint = ?", (original_hash,))
+    reopened = RawAlertEvidenceStore(path)
+    assert reopened.store(canonicalize_wazuh_alert(payload)) is False
+    assert reopened.get(alert.wazuh_alert_id)["canonical_fingerprint"] == original_hash
+    payload["rule"]["level"] = 12
+    with pytest.raises(RawEvidenceConflictError):
+        reopened.store(canonicalize_wazuh_alert(payload))
 
 
 def test_store_conflicting_duplicate_raises_error(store: RawAlertEvidenceStore):

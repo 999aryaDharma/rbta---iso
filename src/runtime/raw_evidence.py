@@ -29,7 +29,7 @@ class RawAlertEvidenceStore:
     """RawAlertEvidenceStore — SQLite-backed raw alert evidence persistence with WAL mode.
 
     Guarantees:
-    - High-throughput batched write buffer with WAL journal and NORMAL synchronous mode.
+    - Batched write buffer with WAL journal and FULL synchronous mode.
     - Idempotent duplicate: identical alert fingerprint -> NO-OP (returns False).
     - Conflicting duplicate: different alert fingerprint -> raises RawEvidenceConflictError (fail-closed).
     - Exact source membership traceability for MetaAlerts (source_total, resolved_total, unresolved_ids).
@@ -57,7 +57,7 @@ class RawAlertEvidenceStore:
             conn = sqlite3.connect(str(self.db_path), timeout=30.0, check_same_thread=False)
             conn.row_factory = sqlite3.Row
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA synchronous=FULL")
             conn.execute("PRAGMA cache_size=-64000")
             conn.execute("PRAGMA temp_store=MEMORY")
             conn.execute("PRAGMA busy_timeout=30000")
@@ -102,6 +102,7 @@ class RawAlertEvidenceStore:
 
             column_defs = {
                 "canonical_fingerprint": "TEXT NOT NULL DEFAULT ''",
+                "fingerprint_version": "INTEGER NOT NULL DEFAULT 1",
                 "rule_description": "TEXT DEFAULT ''",
                 "rule_groups_all": "TEXT DEFAULT '[]'",
                 "mitre_tactics": "TEXT DEFAULT '[]'",
@@ -138,13 +139,13 @@ class RawAlertEvidenceStore:
             conn.executemany(
                 """
                 INSERT OR IGNORE INTO raw_alert_evidence (
-                    wazuh_alert_id, canonical_fingerprint, timestamp, agent_id, agent_name,
+                    wazuh_alert_id, canonical_fingerprint, fingerprint_version, timestamp, agent_id, agent_name,
                     rule_id, rule_level, rule_description, rule_group_primary, rule_groups_all,
                     mitre_tactics, mitre_techniques, srcip, location, decoder,
                     full_log, agent_criticality, metadata, original_source_payload,
                     source_index, source_document_id, source_mode, ingested_at
                 ) VALUES (
-                    ?, ?, ?, ?, ?,
+                    ?, ?, 2, ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?,
@@ -223,12 +224,25 @@ class RawAlertEvidenceStore:
 
             conn = self._get_conn()
             row = conn.execute(
-                "SELECT canonical_fingerprint FROM raw_alert_evidence WHERE wazuh_alert_id = ?",
+                "SELECT * FROM raw_alert_evidence WHERE wazuh_alert_id = ?",
                 (alert.wazuh_alert_id,),
             ).fetchone()
 
             if row is not None:
                 existing_fp = row["canonical_fingerprint"]
+                if row["fingerprint_version"] == 1:
+                    fields = {name: row[name] for name in (
+                        "wazuh_alert_id", "timestamp", "agent_id", "agent_name", "rule_id", "rule_level",
+                        "rule_group_primary", "srcip", "agent_criticality",
+                    )}
+                    fields["metadata"] = json.loads(row["metadata"])
+                    fields["mitre_tactics"] = json.loads(row["mitre_tactics"])
+                    if compute_canonical_fingerprint(**fields, version=1) != existing_fp:
+                        raise RawEvidenceIntegrityError("Legacy evidence fingerprint does not match stored canonical content")
+                    # Compare normalized content without rewriting historical hashes.
+                    existing_fp = compute_canonical_fingerprint(**fields)
+                elif row["fingerprint_version"] != 2:
+                    raise RawEvidenceIntegrityError("Unsupported stored fingerprint version")
                 if len(self._recent_fingerprints) < self._max_recent_fingerprints:
                     self._recent_fingerprints[alert.wazuh_alert_id] = existing_fp
                 if existing_fp == fingerprint:
@@ -280,13 +294,13 @@ class RawAlertEvidenceStore:
                 conn.executemany(
                     """
                     INSERT OR IGNORE INTO raw_alert_evidence (
-                        wazuh_alert_id, canonical_fingerprint, timestamp, agent_id, agent_name,
+                        wazuh_alert_id, canonical_fingerprint, fingerprint_version, timestamp, agent_id, agent_name,
                         rule_id, rule_level, rule_description, rule_group_primary, rule_groups_all,
                         mitre_tactics, mitre_techniques, srcip, location, decoder,
                         full_log, agent_criticality, metadata, original_source_payload,
                         source_index, source_document_id, source_mode, ingested_at
                     ) VALUES (
-                        ?, ?, ?, ?, ?,
+                        ?, ?, 2, ?, ?, ?,
                         ?, ?, ?, ?, ?,
                         ?, ?, ?, ?, ?,
                         ?, ?, ?, ?,

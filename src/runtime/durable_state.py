@@ -3,6 +3,7 @@
 from collections import Counter
 from datetime import datetime, timezone
 import json
+import logging
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -10,6 +11,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from src.contracts.raw_alert import CanonicalRawAlert
 from src.rbta.engine import RBTAEngine, _ActiveBucket
 from src.rbta.temporal_state import AgentTemporalState
+
+logger = logging.getLogger(__name__)
 
 
 class DurableStateManager:
@@ -42,6 +45,7 @@ class DurableStateManager:
                 )
                 """
             )
+            conn.execute("CREATE TABLE IF NOT EXISTS runtime_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL)")
 
     def append_finalized(self, scored_items: List[Dict[str, Any]]) -> None:
         if not scored_items:
@@ -165,17 +169,11 @@ class DurableStateManager:
         """Atomically persist engine state, active buckets, seen alert IDs, pending scoring, and outbox to disk."""
         self.filepath.parent.mkdir(parents=True, exist_ok=True)
         
-        if new_finalized_history:
-            self.append_finalized(new_finalized_history)
-
         tmp_file = self.filepath.with_suffix(".tmp")
 
         # Seen IDs are append-only in SQLite so checkpoint cost is proportional
         # to new events rather than rewriting the full replay history as JSON.
         new_seen_ids = set(getattr(engine, "_new_seen_alert_ids", set()))
-        self.append_seen_alert_ids(new_seen_ids)
-        if hasattr(engine, "_new_seen_alert_ids"):
-            engine._new_seen_alert_ids.difference_update(new_seen_ids)
 
         # 1. Serialize Meta Counter
         meta_id_counter = engine._meta_id_counter
@@ -220,7 +218,7 @@ class DurableStateManager:
             })
 
         payload = {
-            "schema_version": "1.1",
+            "schema_version": "1.2",
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "meta_id_counter": meta_id_counter,
             "temporal_states": temporal_states_data,
@@ -230,10 +228,29 @@ class DurableStateManager:
             "outbox": outbox or [],
         }
 
-        with tmp_file.open("w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
+        # Serialize before any writes. A single SQLite commit is authoritative
+        # for both duplicate protection and the RBTA mutation it protects.
+        serialized = json.dumps(payload, indent=2)
+        history_rows = [(item["meta_id"], json.dumps(item)) for item in (new_finalized_history or [])]
+        with sqlite3.connect(self.history_db_path) as conn:
+            conn.execute("PRAGMA synchronous=FULL")
+            conn.executemany(
+                "INSERT OR IGNORE INTO finalized_history (meta_id, scored_data) VALUES (?, ?)", history_rows,
+            )
+            conn.executemany(
+                "INSERT OR IGNORE INTO seen_alert_ids (wazuh_alert_id) VALUES (?)",
+                ((alert_id,) for alert_id in new_seen_ids),
+            )
+            conn.execute("INSERT OR REPLACE INTO runtime_snapshot (id, payload) VALUES (1, ?)", (serialized,))
+        if hasattr(engine, "_new_seen_alert_ids"):
+            engine._new_seen_alert_ids.difference_update(new_seen_ids)
 
-        tmp_file.replace(self.filepath)
+        # Compatibility/export mirror only; recovery always prefers SQLite.
+        try:
+            tmp_file.write_text(serialized, encoding="utf-8")
+            tmp_file.replace(self.filepath)
+        except OSError:
+            logger.warning("Runtime JSON mirror could not be published; committed SQLite snapshot remains authoritative")
 
     def restore_state(self, engine: RBTAEngine, hydrate_seen_ids: bool = True) -> Dict[str, Any]:
         """Restore internal engine structures from disk into the provided RBTAEngine instance.
@@ -248,13 +265,19 @@ class DurableStateManager:
         Dict[str, Any]
             Restored metadata dictionary containing 'outbox' and 'source_checkpoint'.
         """
-        if not self.filepath.exists():
+        with sqlite3.connect(self.history_db_path) as conn:
+            row = conn.execute("SELECT payload FROM runtime_snapshot WHERE id = 1").fetchone()
+        if row:
+            data = json.loads(row[0])
+        elif self.filepath.exists():
+            with self.filepath.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            if data.get("schema_version") == "1.2":
+                raise ValueError("Runtime SQLite snapshot missing; restore the complete runtime backup, not its JSON mirror")
+        else:
             engine._seen_alert_ids = self.load_seen_alert_ids() if hydrate_seen_ids else set()
             engine._new_seen_alert_ids = set()
             return {"outbox": [], "source_checkpoint": {}, "finalized_history": self.load_finalized_history()}
-
-        with self.filepath.open("r", encoding="utf-8") as f:
-            data = json.load(f)
 
         # 1. Restore Seen IDs and Counter
         legacy_seen_ids = set(data.get("seen_alert_ids", []))

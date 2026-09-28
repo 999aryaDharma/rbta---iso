@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import json
+import sqlite3
 import pytest
 
 from src.contracts.raw_alert import CanonicalRawAlert
@@ -119,3 +120,87 @@ def test_restore_only_loads_bounded_recent_history(tmp_path: Path):
     restored = manager.restore_state(RBTAEngine(base_delta_t=timedelta(minutes=15)))
     assert len(restored["finalized_history"]) == 1000
     assert restored["finalized_history"][0]["meta_id"] == 202
+
+
+def test_failed_checkpoint_does_not_commit_seen_ids_or_history(tmp_path):
+    manager = DurableStateManager(tmp_path / "state.json")
+    engine = RBTAEngine()
+    now = datetime(2026, 9, 28, tzinfo=timezone.utc)
+    engine.process(make_alert(1, now))
+    manager.save_state(engine)
+    engine.process(make_alert(2, now + timedelta(seconds=1)))
+
+    with pytest.raises(TypeError):
+        manager.save_state(
+            engine, source_checkpoint={"invalid": object()},
+            new_finalized_history=[{"meta_id": 42}],
+        )
+
+    restored = RBTAEngine()
+    manager.restore_state(restored)
+    assert not manager.has_seen_alert_id("alert_2")
+    assert manager.get_finalized(42) is None
+    assert restored._active_buckets[("001", "pam")].wazuh_alert_ids == ["alert_1"]
+    assert "alert_2" in engine._new_seen_alert_ids
+
+
+def test_recovery_after_json_publication_failure_keeps_dedup_and_bucket_together(tmp_path, monkeypatch):
+    manager = DurableStateManager(tmp_path / "state.json")
+    engine = RBTAEngine()
+    now = datetime(2026, 9, 28, tzinfo=timezone.utc)
+    engine.process(make_alert(1, now))
+    manager.save_state(engine)
+    engine.process(make_alert(2, now + timedelta(seconds=1)))
+
+    def fail_replace(*args, **kwargs):
+        raise OSError("simulated interrupted JSON publication")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+    try:
+        manager.save_state(engine)
+    except OSError:
+        pass
+    restored = RBTAEngine()
+    DurableStateManager(manager.state_path).restore_state(restored)
+    assert restored._seen_alert_ids == set(restored._active_buckets[("001", "pam")].wazuh_alert_ids)
+    assert restored._active_buckets[("001", "pam")].wazuh_alert_ids == ["alert_1", "alert_2"]
+
+
+def test_sqlite_checkpoint_failure_rolls_back_history_dedup_and_snapshot(tmp_path):
+    manager = DurableStateManager(tmp_path / "state.json")
+    engine = RBTAEngine()
+    now = datetime(2026, 9, 28, tzinfo=timezone.utc)
+    engine.process(make_alert(1, now))
+    manager.save_state(engine, source_checkpoint={"cursor": 1})
+    engine.process(make_alert(2, now + timedelta(seconds=1)))
+    with sqlite3.connect(manager.history_db_path) as conn:
+        conn.execute("CREATE TRIGGER fail_checkpoint BEFORE INSERT ON runtime_snapshot BEGIN SELECT RAISE(ABORT, 'disk failure'); END")
+    with pytest.raises(sqlite3.IntegrityError, match="disk failure"):
+        manager.save_state(engine, source_checkpoint={"cursor": 2}, new_finalized_history=[{"meta_id": 42}])
+    recovered = RBTAEngine()
+    restored = manager.restore_state(recovered)
+    assert restored["source_checkpoint"] == {"cursor": 1}
+    assert not manager.has_seen_alert_id("alert_2")
+    assert manager.get_finalized(42) is None
+    assert recovered._active_buckets[("001", "pam")].alert_count == 1
+    assert "alert_2" in engine._new_seen_alert_ids
+
+
+def test_legacy_json_snapshot_migrates_without_reset(tmp_path):
+    state = tmp_path / "state.json"
+    state.write_text(json.dumps({
+        "schema_version": "1.0", "seen_alert_ids": ["legacy-alert"],
+        "meta_id_counter": 7, "source_checkpoint": {"cursor": "legacy"},
+        "pending_scoring": [], "outbox": [{"meta_id": 6}],
+    }), encoding="utf-8")
+    manager = DurableStateManager(state)
+    engine = RBTAEngine()
+    restored = manager.restore_state(engine)
+    manager.save_state(engine, outbox=restored["outbox"], source_checkpoint=restored["source_checkpoint"])
+    state.unlink()  # SQLite alone must suffice after migration.
+    recovered = RBTAEngine()
+    restored = DurableStateManager(state).restore_state(recovered)
+    assert recovered._seen_alert_ids == {"legacy-alert"}
+    assert recovered._meta_id_counter == 7
+    assert restored["outbox"] == [{"meta_id": 6}]
+    assert restored["source_checkpoint"] == {"cursor": "legacy"}
