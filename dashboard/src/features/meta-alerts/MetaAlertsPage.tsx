@@ -161,9 +161,9 @@ export function MetaAlertsPage() {
               size="sm"
               value={decision || ''}
               onValueChange={(val) => setFilterParam('decision', val as string)}
-              placeholder="All Decisions"
+              placeholder="All Levels"
             >
-              <Select.Option value="">All Decisions</Select.Option>
+              <Select.Option value="">All Levels</Select.Option>
               <Select.Option value="CRITICAL">CRITICAL</Select.Option>
               <Select.Option value="SUSPICIOUS">SUSPICIOUS</Select.Option>
               <Select.Option value="CONTEXTUAL_ANOMALY">CONTEXTUAL_ANOMALY</Select.Option>
@@ -202,7 +202,7 @@ export function MetaAlertsPage() {
                     {sortBy !== 'anomaly_score' ? <CaretUpDown size={13} /> : sortOrder === 'desc' ? <CaretDown size={13} /> : <CaretUp size={13} />}
                   </button>
                 </Table.Head>
-                <Table.Head>SOC Decision</Table.Head>
+                <Table.Head>SOC Level</Table.Head>
               </Table.Row>
             </Table.Header>
             <Table.Body>

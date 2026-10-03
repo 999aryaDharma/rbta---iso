@@ -68,7 +68,7 @@ describe('ReplayPipelineVisualizer component', () => {
     expect(screen.getByText('5. MetaAlert')).toBeDefined();
     expect(screen.getByText('6. 7 Features')).toBeDefined();
     expect(screen.getByText('7. IsoForest')).toBeDefined();
-    expect(screen.getByText('8. Decision')).toBeDefined();
+    expect(screen.getByText('8. Level')).toBeDefined();
     expect(screen.getByText('9. Output Sink')).toBeDefined();
 
     expect(screen.getByText('RUNNING')).toBeDefined();

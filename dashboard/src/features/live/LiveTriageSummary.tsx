@@ -151,11 +151,11 @@ export function LiveTriageSummaryPanel({ isLoading, isError, data, errorMessage,
 
       <div>
         <h4 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong mb-2">
-          Distribusi decision (live)
+          Distribusi level (live)
         </h4>
         {data.decisionUnavailable ? (
           <p className="text-xs text-kumo-subtle">
-            Distribusi decision tidak tersedia. Daftar MetaAlert live gagal dimuat.
+            Distribusi level tidak tersedia. Daftar MetaAlert live gagal dimuat.
           </p>
         ) : decisions.length === 0 ? (
           <p className="text-xs text-kumo-subtle">

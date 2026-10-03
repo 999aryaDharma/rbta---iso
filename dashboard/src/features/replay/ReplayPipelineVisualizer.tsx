@@ -147,11 +147,11 @@ export function ReplayPipelineVisualizer({
         {
           id: 'DECISION' as PipelineStageId,
           num: '08',
-          title: '8. Decision',
+          title: '8. Level',
           sublabel: 'Tukey IQR Matrix',
           icon: Scales,
           metric: latestMeta?.decision ?? 'NOISE',
-          metricLabel: 'Decision',
+          metricLabel: 'Level',
         },
         {
           id: 'OUTPUT_SINK' as PipelineStageId,

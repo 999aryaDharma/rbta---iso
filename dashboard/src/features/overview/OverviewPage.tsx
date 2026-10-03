@@ -234,7 +234,7 @@ export function OverviewPage() {
                   <Table.Head>Rule Group</Table.Head>
                   <Table.Head className="text-right">Jumlah Alert</Table.Head>
                   <Table.Head className="text-right">Skor Anomali</Table.Head>
-                  <Table.Head>Keputusan / Aksi</Table.Head>
+                  <Table.Head>Level / Aksi</Table.Head>
                 </Table.Row>
               </Table.Header>
               <Table.Body>

@@ -72,7 +72,7 @@ export function DeferredTelegramOutbox() {
               <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
                 <Table.Head>Timestamp</Table.Head>
                 <Table.Head>Meta ID</Table.Head>
-                <Table.Head>Decision</Table.Head>
+                <Table.Head>Level</Table.Head>
                 <Table.Head>Group & Endpoint</Table.Head>
                 <Table.Head>Score / Threshold</Table.Head>
                 <Table.Head>Telegram Message Payload</Table.Head>

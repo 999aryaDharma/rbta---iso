@@ -143,7 +143,7 @@ export function PipelineStageDetail({
             </div>
 
             <div className="p-3 rounded bg-kumo-recessed border border-kumo-hairline space-y-1">
-              <div className="text-[11px] text-kumo-subtle uppercase">Decision Threshold</div>
+              <div className="text-[11px] text-kumo-subtle uppercase">Level Threshold</div>
               <div className="flex justify-between">
                 <span className="text-kumo-subtle">Tukey Threshold:</span>
                 <span className="font-semibold text-kumo-default">{latestMeta?.threshold_used?.toFixed(6) ?? '-'}</span>

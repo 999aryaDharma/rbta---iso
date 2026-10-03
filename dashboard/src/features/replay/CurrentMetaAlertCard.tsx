@@ -104,7 +104,7 @@ export function CurrentMetaAlertCard({
             <p className="text-[10px] leading-4 text-kumo-subtle">{margin >= 0 ? 'Skor berada di atas batas.' : 'Skor berada di bawah batas.'} Angka asli ditampilkan tanpa dipotong.</p>
           </div>
 
-          {/* Keputusan dan tindakan adalah dua hal berbeda */}
+          {/* Level dan tindakan adalah dua hal berbeda */}
           <div className="space-y-1.5 flex flex-col justify-center">
             <div className="text-[11px] text-kumo-subtle uppercase tracking-wider font-semibold">Hasil dan tindakan</div>
             <div className="flex items-center gap-2">

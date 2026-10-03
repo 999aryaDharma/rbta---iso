@@ -79,7 +79,7 @@ describe('PipelineStageDetail component', () => {
       />
     );
 
-    expect(screen.getByText(/Decision Threshold/i)).toBeDefined();
+    expect(screen.getByText(/Level Threshold/i)).toBeDefined();
     expect(screen.getByText(/\+0.050000/)).toBeDefined();
   });
 });
