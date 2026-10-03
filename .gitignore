@@ -159,3 +159,9 @@ artifacts/research-runs/
 state/
 models/
 AGENTS.md
+
+# Local-only operational scratch (kredensial dev / helper lokal, jangan commit)
+scripts/run-backend.ps1
+scripts/run-frontend.ps1
+role-patched*.json
+guardins-ca.pem
