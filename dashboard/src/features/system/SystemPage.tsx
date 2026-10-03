@@ -2,6 +2,7 @@ import { usePollingQuery } from '@/hooks/usePolling';
 import { fetchSystemInfo, fetchSummary } from '@/api/dashboard';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { MetricCard } from '@/components/shared/MetricCard';
+import { LiveStatusCard } from '@/features/live/LiveStatusPanel';
 import { useSearchParams } from 'react-router-dom';
 import { HardDrives, Cpu } from '@phosphor-icons/react';
 
@@ -21,6 +22,7 @@ export function SystemPage() {
       />
 
       <div className="px-6 py-8 lg:px-10 space-y-8">
+        <LiveStatusCard />
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
           <MetricCard label="System Status" value={sys?.system_status ?? '—'} sub="Nilai aktual dari API" />
           <MetricCard label="Model Version" value={sys?.model_version ?? '—'} sub="Registered bundle" />

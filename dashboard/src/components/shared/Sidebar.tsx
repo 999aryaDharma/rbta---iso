@@ -8,7 +8,7 @@ import {
 import { Badge } from '@cloudflare/kumo/components/badge';
 import {
   House, ChartBar, Cpu, Play, Plugs, GearSix,
-  MagnifyingGlass, CaretUpDown, ShieldCheck,
+  MagnifyingGlass, CaretUpDown, ShieldCheck, Pulse,
 } from '@phosphor-icons/react';
 
 export function AppSidebar() {
@@ -36,7 +36,7 @@ export function AppSidebar() {
       const now = Date.now();
       if (lastKey === 'g' && now - lastKeyTime < 1000) {
         const map: Record<string, string> = {
-          o: '/overview', m: '/meta-alerts', r: '/rbta', d: '/demo', s: '/system',
+          o: '/overview', m: '/meta-alerts', r: '/rbta', d: '/demo', l: '/live', s: '/system',
         };
         if (map[e.key]) {
           e.preventDefault();
@@ -146,12 +146,22 @@ export function AppSidebar() {
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
+                icon={Pulse}
+                active={isPathActive('/live')}
+                tooltip="Live stream Wazuh"
+                onClick={() => navigate(withRunId('/live'))}
+              >
+                Live
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
                 icon={Play}
                 active={isPathActive('/demo')}
-                tooltip="Demo penelitian"
+                tooltip="Replay penelitian"
                 onClick={() => navigate(withRunId('/demo'))}
               >
-                Demo
+                Replay
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

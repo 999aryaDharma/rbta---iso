@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { DialogRoot, Dialog, DialogClose } from '@cloudflare/kumo/components/dialog';
 import { Button } from '@cloudflare/kumo/components/button';
 import {
-  ChartBar, PaintBucket, Cpu, Play, Plugs, GearSix, ArrowRight, MagnifyingGlass, Hash,
+  ChartBar, PaintBucket, Cpu, Play, Plugs, GearSix, ArrowRight, MagnifyingGlass, Hash, Pulse,
 } from '@phosphor-icons/react';
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -20,7 +20,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     { label: 'Overview Dashboard', category: 'Pages', desc: 'Real-time security analytics and live timeseries', path: withRunId('/overview'), icon: ChartBar },
     { label: 'MetaAlerts Explorer', category: 'Pages', desc: 'Investigate clustered alerts and anomaly scores', path: withRunId('/meta-alerts'), icon: PaintBucket },
     { label: 'RBTA Engine State', category: 'Pages', desc: 'Inspect active windows and temporal reduction', path: withRunId('/rbta'), icon: Cpu },
-    { label: 'Demo Sidang', category: 'Pages', desc: 'Replay, evaluasi RBTA, model, dan evidence', path: withRunId('/demo'), icon: Play },
+    { label: 'Live Stream', category: 'Pages', desc: 'Status worker live, siklus, karantina, dan lag', path: withRunId('/live'), icon: Pulse },
+    { label: 'Replay Sidang', category: 'Pages', desc: 'Replay, evaluasi RBTA, model, dan evidence', path: withRunId('/demo'), icon: Play },
     { label: 'Integrations & Shuffle SOAR', category: 'Operations', desc: 'Manage Shuffle webhook and deferred Telegram sink', path: withRunId('/integrations'), icon: Plugs },
     { label: 'System Configuration', category: 'Operations', desc: 'Governance, model calibration, and environment', path: withRunId('/system'), icon: GearSix },
   ];

@@ -2,6 +2,8 @@ import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-quer
 import { fetchMetaAlerts } from '@/api/metaAlerts';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { DecisionBadge } from '@/components/shared/DecisionBadge';
+import { LiveReplaySwitcher } from '@/features/live/LiveReplaySwitcher';
+import { resolveLiveContext } from '@/features/live/liveContext';
 import { formatDateTime, formatScore } from '@/lib/formatters';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
@@ -49,7 +51,7 @@ export function MetaAlertsPage() {
     return () => clearTimeout(timer);
   }, [localSearch, urlSearch, searchParams, setSearchParams]);
 
-  const { data, isFetching, isPlaceholderData } = useQuery({
+  const { data, isFetching, isPlaceholderData, isLoading, isError, error } = useQuery({
     queryKey: ['meta-alerts', page, decision, action, urlSearch, sortBy, sortOrder, runId || 'live'],
     queryFn: () =>
       fetchMetaAlerts({
@@ -114,6 +116,21 @@ export function MetaAlertsPage() {
       />
 
       <div className="px-6 py-8 lg:px-10 space-y-6">
+        <LiveReplaySwitcher
+          mode={resolveLiveContext(runId)}
+          status={isError ? 'error' : isLoading ? 'loading' : data && data.total === 0 ? 'empty' : 'idle'}
+          errorMessage={isError ? (error instanceof Error ? error.message : 'Gagal memuat MetaAlert') : undefined}
+          onChange={(next) => {
+            if (next === 'live') {
+              const params = new URLSearchParams(searchParams);
+              params.delete('run_id');
+              params.set('page', '1');
+              setSearchParams(params);
+            } else if (!runId) {
+              navigate('/demo');
+            }
+          }}
+        />
         {/* Filter toolbar card */}
         <div className="p-5 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">

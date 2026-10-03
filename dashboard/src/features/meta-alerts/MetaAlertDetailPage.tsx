@@ -29,18 +29,61 @@ export function MetaAlertDetailPage() {
 
   const withRunId = (path: string) => (runId ? `${path}${path.includes('?') ? '&' : '?'}run_id=${encodeURIComponent(runId)}` : path);
 
-  const { data } = useQuery({
+  const { data, isLoading: isDetailLoading, isError: isDetailError, error: detailError, refetch: refetchDetail } = useQuery({
     queryKey: ['meta-alert', id, runId || 'live'],
     queryFn: () => fetchMetaAlert(id, runId || undefined),
+    enabled: Number.isFinite(id),
   });
 
   const { data: trace, isLoading: isTraceLoading, isError: isTraceError, error: traceError, refetch: refetchTrace } = useQuery({
     queryKey: ['meta-alert-trace', id, runId || 'live'],
     queryFn: () => fetchMetaAlertTrace(id, runId || undefined),
+    enabled: Number.isFinite(id),
   });
 
-  if (!data) {
-    return <div className="p-6 text-xs text-kumo-subtle">Loading MetaAlert #{id}...</div>;
+  if (!Number.isFinite(id)) {
+    return (
+      <div className="p-6 space-y-3">
+        <p role="status" className="text-xs text-kumo-subtle">ID MetaAlert tidak valid: “{metaId}”.</p>
+        <button
+          type="button"
+          onClick={() => navigate(withRunId('/meta-alerts'))}
+          className="px-4 py-2 rounded-lg text-sm font-semibold border border-kumo-hairline"
+        >
+          Kembali ke daftar
+        </button>
+      </div>
+    );
+  }
+
+  if (isDetailLoading) {
+    return <div role="status" className="p-6 text-xs text-kumo-subtle">Loading MetaAlert #{id}...</div>;
+  }
+
+  if (isDetailError || !data) {
+    return (
+      <div className="p-6 space-y-3">
+        <p role="alert" className="text-xs text-red-600">
+          Gagal memuat MetaAlert #{id}{detailError instanceof Error ? `: ${detailError.message}` : ''}.
+        </p>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => void refetchDetail()}
+            className="px-4 py-2 rounded-lg text-sm font-semibold border border-kumo-hairline"
+          >
+            Coba lagi
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate(withRunId('/meta-alerts'))}
+            className="px-4 py-2 rounded-lg text-sm border border-kumo-hairline text-kumo-subtle"
+          >
+            Kembali ke daftar
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const tabsConfig = [
