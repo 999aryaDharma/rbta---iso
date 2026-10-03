@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Pulse, Play } from "@phosphor-icons/react";
 
 export type LiveContext = "live" | "replay";
 export type SwitcherStatus = "idle" | "loading" | "error" | "empty";
@@ -16,6 +17,19 @@ const STATUS_LABEL: Record<Exclude<SwitcherStatus, "idle">, string> = {
   error: "Gagal memuat konteks",
   empty: "Belum ada MetaAlert pada konteks ini",
 };
+
+const CONTEXT_META = {
+  live: {
+    label: "Live",
+    caption: "Menampilkan: Live (arus alert langsung).",
+    Icon: Pulse,
+  },
+  replay: {
+    label: "Replay",
+    caption: "Menampilkan: Replay (dataset historis).",
+    Icon: Play,
+  },
+} as const;
 
 export function LiveReplaySwitcher({
   mode,
@@ -44,21 +58,30 @@ export function LiveReplaySwitcher({
         aria-label="Konteks data: live atau replay"
         className="flex gap-2"
       >
-        {(["live", "replay"] as const).map((value) => (
-          <button
-            key={value}
-            type="button"
-            role="radio"
-            aria-checked={mode === value}
-            aria-pressed={mode === value}
-            disabled={disabled || busy}
-            onClick={() => select(value)}
-            className="px-4 py-2 rounded-lg text-sm font-semibold border border-kumo-hairline data-[active=true]:bg-kumo-brand"
-            data-active={mode === value}
-          >
-            {value === "live" ? "Live" : "Replay"}
-          </button>
-        ))}
+        {(["live", "replay"] as const).map((value) => {
+          const active = mode === value;
+          const { label, Icon } = CONTEXT_META[value];
+          return (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={active}
+              aria-pressed={active}
+              disabled={disabled || busy}
+              onClick={() => select(value)}
+              data-active={active}
+              className={
+                active
+                  ? "switcher-active inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold border border-transparent bg-kumo-brand text-white shadow-xs cursor-default"
+                  : "inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border border-kumo-hairline bg-transparent text-kumo-subtle hover:text-kumo-strong hover:border-kumo-strong/40"
+              }
+            >
+              <Icon size={15} weight={active ? "fill" : "regular"} aria-hidden="true" />
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       {status === "loading" && (
@@ -78,11 +101,13 @@ export function LiveReplaySwitcher({
         </p>
       )}
       {status === "idle" && (
-        <p className="text-xs text-kumo-subtle">
-          Konteks aktif:{" "}
-          {mode === "live"
-            ? "Live: MetaAlert live memakai kontrak provenance yang sama dengan replay."
-            : "Replay: dataset historis untuk demo sidang."}
+        <p className="text-xs text-kumo-strong font-medium">
+          {mode === "live" ? CONTEXT_META.live.caption : CONTEXT_META.replay.caption}{" "}
+          <span className="text-kumo-subtle font-normal">
+            {mode === "live"
+              ? "Kontrak provenance sama dengan replay."
+              : "Pilih Live untuk kembali ke arus langsung."}
+          </span>
         </p>
       )}
     </div>

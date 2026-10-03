@@ -589,10 +589,6 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
 
     await expect(page.locator('text=MetaAlert #101')).toBeVisible();
 
-    // Click Seven Features tab
-    const featuresTab = page.locator('button[role="tab"]:has-text("Seven Features")');
-    await featuresTab.click();
-
     await expect(page.locator('text=max_severity')).toBeVisible();
     await expect(page.locator('text=mitre_tactic_count')).toBeVisible();
     await expect(page.locator('text=critical_mitre_tactic_present')).toBeVisible();

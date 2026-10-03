@@ -32,6 +32,16 @@ describe('LiveReplaySwitcher', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/belum ada metaalert/i);
   });
 
+  it('menegaskan konteks aktif lewat keterangan dan gaya', () => {
+    const { rerender } = render(<LiveReplaySwitcher mode="live" onChange={() => {}} />);
+    expect(screen.getByText(/menampilkan: live/i)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /^live/i })).toHaveClass('switcher-active');
+
+    rerender(<LiveReplaySwitcher mode="replay" onChange={() => {}} />);
+    expect(screen.getByText(/menampilkan: replay/i)).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /^replay/i })).toHaveClass('switcher-active');
+  });
+
   it('disables switching while disabled', () => {
     const onChange = vi.fn();
     render(<LiveReplaySwitcher mode="replay" onChange={onChange} disabled />);

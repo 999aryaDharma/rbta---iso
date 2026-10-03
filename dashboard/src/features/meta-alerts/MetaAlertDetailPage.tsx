@@ -1,11 +1,9 @@
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchMetaAlert, fetchMetaAlertTrace } from '@/api/metaAlerts';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { DecisionBadge } from '@/components/shared/DecisionBadge';
 import { formatDateTime, formatScore } from '@/lib/formatters';
-import { Tabs } from '@cloudflare/kumo/components/tabs';
 import { Button } from '@cloudflare/kumo/components/button';
 import { ArrowRight, Copy, WarningCircle } from '@phosphor-icons/react';
 
@@ -23,7 +21,6 @@ export function MetaAlertDetailPage() {
   const { metaId } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState('overview');
   const runId = searchParams.get('run_id');
   const id = Number(metaId);
 
@@ -86,12 +83,6 @@ export function MetaAlertDetailPage() {
     );
   }
 
-  const tabsConfig = [
-    { value: 'overview', label: 'Overview & Detection' },
-    { value: 'features', label: 'Seven Features' },
-    { value: 'provenance', label: `Provenance Trace (${data.alert_count})` },
-  ];
-
   return (
     <>
       <PageHeader
@@ -112,19 +103,9 @@ export function MetaAlertDetailPage() {
         }
       />
 
-      <div className="px-6 lg:px-8 border-b border-kumo-hairline bg-kumo-canvas">
-        <Tabs
-          tabs={tabsConfig}
-          value={activeTab}
-          onValueChange={setActiveTab}
-          variant="underline"
-        />
-      </div>
-
       <div className="px-6 py-8 lg:px-10 space-y-8">
-        {/* Tab 1: Overview & Detection */}
-        {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Overview & Detection */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Aggregation Profile Card */}
             <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs">
               <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong mb-4 pb-3 border-b border-kumo-hairline">
@@ -183,11 +164,9 @@ export function MetaAlertDetailPage() {
               </dl>
             </div>
           </div>
-        )}
 
-        {/* Tab 2: Seven Features */}
-        {activeTab === 'features' && (
-          <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-5">
+        {/* Seven Features */}
+        <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-5">
             <div>
               <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong pb-2 border-b border-kumo-hairline">
                 Canonical 7-Feature Vector (Locked Research Specification)
@@ -216,11 +195,9 @@ export function MetaAlertDetailPage() {
               })}
             </div>
           </div>
-        )}
 
-        {/* Tab 3: Provenance Trace */}
-        {activeTab === 'provenance' && (
-          <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-5">
+        {/* Provenance Trace */}
+        <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-5">
             <div>
               <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong pb-2 border-b border-kumo-hairline">
                 Provenance Trace {trace ? `(${trace.resolved_total}/${trace.source_total} evidence ter-resolve)` : ''}
@@ -235,7 +212,6 @@ export function MetaAlertDetailPage() {
             {trace && trace.members.length === 0 && <div className="rounded-lg border border-kumo-hairline bg-kumo-recessed/30 p-6 text-sm text-kumo-subtle">MetaAlert ini tidak memiliki member source.</div>}
             {trace && trace.members.length > 0 && <div className="overflow-x-auto rounded-lg border border-kumo-hairline"><table className="w-full min-w-[760px] text-left text-xs"><thead className="bg-kumo-recessed/50 text-kumo-subtle"><tr><th className="p-3">Evidence</th><th>Rule ID / Detection Signature</th><th>Agent</th><th>Source</th><th>Integrity fingerprint</th><th /></tr></thead><tbody>{trace.members.map((member) => <tr key={member.wazuh_alert_id} className="border-t border-kumo-hairline/60"><td className="p-3 font-mono text-kumo-strong">{member.wazuh_alert_id}<div className="text-[10px] text-kumo-subtle">{member.resolved ? 'resolved' : 'unresolved'}</div></td><td>{member.rule_id ? <><span className="font-mono">{member.rule_id}</span><div className="mt-1 max-w-[260px] break-words text-kumo-subtle">{member.rule_description || `Rule ${member.rule_id}`}</div></> : '-'}</td><td>{member.agent_name || '-'}<div className="font-mono text-kumo-subtle">{member.agent_id || ''}</div></td><td>{member.source_mode || '-'}<div className="font-mono text-kumo-subtle">{member.source_index || member.source_document_id || ''}</div></td><td className="max-w-[180px] break-all font-mono text-[10px] text-kumo-subtle">{member.canonical_fingerprint || '-'}</td><td className="p-3"><div className="flex gap-2">{member.resolved && <Button size="sm" variant="outline" onClick={() => navigate(withRunId(`/meta-alerts/${id}/raw-alerts/${encodeURIComponent(member.wazuh_alert_id)}`))}>Buka evidence</Button>}{member.canonical_fingerprint && <button aria-label="Salin fingerprint" onClick={() => navigator.clipboard?.writeText(member.canonical_fingerprint!)}><Copy size={15} /></button>}</div></td></tr>)}</tbody></table></div>}
           </div>
-        )}
       </div>
     </>
   );
