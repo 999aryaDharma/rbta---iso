@@ -14,7 +14,7 @@ interface LiveStatusPanelProps {
 }
 
 function formatLag(sec: number | null): string {
-  if (sec === null || Number.isNaN(sec)) return '—';
+  if (sec === null || Number.isNaN(sec)) return '-';
   if (sec < 60) return `${sec.toFixed(1)} dtk`;
   return `${(sec / 60).toFixed(1)} mnt`;
 }
@@ -72,7 +72,7 @@ export function LiveStatusPanel({ isLoading, isError, data, errorMessage, onRetr
       )}
       {!data.worker_alive && (
         <p className="text-xs text-kumo-subtle">
-          Worker berhenti — backend berjalan dalam mode replay/demo. Aktifkan via RBTA_LIVE_WORKER_ENABLED=true.
+          Worker berhenti. Backend berjalan dalam mode replay/demo. Aktifkan via RBTA_LIVE_WORKER_ENABLED=true.
         </p>
       )}
 
@@ -80,7 +80,7 @@ export function LiveStatusPanel({ isLoading, isError, data, errorMessage, onRetr
         <div>
           <dt className="text-kumo-subtle font-medium">Alert unik diproses</dt>
           <dd className="font-mono font-semibold text-kumo-strong text-base">
-            {data.ingested_total ?? '—'}
+            {data.ingested_total ?? '-'}
           </dd>
         </div>
         <div>
@@ -91,11 +91,11 @@ export function LiveStatusPanel({ isLoading, isError, data, errorMessage, onRetr
         </div>
         <div>
           <dt className="text-kumo-subtle font-medium">Model terpin</dt>
-          <dd className="font-mono font-semibold text-kumo-strong">{data.live_model_version ?? '—'}</dd>
+          <dd className="font-mono font-semibold text-kumo-strong">{data.live_model_version ?? '-'}</dd>
         </div>
         <div>
           <dt className="text-kumo-subtle font-medium">Karantina</dt>
-          <dd className="font-mono font-semibold text-kumo-strong">{data.quarantine_total ?? '—'}</dd>
+          <dd className="font-mono font-semibold text-kumo-strong">{data.quarantine_total ?? '-'}</dd>
         </div>
         <div>
           <dt className="text-kumo-subtle font-medium">Lag siklus</dt>
@@ -124,7 +124,7 @@ export function LiveStatusPanel({ isLoading, isError, data, errorMessage, onRetr
       )}
       {data.tls_verify === false && (
         <p className="text-xs text-amber-600">
-          Verifikasi TLS Indexer/API nonaktif — rentan MITM; aktifkan untuk produksi.
+          Verifikasi TLS Indexer/API nonaktif. Rentan MITM; aktifkan untuk produksi.
         </p>
       )}
     </div>

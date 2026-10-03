@@ -81,8 +81,8 @@ export function LiveReplaySwitcher({
         <p className="text-xs text-kumo-subtle">
           Konteks aktif:{" "}
           {mode === "live"
-            ? "Live — MetaAlert live memakai kontrak provenance yang sama dengan replay."
-            : "Replay — dataset historis untuk demo sidang."}
+            ? "Live: MetaAlert live memakai kontrak provenance yang sama dengan replay."
+            : "Replay: dataset historis untuk demo sidang."}
         </p>
       )}
     </div>

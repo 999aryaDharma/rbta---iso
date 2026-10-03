@@ -4,7 +4,7 @@ export function formatNumber(num: number | null | undefined): string {
 }
 
 export function formatDateTime(isoString: string | null | undefined): string {
-  if (!isoString) return '—';
+  if (!isoString) return '-';
   try {
     const d = new Date(isoString);
     if (isNaN(d.getTime())) return String(isoString);
@@ -25,12 +25,12 @@ export function formatDateTime(isoString: string | null | undefined): string {
 }
 
 export function formatScore(score: number | null | undefined, precision: number = 4): string {
-  if (score === null || score === undefined) return '—';
+  if (score === null || score === undefined) return '-';
   return score.toFixed(precision);
 }
 
 export function formatSeconds(secs: number | null | undefined): string {
-  if (secs === null || secs === undefined) return '—';
+  if (secs === null || secs === undefined) return '-';
   if (secs < 60) return `${secs.toFixed(1)}s`;
   const m = Math.floor(secs / 60);
   const rem = secs % 60;

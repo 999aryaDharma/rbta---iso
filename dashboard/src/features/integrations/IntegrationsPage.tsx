@@ -32,18 +32,18 @@ export function IntegrationsPage() {
 
       <div className="px-6 py-8 lg:px-10 space-y-8">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
-          <MetricCard label="Raw Events Ingested" value={summary ? formatNumber(summary.raw_alert_count) : '—'} sub="Raw stream count" />
-          <MetricCard label="MetaAlerts Generated" value={summary ? formatNumber(summary.meta_alert_count) : '—'} sub="Temporal cluster count" />
+          <MetricCard label="Raw Events Ingested" value={summary ? formatNumber(summary.raw_alert_count) : '-'} sub="Raw stream count" />
+          <MetricCard label="MetaAlerts Generated" value={summary ? formatNumber(summary.meta_alert_count) : '-'} sub="Temporal cluster count" />
           <MetricCard
             label="Reduction Achieved"
             value={
               summary && summary.alert_reduction_rate_percent !== null && summary.alert_reduction_rate_percent !== undefined
                 ? `${summary.alert_reduction_rate_percent}%`
-                : '—'
+                : '-'
             }
             sub="Pengurangan unit triase, bukan eliminasi noise"
           />
-          <MetricCard label="Active In-Memory Buckets" value={summary ? formatNumber(summary.active_buckets_count) : '—'} sub="Open buffer windows" />
+          <MetricCard label="Active In-Memory Buckets" value={summary ? formatNumber(summary.active_buckets_count) : '-'} sub="Open buffer windows" />
         </div>
 
         <div className="space-y-4">

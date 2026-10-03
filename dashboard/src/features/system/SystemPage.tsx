@@ -24,10 +24,10 @@ export function SystemPage() {
       <div className="px-6 py-8 lg:px-10 space-y-8">
         <LiveStatusCard />
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
-          <MetricCard label="System Status" value={sys?.system_status ?? '—'} sub="Nilai aktual dari API" />
-          <MetricCard label="Model Version" value={sys?.model_version ?? '—'} sub="Registered bundle" />
-          <MetricCard label="Tukey Threshold" value={sys ? sys.tukey_threshold.toFixed(4) : '—'} sub="Calibrated anomaly boundary" />
-          <MetricCard label="Base Δt (Seconds)" value={sys ? `${sys.base_delta_t_seconds}s` : '—'} sub="Initial aggregation window" />
+          <MetricCard label="System Status" value={sys?.system_status ?? '-'} sub="Nilai aktual dari API" />
+          <MetricCard label="Model Version" value={sys?.model_version ?? '-'} sub="Registered bundle" />
+          <MetricCard label="Tukey Threshold" value={sys ? sys.tukey_threshold.toFixed(4) : '-'} sub="Calibrated anomaly boundary" />
+          <MetricCard label="Base Δt (Seconds)" value={sys ? `${sys.base_delta_t_seconds}s` : '-'} sub="Initial aggregation window" />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -44,12 +44,12 @@ export function SystemPage() {
             <dl className="space-y-3 text-xs">
               <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                 <dt className="text-kumo-subtle font-medium">Model Artifact Version</dt>
-                <dd className="font-mono font-semibold text-kumo-strong">{sys?.model_version ?? '—'}</dd>
+                <dd className="font-mono font-semibold text-kumo-strong">{sys?.model_version ?? '-'}</dd>
               </div>
               <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                 <dt className="text-kumo-subtle font-medium">Tukey IQR Anomaly Threshold</dt>
                 <dd className="font-mono font-bold text-kumo-strong">
-                  {sys ? sys.tukey_threshold.toFixed(4) : '—'}
+                  {sys ? sys.tukey_threshold.toFixed(4) : '-'}
                 </dd>
               </div>
               <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">

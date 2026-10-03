@@ -45,7 +45,7 @@ export function PipelineStageDetail({
       {activeStage === 'FEATURES' && (
         <div className="space-y-3">
           <div className="text-xs text-kumo-subtle">
-            Exact Seven-Dimensional Numerical Feature Vector extracted from the latest finalized MetaAlert (#{latestMeta?.meta_id ?? '—'}).
+            Exact Seven-Dimensional Numerical Feature Vector extracted from the latest finalized MetaAlert (#{latestMeta?.meta_id ?? '-'}).
           </div>
           {latestMeta?.seven_features ? (
             <div className="min-w-0">
@@ -61,49 +61,49 @@ export function PipelineStageDetail({
                   <tr>
                     <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">max_severity</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
-                      {latestMeta.seven_features['max_severity']?.toFixed(6) ?? '—'}
+                      {latestMeta.seven_features['max_severity']?.toFixed(6) ?? '-'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Highest Wazuh rule level observed in cluster (1–15)</td>
                   </tr>
                   <tr>
                     <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">mitre_tactic_count</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
-                      {latestMeta.seven_features['mitre_tactic_count']?.toFixed(6) ?? '—'}
+                      {latestMeta.seven_features['mitre_tactic_count']?.toFixed(6) ?? '-'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Distinct MITRE ATT&CK tactics involved</td>
                   </tr>
                   <tr>
                     <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">critical_mitre_tactic_present</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
-                      {latestMeta.seven_features['critical_mitre_tactic_present']?.toFixed(6) ?? '—'}
+                      {latestMeta.seven_features['critical_mitre_tactic_present']?.toFixed(6) ?? '-'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Binary flag (1.0 = Exfiltration / Privilege Escalation / Impact present)</td>
                   </tr>
                   <tr>
                     <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">alert_count_log</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
-                      {latestMeta.seven_features['alert_count_log']?.toFixed(6) ?? '—'}
+                      {latestMeta.seven_features['alert_count_log']?.toFixed(6) ?? '-'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Natural logarithm of cluster size: ln(1 + count)</td>
                   </tr>
                   <tr>
                     <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">rule_diversity_shannon</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
-                      {latestMeta.seven_features['rule_diversity_shannon']?.toFixed(6) ?? '—'}
+                      {latestMeta.seven_features['rule_diversity_shannon']?.toFixed(6) ?? '-'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Shannon entropy of rule_id distribution in bucket</td>
                   </tr>
                   <tr>
                     <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">severity_dispersion</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
-                      {latestMeta.seven_features['severity_dispersion']?.toFixed(6) ?? '—'}
+                      {latestMeta.seven_features['severity_dispersion']?.toFixed(6) ?? '-'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Normalized standard deviation of alert severities</td>
                   </tr>
                   <tr>
                     <td className="break-all py-1.5 px-2 font-semibold text-kumo-default">agent_criticality</td>
                     <td className="py-1.5 px-2 text-right font-semibold text-kumo-brand">
-                      {latestMeta.seven_features['agent_criticality']?.toFixed(6) ?? '—'}
+                      {latestMeta.seven_features['agent_criticality']?.toFixed(6) ?? '-'}
                     </td>
                     <td className="py-1.5 px-2 text-kumo-subtle">Asset criticality tier of monitored endpoint (1–3)</td>
                   </tr>
@@ -133,11 +133,11 @@ export function PipelineStageDetail({
               <div className="text-[11px] text-kumo-subtle uppercase">Score Calibration</div>
               <div className="flex justify-between">
                 <span className="text-kumo-subtle">Raw Model Score:</span>
-                <span className="font-semibold text-kumo-default">{latestMeta?.raw_model_score?.toFixed(6) ?? '—'}</span>
+                <span className="font-semibold text-kumo-default">{latestMeta?.raw_model_score?.toFixed(6) ?? '-'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-kumo-subtle">Calibrated Anomaly:</span>
-                <span className="font-semibold text-kumo-brand">{latestMeta?.anomaly_score?.toFixed(6) ?? '—'}</span>
+                <span className="font-semibold text-kumo-brand">{latestMeta?.anomaly_score?.toFixed(6) ?? '-'}</span>
               </div>
               <div className="text-[11px] text-kumo-subtle">Calibration: MinMax-v1 strictly monotonically mapped</div>
             </div>
@@ -146,18 +146,18 @@ export function PipelineStageDetail({
               <div className="text-[11px] text-kumo-subtle uppercase">Decision Threshold</div>
               <div className="flex justify-between">
                 <span className="text-kumo-subtle">Tukey Threshold:</span>
-                <span className="font-semibold text-kumo-default">{latestMeta?.threshold_used?.toFixed(6) ?? '—'}</span>
+                <span className="font-semibold text-kumo-default">{latestMeta?.threshold_used?.toFixed(6) ?? '-'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-kumo-subtle">Margin (Score - Thresh):</span>
                 <span className={`font-semibold ${(latestMeta?.margin ?? 0) >= 0 ? 'text-red-500' : 'text-kumo-subtle'}`}>
-                  {latestMeta?.margin != null ? `${latestMeta.margin >= 0 ? '+' : ''}${latestMeta.margin.toFixed(6)}` : '—'}
+                  {latestMeta?.margin != null ? `${latestMeta.margin >= 0 ? '+' : ''}${latestMeta.margin.toFixed(6)}` : '-'}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-kumo-subtle">Action:</span>
                 <span className={`font-semibold ${latestMeta?.action === 'ESCALATE' ? 'text-red-500' : 'text-kumo-default'}`}>
-                  {latestMeta?.action ?? '—'}
+                  {latestMeta?.action ?? '-'}
                 </span>
               </div>
             </div>
@@ -250,15 +250,15 @@ export function PipelineStageDetail({
             <div className="text-[11px] text-kumo-subtle uppercase">Ingress & Provenance</div>
             <div className="flex justify-between">
               <span className="text-kumo-subtle">Dataset:</span>
-              <span className="font-semibold text-kumo-default truncate max-w-[200px]">{status?.current_dataset || status?.dataset || '—'}</span>
+              <span className="font-semibold text-kumo-default truncate max-w-[200px]">{status?.current_dataset || status?.dataset || '-'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-kumo-subtle">Event Time:</span>
-              <span className="text-kumo-default">{status?.current_event_time || '—'}</span>
+              <span className="text-kumo-default">{status?.current_event_time || '-'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-kumo-subtle">Run ID:</span>
-              <span className="text-kumo-default truncate max-w-[200px]">{status?.run_id || '—'}</span>
+              <span className="text-kumo-default truncate max-w-[200px]">{status?.run_id || '-'}</span>
             </div>
           </div>
 
@@ -266,15 +266,15 @@ export function PipelineStageDetail({
             <div className="text-[11px] text-kumo-subtle uppercase">Last Processed Raw Alert</div>
             <div className="flex justify-between">
               <span className="text-kumo-subtle">Alert ID:</span>
-              <span className="text-kumo-default">{telemetry?.raw.last_alert?.alert_id as string || '—'}</span>
+              <span className="text-kumo-default">{telemetry?.raw.last_alert?.alert_id as string || '-'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-kumo-subtle">Rule Level:</span>
-              <span className="text-kumo-default">{telemetry?.raw.last_alert?.level as number || '—'}</span>
+              <span className="text-kumo-default">{telemetry?.raw.last_alert?.level as number || '-'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-kumo-subtle">Group:</span>
-              <span className="text-kumo-default">{telemetry?.raw.last_alert?.rule_group as string || '—'}</span>
+              <span className="text-kumo-default">{telemetry?.raw.last_alert?.rule_group as string || '-'}</span>
             </div>
           </div>
         </div>

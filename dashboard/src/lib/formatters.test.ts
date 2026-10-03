@@ -12,20 +12,20 @@ describe('Formatters Utilities', () => {
 
   it('formats datetime strings into WITA format', () => {
     expect(formatDateTime('2026-08-29T10:00:00Z')).toContain('2026-08-29 18:00:00 WITA');
-    expect(formatDateTime(null)).toBe('—');
-    expect(formatDateTime(undefined)).toBe('—');
+    expect(formatDateTime(null)).toBe('-');
+    expect(formatDateTime(undefined)).toBe('-');
   });
 
   it('formats anomaly score to fixed precision', () => {
     expect(formatScore(0.852345, 4)).toBe('0.8523');
     expect(formatScore(1.2, 2)).toBe('1.20');
-    expect(formatScore(null)).toBe('—');
+    expect(formatScore(null)).toBe('-');
   });
 
   it('formats seconds into human readable format', () => {
     expect(formatSeconds(45)).toBe('45.0s');
     expect(formatSeconds(125)).toBe('2m 5s');
-    expect(formatSeconds(null)).toBe('—');
+    expect(formatSeconds(null)).toBe('-');
   });
 
   it('formats duration in wall-clock seconds', () => {

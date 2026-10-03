@@ -141,7 +141,7 @@ export function ReplayPipelineVisualizer({
           title: '7. IsoForest',
           sublabel: '200 Tree Ensemble',
           icon: TreeStructure,
-          metric: latestMeta?.anomaly_score !== undefined ? latestMeta.anomaly_score.toFixed(4) : '—',
+          metric: latestMeta?.anomaly_score !== undefined ? latestMeta.anomaly_score.toFixed(4) : '-',
           metricLabel: 'Score',
         },
         {

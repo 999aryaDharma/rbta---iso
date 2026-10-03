@@ -93,7 +93,7 @@ export function RawAlertDetailPage() {
                 </Button>
 
                 <span className="text-xs font-mono px-2 text-kumo-subtle">
-                  {currentIndex >= 0 ? `${currentIndex + 1} / ${sourceIds.length}` : '—'}
+                  {currentIndex >= 0 ? `${currentIndex + 1} / ${sourceIds.length}` : '-'}
                 </span>
 
                 <Button
@@ -180,9 +180,9 @@ export function RawAlertDetailPage() {
               <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs">
                 <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong mb-4 pb-3 border-b border-kumo-hairline">Network & MITRE ATT&CK Context</h3>
                 <dl className="space-y-3 text-xs">
-                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Source IP:</dt> <dd className="font-mono text-kumo-default font-semibold">{data.srcip || '—'}</dd></div>
-                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Location:</dt> <dd className="font-mono text-kumo-default">{data.location || '—'}</dd></div>
-                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Decoder:</dt> <dd className="font-mono text-kumo-default">{data.decoder || '—'}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Source IP:</dt> <dd className="font-mono text-kumo-default font-semibold">{data.srcip || '-'}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Location:</dt> <dd className="font-mono text-kumo-default">{data.location || '-'}</dd></div>
+                  <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">Decoder:</dt> <dd className="font-mono text-kumo-default">{data.decoder || '-'}</dd></div>
                   <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40"><dt className="text-kumo-subtle font-medium">MITRE Tactics:</dt> <dd className="font-mono text-kumo-default">{data.mitre_tactics.join(', ') || 'None'}</dd></div>
                   <div className="flex justify-between items-center py-1"><dt className="text-kumo-subtle font-medium">MITRE Techniques:</dt> <dd className="font-mono text-kumo-default">{data.mitre_techniques.join(', ') || 'None'}</dd></div>
                 </dl>

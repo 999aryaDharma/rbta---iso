@@ -31,13 +31,13 @@ interface LiveTriageSummaryPanelProps {
 const DECISION_ORDER = ['CRITICAL', 'SUSPICIOUS', 'NOISE_HIGH', 'NOISE'];
 
 function formatLag(sec: number | null): string {
-  if (sec === null || Number.isNaN(sec)) return '—';
+  if (sec === null || Number.isNaN(sec)) return '-';
   if (sec < 60) return `${sec.toFixed(1)} dtk`;
   return `${(sec / 60).toFixed(1)} mnt`;
 }
 
 function formatArr(v: number | null): string {
-  if (v === null || Number.isNaN(v)) return '—';
+  if (v === null || Number.isNaN(v)) return '-';
   return `${v}%`;
 }
 
@@ -111,13 +111,13 @@ export function LiveTriageSummaryPanel({ isLoading, isError, data, errorMessage,
         <div>
           <p className="text-xs text-kumo-subtle font-medium">Alert masuk</p>
           <p className="font-mono font-semibold text-kumo-strong text-base">
-            {data.rawAlerts ?? '—'}
+            {data.rawAlerts ?? '-'}
           </p>
         </div>
         <div>
           <p className="text-xs text-kumo-subtle font-medium">MetaAlert final</p>
           <p className="font-mono font-semibold text-kumo-strong text-base">
-            {data.metaAlerts ?? '—'}
+            {data.metaAlerts ?? '-'}
           </p>
         </div>
         <div>
@@ -133,19 +133,19 @@ export function LiveTriageSummaryPanel({ isLoading, isError, data, errorMessage,
         <div>
           <p className="text-xs text-kumo-subtle font-medium">ESCALATE terbuka</p>
           <p className="font-mono font-semibold text-kumo-strong text-base">
-            {data.escalateOpen ?? '—'}
+            {data.escalateOpen ?? '-'}
           </p>
         </div>
         <div>
           <p className="text-xs text-kumo-subtle font-medium">Outbox menunggu</p>
           <p className="font-mono text-kumo-default text-base">
-            {data.outboxPending ?? '—'}
+            {data.outboxPending ?? '-'}
           </p>
         </div>
       </div>
 
       <p className="text-[11px] text-kumo-subtle">
-        Umur tertua tidak tersedia dari API yang ada — outbox live hanya mengekspos hitungan
+        Umur tertua tidak tersedia dari API yang ada. Outbox live hanya mengekspos hitungan
         tanpa stempel waktu per item. Endpoint Telegram payloads milik konteks replay, bukan live.
       </p>
 
@@ -155,7 +155,7 @@ export function LiveTriageSummaryPanel({ isLoading, isError, data, errorMessage,
         </h4>
         {data.decisionUnavailable ? (
           <p className="text-xs text-kumo-subtle">
-            Distribusi decision tidak tersedia — daftar MetaAlert live gagal dimuat.
+            Distribusi decision tidak tersedia. Daftar MetaAlert live gagal dimuat.
           </p>
         ) : decisions.length === 0 ? (
           <p className="text-xs text-kumo-subtle">

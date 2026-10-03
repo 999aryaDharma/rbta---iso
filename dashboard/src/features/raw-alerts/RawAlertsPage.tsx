@@ -158,7 +158,7 @@ export function RawAlertsPage() {
                   <Table.Cell className="max-w-[320px] text-xs text-kumo-default"><span title={ruleDescription(a.rule_description, a.rule_id)} className="line-clamp-2">{ruleDescription(a.rule_description, a.rule_id)}</span><div className="mt-1 font-mono text-[10px] text-kumo-subtle">Rule ID: {a.rule_id}</div></Table.Cell>
                   <Table.Cell className="text-xs text-right font-mono font-bold text-kumo-strong">{a.rule_level}</Table.Cell>
                   <Table.Cell className="max-w-[320px] text-xs text-kumo-default">{a.rule_group_primary}</Table.Cell>
-                  <Table.Cell className="font-mono text-xs text-kumo-subtle">{a.srcip || '—'}</Table.Cell>
+                  <Table.Cell className="font-mono text-xs text-kumo-subtle">{a.srcip || '-'}</Table.Cell>
                   <Table.Cell className="text-xs">
                     {a.mitre_tactics && a.mitre_tactics.length > 0 ? (
                       <Badge variant="secondary">{a.mitre_tactics.join(', ')}</Badge>

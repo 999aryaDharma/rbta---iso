@@ -49,12 +49,12 @@ export function OverviewPage() {
       <div className="px-6 py-8 lg:px-10 space-y-8">
         <p className="text-xs text-kumo-subtle leading-relaxed border border-kumo-hairline bg-kumo-canvas rounded-xl px-4 py-3">
           {isReplay
-            ? `Konteks: Replay — dataset historis (run ${runId}). ARR = reduksi unit triase, bukan akurasi; skor = prioritas, bukan vonis serangan.`
-            : 'Konteks: Live — arus alert langsung dari Indexer/API. ARR = reduksi unit triase, bukan akurasi; skor = prioritas, bukan vonis serangan.'}
+            ? `Konteks Replay: dataset historis (run ${runId}). ARR = reduksi unit triase, bukan akurasi; skor = prioritas, bukan vonis serangan.`
+            : 'Konteks Live: arus alert langsung dari Indexer/API. ARR = reduksi unit triase, bukan akurasi; skor = prioritas, bukan vonis serangan.'}
         </p>
         {/* Needs Investigation Banner */}
         {needsInvestigation.length > 0 && (
-          <div className="p-6 rounded-xl border border-rose-500/30 border-l-4 border-l-rose-500 bg-rose-500/5 shadow-xs space-y-5">
+          <div className="p-6 rounded-xl bg-rose-500/5 shadow-xs space-y-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-rose-500/20">
               <div className="flex items-center gap-3">
                 <WarningCircle size={22} className="text-rose-600 dark:text-rose-400 shrink-0" weight="fill" />
@@ -122,12 +122,12 @@ export function OverviewPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
           <MetricCard
             label="Alert Mentah Masuk"
-            value={summary ? formatNumber(summary.raw_alert_count) : '—'}
+            value={summary ? formatNumber(summary.raw_alert_count) : '-'}
             sub={isReplay ? 'Alert valid dari dataset historis' : 'Alert Wazuh dari arus langsung'}
           />
           <MetricCard
             label="MetaAlert Final"
-            value={summary ? formatNumber(summary.meta_alert_count) : '—'}
+            value={summary ? formatNumber(summary.meta_alert_count) : '-'}
             sub="Episode temporal hasil agregasi RBTA"
           />
           <MetricCard
@@ -135,7 +135,7 @@ export function OverviewPage() {
             value={
               summary && summary.alert_reduction_rate_percent !== null && summary.alert_reduction_rate_percent !== undefined
                 ? `${summary.alert_reduction_rate_percent}%`
-                : '—'
+                : '-'
             }
             sub="Reduksi unit triase, bukan akurasi deteksi"
           />
@@ -145,13 +145,13 @@ export function OverviewPage() {
           >
             <MetricCard
               label="MetaAlert ESCALATE"
-              value={summary ? formatNumber(summary.escalate_count) : '—'}
+              value={summary ? formatNumber(summary.escalate_count) : '-'}
               sub="Prioritas investigasi terbuka, bukan insiden terbukti"
             />
           </div>
           <MetricCard
             label="Di Atas Ambang Tukey"
-            value={summary ? formatNumber(summary.anomalies_detected) : '—'}
+            value={summary ? formatNumber(summary.anomalies_detected) : '-'}
             sub="Skor di atas ambang; prioritas, bukan vonis serangan"
           />
           <div
@@ -160,18 +160,18 @@ export function OverviewPage() {
           >
             <MetricCard
               label="Bucket RBTA Terbuka"
-              value={summary ? formatNumber(summary.active_buckets_count) : '—'}
+              value={summary ? formatNumber(summary.active_buckets_count) : '-'}
               sub={isReplay ? 'Jendela temporal run replay ini (per agen)' : 'Jendela temporal arus langsung (per agen)'}
             />
           </div>
           <MetricCard
             label="Antrean Digest"
-            value={summary ? formatNumber(summary.digest_count) : '—'}
+            value={summary ? formatNumber(summary.digest_count) : '-'}
             sub="Batch rutin frekuensi rendah (DAILY_DIGEST)"
           />
           <MetricCard
             label="MetaAlert SUPPRESS"
-            value={summary ? formatNumber(summary.suppress_count) : '—'}
+            value={summary ? formatNumber(summary.suppress_count) : '-'}
             sub="Prioritas lebih rendah, bukan label benign"
           />
         </div>

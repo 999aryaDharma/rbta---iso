@@ -29,7 +29,6 @@ import { CurrentMetaAlertCard } from './CurrentMetaAlertCard';
 import { PipelineStageDetail } from './PipelineStageDetail';
 import { ProcessingTrace } from './ProcessingTrace';
 import { DeferredTelegramOutbox } from './DeferredTelegramOutbox';
-import { ResearchBoundaryCard } from '@/features/demo/ResearchBoundaryCard';
 import { LiveEvaluationPanel } from '@/features/demo/LiveEvaluationPanel';
 import { PostReplayEvaluation } from '@/features/demo/PostReplayEvaluation';
 import { DatasetCatalogPanel } from '@/features/demo/DatasetCatalogPanel';
@@ -160,9 +159,7 @@ export function ReplayPage() {
       />
 
       <div className="px-6 py-8 lg:px-10 space-y-8">
-        <ResearchBoundaryCard dataset={selectedManifest} modelVersion={status?.model_version || 'rbta-if-v1'} />
-
-        {/* Zona 1 — Kontrol */}
+        {/* Zona 1: Kontrol */}
         <ZoneSection
           zoneId="replay-zone-kontrol"
           index="Zona 1"
@@ -311,7 +308,7 @@ export function ReplayPage() {
           )}
         </ZoneSection>
 
-        {/* Zona 2 — Alur */}
+        {/* Zona 2: Alur */}
         <ZoneSection
           zoneId="replay-zone-alur"
           index="Zona 2"
@@ -344,7 +341,7 @@ export function ReplayPage() {
           <ProcessingTrace trace={telemetry?.trace} />
         </ZoneSection>
 
-        {/* Zona 3 — Bukti */}
+        {/* Zona 3: Bukti */}
         <ZoneSection
           zoneId="replay-zone-bukti"
           index="Zona 3"
@@ -403,21 +400,21 @@ export function ReplayPage() {
                   <>
                     <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                       <span className="text-kumo-subtle">Current File:</span>
-                      <span className="text-kumo-default">{status.current_dataset || '—'}</span>
+                      <span className="text-kumo-default">{status.current_dataset || '-'}</span>
                     </div>
                     <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                       <span className="text-kumo-subtle">Dataset Index:</span>
                       <span className="text-kumo-default">
                         {status.current_dataset_index !== undefined && status.dataset_count !== undefined
                           ? `${(status.current_dataset_index || 0) + 1} / ${status.dataset_count}`
-                          : '—'}
+                          : '-'}
                       </span>
                     </div>
                   </>
                 )}
                 <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                   <span className="text-kumo-subtle">Current Event Timestamp:</span>
-                  <span className="text-kumo-default">{status.current_event_time || '—'}</span>
+                  <span className="text-kumo-default">{status.current_event_time || '-'}</span>
                 </div>
                 <div className="flex justify-between items-center py-1.5 border-b border-kumo-hairline/40">
                   <span className="text-kumo-subtle">Wall-Clock Elapsed Time:</span>

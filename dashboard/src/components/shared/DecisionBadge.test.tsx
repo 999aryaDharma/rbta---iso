@@ -7,7 +7,7 @@ describe('DecisionBadge Component', () => {
     render(<DecisionBadge decision="CRITICAL" action="ESCALATE" />);
     const badge = screen.getByText('Action: ESCALATE');
     expect(badge).toBeDefined();
-    expect(screen.getByText('Decision: CRITICAL')).toBeDefined();
+    expect(screen.getByText('Level: CRITICAL')).toBeDefined();
   });
 
   it('renders SUPPRESS action badge', () => {

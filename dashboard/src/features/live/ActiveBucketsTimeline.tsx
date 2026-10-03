@@ -22,7 +22,7 @@ export function ActiveBucketsTimeline({ bars, windowMinutes, onSelect }: ActiveB
     return (
       <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs">
         <p role="status" className="text-xs text-kumo-subtle">
-          Belum ada bucket aktif dalam {windowMinutes} menit terakhir — worker berhenti atau belum ada alert masuk.
+          Belum ada bucket aktif dalam {windowMinutes} menit terakhir. Worker berhenti atau belum ada alert masuk.
         </p>
       </div>
     );
@@ -32,7 +32,7 @@ export function ActiveBucketsTimeline({ bars, windowMinutes, onSelect }: ActiveB
     <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-4">
       <div className="pb-3 border-b border-kumo-hairline">
         <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong">
-          Bucket aktif RBTA — {windowMinutes} menit terakhir (event-time)
+          Bucket aktif RBTA: {windowMinutes} menit terakhir (event-time)
         </h3>
         <p className="text-xs text-kumo-subtle mt-1">
           Bar = unit agregasi yang tumbuh saat alert masuk. Bar bukan bukti serangan.
