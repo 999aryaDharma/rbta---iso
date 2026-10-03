@@ -17,7 +17,7 @@ def format_telegram_alert(scored_meta: ScoredMetaAlert, run_id: str = "live") ->
     return (
         f"<b>SECURITY META-ALERT: {escape(scored_meta.decision)}</b>\n"
         f"<b>Meta-ID:</b> <code>{scored_meta.meta_id}</code>\n"
-        f"<b>Decision:</b> {escape(scored_meta.decision)} | <b>Action:</b> {escape(scored_meta.action)}\n"
+        f"<b>Level:</b> {escape(scored_meta.decision)} | <b>Action:</b> {escape(scored_meta.action)}\n"
         f"<b>Agent:</b> {escape(scored_meta.agent_name)} ({escape(scored_meta.agent_id)})\n"
         f"<b>Rule group:</b> <code>{escape(scored_meta.rule_group_primary)}</code>\n"
         f"<b>Waktu:</b> {window_start} → {window_end}\n"

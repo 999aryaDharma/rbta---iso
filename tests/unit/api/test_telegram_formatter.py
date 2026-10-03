@@ -34,7 +34,7 @@ def test_telegram_formatter_presentation_only():
     msg = format_telegram_alert(meta)
 
     assert "<b>SECURITY META-ALERT: CRITICAL</b>" in msg
-    assert "<b>Decision:</b> CRITICAL | <b>Action:</b> ESCALATE" in msg
+    assert "<b>Level:</b> CRITICAL | <b>Action:</b> ESCALATE" in msg
     assert "db-prod (001)" in msg
     assert "sql_injection" in msg
     assert "Evidence:</b> 25" in msg

@@ -5,12 +5,12 @@ import { TelegramMessagePreview } from './TelegramMessagePreview';
 
 describe('TelegramMessagePreview', () => {
   it('renders the supported Telegram HTML tags instead of showing them as text', () => {
-    render(<TelegramMessagePreview message={'<b>Decision:</b> CRITICAL\n<code>rbta-if-v1</code>\n<i>Bukan bukti serangan.</i>'} />);
+    render(<TelegramMessagePreview message={'<b>Level:</b> CRITICAL\n<code>rbta-if-v1</code>\n<i>Bukan bukti serangan.</i>'} />);
 
-    expect(screen.getByText('Decision:').tagName).toBe('B');
+    expect(screen.getByText('Level:').tagName).toBe('B');
     expect(screen.getByText('rbta-if-v1').tagName).toBe('CODE');
     expect(screen.getByText('Bukan bukti serangan.').tagName).toBe('I');
-    expect(screen.queryByText(/<b>Decision:<\/b>/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/<b>Level:<\/b>/)).not.toBeInTheDocument();
   });
 
   it('keeps unsupported markup as plain text', () => {
