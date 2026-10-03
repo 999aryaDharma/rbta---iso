@@ -5,14 +5,13 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { MetaAlertDetailPage } from './MetaAlertDetailPage';
 
-const { mockFetchMetaAlert, mockFetchMetaAlertTrace } = vi.hoisted(() => ({
+const { mockFetchMetaAlert } = vi.hoisted(() => ({
   mockFetchMetaAlert: vi.fn(),
-  mockFetchMetaAlertTrace: vi.fn(),
 }));
 
 vi.mock('@/api/metaAlerts', () => ({
   fetchMetaAlert: mockFetchMetaAlert,
-  fetchMetaAlertTrace: mockFetchMetaAlertTrace,
+  fetchMetaAlertTrace: vi.fn(),
 }));
 
 class ResizeObserverMock {
@@ -64,18 +63,6 @@ function renderAt(path: string) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockFetchMetaAlertTrace.mockResolvedValue({
-    meta_id: 5,
-    agent_id: '005',
-    rule_group_primary: 'rootcheck',
-    model_version: 'rbta-if-v1',
-    feature_schema_version: 'v1',
-    score_calibration_version: 'v1',
-    source_total: 0,
-    resolved_total: 0,
-    unresolved_alert_ids: [],
-    members: [],
-  });
 });
 
 describe('MetaAlertDetailPage contract states', () => {
@@ -94,10 +81,11 @@ describe('MetaAlertDetailPage contract states', () => {
     expect(mockFetchMetaAlert).not.toHaveBeenCalled();
   });
 
-  it('menampilkan detail + tab provenance saat sukses', async () => {
+  it('menampilkan ringkasan agregasi + skor saat sukses', async () => {
     mockFetchMetaAlert.mockResolvedValue(detail);
     renderAt('/meta-alerts/5');
     expect(await screen.findByText('MetaAlert #5')).toBeInTheDocument();
-    expect(screen.getByText(/Provenance Trace/)).toBeInTheDocument();
+    expect(screen.getByText(/Temporal Aggregation Profile/)).toBeInTheDocument();
+    expect(screen.queryByText(/Provenance Trace/)).not.toBeInTheDocument();
   });
 });

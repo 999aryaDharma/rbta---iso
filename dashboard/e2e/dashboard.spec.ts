@@ -581,7 +581,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     await expect(page.locator('text=0.8920').first()).toBeVisible();
   });
 
-  test('6. MetaAlert detail renders exact seven-feature section and trace', async ({ page }) => {
+  test('6. MetaAlert detail renders aggregation profile and scoring', async ({ page }) => {
     await page.addInitScript((key) => {
       window.sessionStorage.setItem('rbta.dashboard.apiKey', key);
     }, VALID_API_KEY);
@@ -589,10 +589,8 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
 
     await expect(page.locator('text=MetaAlert #101')).toBeVisible();
 
-    await expect(page.locator('text=max_severity')).toBeVisible();
-    await expect(page.locator('text=mitre_tactic_count')).toBeVisible();
-    await expect(page.locator('text=critical_mitre_tactic_present')).toBeVisible();
-    await expect(page.locator('text=rule_diversity_shannon')).toBeVisible();
+    await expect(page.locator('text=Temporal Aggregation Profile')).toBeVisible();
+    await expect(page.locator('text=Isolation Forest Evaluation & Scoring')).toBeVisible();
   });
 
   test('7. ESCALATE MetaAlert -> Investigate Raw Alerts CTA navigates to raw cluster', async ({ page }) => {
@@ -804,7 +802,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     await expect(page.locator('text=5. MetaAlert')).toBeVisible();
     await expect(page.locator('text=6. 7 Features')).toBeVisible();
     await expect(page.locator('text=7. IsoForest')).toBeVisible();
-    await expect(page.locator('text=8. Decision')).toBeVisible();
+    await expect(page.locator('text=8. Level')).toBeVisible();
     await expect(page.locator('text=9. Output Sink')).toBeVisible();
 
     // Click 6. 7 Features to open stage detail
