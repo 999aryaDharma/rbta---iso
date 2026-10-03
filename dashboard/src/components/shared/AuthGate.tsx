@@ -71,7 +71,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
         <div className="space-y-3">
           <InputGroup>
-            <InputGroup.Addon align="start"><Key size={14} /></InputGroup.Addon>
+            <InputGroup.Addon align="start" className="pl-3"><Key size={14} /></InputGroup.Addon>
             <InputGroup.Input
               type="password"
               value={input}
@@ -82,7 +82,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 }
               }}
               placeholder="Enter RBTA API Key..."
-              className="font-mono text-xs"
+              className="font-mono text-xs px-3 py-2.5"
               autoFocus
             />
           </InputGroup>

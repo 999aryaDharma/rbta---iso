@@ -1,85 +1,115 @@
-import { useCallback, useEffect } from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useCallback, useEffect } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Sidebar, SidebarHeader, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
-  SidebarMenu, SidebarMenuButton, SidebarMenuItem,
-  SidebarTrigger, SidebarRail,
-} from '@cloudflare/kumo/components/sidebar';
-import { Badge } from '@cloudflare/kumo/components/badge';
+  Sidebar,
+  SidebarHeader,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarTrigger,
+  SidebarRail,
+} from "@cloudflare/kumo/components/sidebar";
+import { Badge } from "@cloudflare/kumo/components/badge";
 import {
-  House, ChartBar, Cpu, Play, Plugs, GearSix,
-  MagnifyingGlass, CaretUpDown, ShieldCheck, Pulse,
-} from '@phosphor-icons/react';
+  House,
+  ChartBar,
+  Cpu,
+  Play,
+  Plugs,
+  GearSix,
+  MagnifyingGlass,
+  CaretUpDown,
+  Pulse,
+} from "@phosphor-icons/react";
 
 export function AppSidebar() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const runId = searchParams.get('run_id');
+  const runId = searchParams.get("run_id");
 
   const withRunId = useCallback(
     (path: string) =>
-      runId ? `${path}${path.includes('?') ? '&' : '?'}run_id=${encodeURIComponent(runId)}` : path,
-    [runId]
+      runId
+        ? `${path}${path.includes("?") ? "&" : "?"}run_id=${encodeURIComponent(runId)}`
+        : path,
+    [runId],
   );
 
   useEffect(() => {
-    let lastKey = '';
+    let lastKey = "";
     let lastKeyTime = 0;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable) {
+      if (
+        ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
+        target.isContentEditable
+      ) {
         return;
       }
 
       const now = Date.now();
-      if (lastKey === 'g' && now - lastKeyTime < 1000) {
+      if (lastKey === "g" && now - lastKeyTime < 1000) {
         const map: Record<string, string> = {
-          o: '/overview', m: '/meta-alerts', r: '/rbta', d: '/demo', l: '/live', s: '/system',
+          o: "/overview",
+          m: "/meta-alerts",
+          r: "/rbta",
+          d: "/demo",
+          l: "/live",
+          s: "/system",
         };
         if (map[e.key]) {
           e.preventDefault();
           navigate(withRunId(map[e.key]));
         }
-        lastKey = '';
+        lastKey = "";
         return;
       }
 
-      if (e.key === 'g') {
-        lastKey = 'g';
+      if (e.key === "g") {
+        lastKey = "g";
         lastKeyTime = now;
       } else {
-        lastKey = '';
+        lastKey = "";
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [withRunId, navigate]);
 
   const openSearch = () => {
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }));
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "/", bubbles: true }),
+    );
   };
 
   const isPathActive = (path: string) => {
-    if (path === '/overview') return location.pathname === '/overview' || location.pathname === '/';
-    return location.pathname === path || location.pathname.startsWith(path + '/');
+    if (path === "/overview")
+      return location.pathname === "/overview" || location.pathname === "/";
+    return (
+      location.pathname === path || location.pathname.startsWith(path + "/")
+    );
   };
 
   return (
     <Sidebar>
       {/* 1. Header with Company/Platform switcher */}
       <SidebarHeader className="p-3 border-b border-kumo-line flex items-center justify-between">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="size-7 rounded-md bg-kumo-brand/10 border border-kumo-brand/20 text-kumo-brand flex items-center justify-center shrink-0">
-            <ShieldCheck size={18} weight="duotone" />
-          </div>
+        <div className="flex items-center gap-2.5 min-w-0 ml-4">
           <span className="font-semibold text-base text-kumo-strong truncate group-data-[state=collapsed]/sidebar:hidden">
             RBTA Platform
           </span>
         </div>
-        <CaretUpDown size={16} className="text-kumo-subtle shrink-0 group-data-[state=collapsed]/sidebar:hidden" />
+        <CaretUpDown
+          size={16}
+          className="text-kumo-subtle shrink-0 group-data-[state=collapsed]/sidebar:hidden"
+        />
       </SidebarHeader>
 
       {/* 2. Scrollable Navigation Content */}
@@ -94,7 +124,9 @@ export function AppSidebar() {
           >
             <div className="flex items-center gap-2.5 truncate">
               <MagnifyingGlass size={16} className="shrink-0" />
-              <span className="truncate group-data-[state=collapsed]/sidebar:hidden">Quick search...</span>
+              <span className="truncate group-data-[state=collapsed]/sidebar:hidden">
+                Quick search...
+              </span>
             </div>
             <kbd className="hidden sm:inline-flex rounded border border-kumo-line bg-kumo-canvas px-1.5 py-0.5 text-xs font-mono text-kumo-subtle group-data-[state=collapsed]/sidebar:hidden">
               ⌘K
@@ -108,9 +140,9 @@ export function AppSidebar() {
             <SidebarMenuItem>
               <SidebarMenuButton
                 icon={House}
-                active={isPathActive('/overview')}
+                active={isPathActive("/overview")}
                 tooltip="Home / Overview"
-                onClick={() => navigate(withRunId('/overview'))}
+                onClick={() => navigate(withRunId("/overview"))}
               >
                 Home
               </SidebarMenuButton>
@@ -119,9 +151,9 @@ export function AppSidebar() {
             <SidebarMenuItem>
               <SidebarMenuButton
                 icon={ChartBar}
-                active={isPathActive('/meta-alerts')}
+                active={isPathActive("/meta-alerts")}
                 tooltip="Analytics & Logs"
-                onClick={() => navigate(withRunId('/meta-alerts'))}
+                onClick={() => navigate(withRunId("/meta-alerts"))}
               >
                 Analytics & Logs
               </SidebarMenuButton>
@@ -130,9 +162,9 @@ export function AppSidebar() {
             <SidebarMenuItem>
               <SidebarMenuButton
                 icon={Cpu}
-                active={isPathActive('/rbta')}
+                active={isPathActive("/rbta")}
                 tooltip="RBTA Engine"
-                onClick={() => navigate(withRunId('/rbta'))}
+                onClick={() => navigate(withRunId("/rbta"))}
               >
                 RBTA Engine
               </SidebarMenuButton>
@@ -147,9 +179,9 @@ export function AppSidebar() {
             <SidebarMenuItem>
               <SidebarMenuButton
                 icon={Pulse}
-                active={isPathActive('/live')}
+                active={isPathActive("/live")}
                 tooltip="Live stream Wazuh"
-                onClick={() => navigate(withRunId('/live'))}
+                onClick={() => navigate(withRunId("/live"))}
               >
                 Live
               </SidebarMenuButton>
@@ -157,9 +189,9 @@ export function AppSidebar() {
             <SidebarMenuItem>
               <SidebarMenuButton
                 icon={Play}
-                active={isPathActive('/demo')}
+                active={isPathActive("/demo")}
                 tooltip="Replay penelitian"
-                onClick={() => navigate(withRunId('/demo'))}
+                onClick={() => navigate(withRunId("/demo"))}
               >
                 Replay
               </SidebarMenuButton>
@@ -174,9 +206,9 @@ export function AppSidebar() {
             <SidebarMenuItem>
               <SidebarMenuButton
                 icon={Plugs}
-                active={isPathActive('/integrations')}
+                active={isPathActive("/integrations")}
                 tooltip="Integrations"
-                onClick={() => navigate(withRunId('/integrations'))}
+                onClick={() => navigate(withRunId("/integrations"))}
               >
                 Integrations
               </SidebarMenuButton>
@@ -185,9 +217,9 @@ export function AppSidebar() {
             <SidebarMenuItem>
               <SidebarMenuButton
                 icon={GearSix}
-                active={isPathActive('/system')}
+                active={isPathActive("/system")}
                 tooltip="System Health"
-                onClick={() => navigate(withRunId('/system'))}
+                onClick={() => navigate(withRunId("/system"))}
               >
                 System Health
               </SidebarMenuButton>
