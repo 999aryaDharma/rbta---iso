@@ -358,3 +358,21 @@ def test_live_status_tls_verify_passthrough(tmp_path):
     client = _client(service, _make_worker({"alive": False}))
     data = client.get("/api/v1/live/status", headers=_auth()).json()
     assert data["tls_verify"] is False
+
+
+def test_live_status_ingested_total_counts_seen_ids(tmp_path):
+    """ingested_total exposes durable unique-alert count (follows F11 honesty)."""
+    service = _make_service(tmp_path, {})
+    service.state_manager.count_seen_alert_ids = lambda: 1899
+    client = _client(service, _make_worker({"alive": True}))
+    data = client.get("/api/v1/live/status", headers=_auth()).json()
+    assert data["ingested_total"] == 1899
+
+
+def test_live_status_ingested_total_null_when_unsupported(tmp_path, monkeypatch):
+    """ingested_total null (not 0) when the counter is unavailable."""
+    service = _make_service(tmp_path, {})
+    monkeypatch.delattr(type(service.state_manager), "count_seen_alert_ids", raising=False)
+    client = _client(service, _make_worker({"alive": False}))
+    data = client.get("/api/v1/live/status", headers=_auth()).json()
+    assert data["ingested_total"] is None

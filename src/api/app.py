@@ -343,6 +343,18 @@ def create_app(
         if service is not None:
             outbox_pending = len(service.get_outbox())
 
+        # ingested_total: durable unique-alert count (dedup registry size).
+        # None when the counter is unavailable (unmeasured), never fake 0.
+        ingested_total: Optional[int] = None
+        if service is not None:
+            try:
+                state_manager = getattr(service, "state_manager", None)
+                count_fn = getattr(state_manager, "count_seen_alert_ids", None)
+                if callable(count_fn):
+                    ingested_total = int(count_fn())
+            except Exception:
+                ingested_total = None
+
         return {
             "worker_alive": alive,
             "cycles_completed": int(worker_snapshot.get("cycles_completed", 0) or 0),
@@ -355,6 +367,7 @@ def create_app(
             "buffer_size": buffer_size,
             "buffer_stats": buffer_stats,
             "outbox_pending": outbox_pending,
+            "ingested_total": ingested_total,
             "dispatcher": dispatcher_status,
             "quarantine_total": quarantine_total,
             "newest_scored_event_time": newest_scored_event_time,

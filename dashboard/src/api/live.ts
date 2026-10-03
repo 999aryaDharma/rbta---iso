@@ -13,6 +13,7 @@ export const LiveStatusSchema = z.object({
   buffer_size: z.number().int().nonnegative().nullable(),
   buffer_stats: z.record(z.string(), z.number().int().nonnegative().nullable()).nullable(),
   outbox_pending: z.number().int().nonnegative(),
+  ingested_total: z.number().int().nonnegative().nullable(),
   dispatcher: z.unknown().nullable(),
   quarantine_total: z.number().int().nonnegative().nullable(),
   newest_scored_event_time: z.string().nullable(),
