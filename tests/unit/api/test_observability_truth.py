@@ -120,11 +120,18 @@ def test_production_source_mode_deferred_by_default(tmp_path: Path):
     srv1 = app1.state.runtime_resolver.live_service
     assert srv1.source_mode == "DEFERRED"
 
+    # Simulated restart: the OS releases the state lock on process exit.
+    from src.runtime.live_worker import release_state_lock
+
+    release_state_lock(str(state_file))
+
     # 2. Explicit LIVE mode
     env_live = dict(env_default, RBTA_SOURCE_MODE="LIVE")
     app2 = create_production_app(env=env_live)
     srv2 = app2.state.runtime_resolver.live_service
     assert srv2.source_mode == "LIVE"
+
+    release_state_lock(str(state_file))
 
     # 3. Invalid mode raises ValueError
     env_invalid = dict(env_default, RBTA_SOURCE_MODE="UNKNOWN_MODE")

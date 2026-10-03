@@ -139,3 +139,19 @@ also warned about inaccessible old pytest cache directories.
 - No throughput or power-failure durability claim is inferred from unit tests.
 - Campus integration remains **BLOCKED_EXTERNAL**. Gate L1 as originally proposed
   is not complete, and the system is not claimed live-ready.
+
+## Addendum 2026-09-30 — R8: per-hit quarantine supersedes page-fail (N1)
+
+The L1 behavior "a document that fails canonicalization fails the whole
+poll page" is superseded by ruling R8: the poller now collects bad
+documents per hit (`poller.last_bad_docs`, reset per call) and the
+coordinator quarantines each durably then continues, so one corrupt
+document can no longer blind live ingestion for days. Deterministic
+per-record errors (`RawEvidenceConflictError`,
+`RawEvidenceIntegrityError`, `RBTAInvariantError`, `TemporalStateError`)
+are quarantined the same way; transient errors still fail the cycle
+without advancing the cursor. Governance test
+`test_no_swallowed_canonicalization_exceptions_in_live_source` now asserts
+recorded-not-swallowed instead of raise. Nothing in the L1 table above is
+altered retroactively; this addendum records the deliberate policy change
+with its reason (availability over page-fail purity).

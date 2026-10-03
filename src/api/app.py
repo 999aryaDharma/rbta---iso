@@ -198,6 +198,171 @@ def create_app(
             "pending_scoring_count": len(service.pending_scoring),
             "raw_evidence_count": app.state.raw_evidence_store.count() if app.state.raw_evidence_store else 0,
         }
+    @app.get("/api/v1/live/status", tags=["Monitoring"])
+    def live_status(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
+        """Read-only live ingestion status (L3). Never mutates service/coordinator state.
+
+        Honesty notes (F11):
+        * ``lag_sec`` is the *cycle age* (now - recent transport cursor), kept
+          for compatibility — it is NOT end-to-end event latency.
+        * ``buffer_size`` is None when the order buffer is disabled/absent
+          (unmeasured), never a fake 0. A real int means the buffer is
+          enabled and holding that many alerts.
+        * ``dispatcher`` / ``quarantine_total`` are null until the owning
+          agents wire those subsystems; null means "not provided", not zero.
+        * ``event_lag_sec`` is now - newest scored ``end_time`` across
+          history/outbox (public API only); null when no scored events exist.
+        """
+        import re as _re
+
+        def _redact_host(value: Optional[str]) -> Optional[str]:
+            """Strip scheme://host (and any embedded credentials) from error text."""
+            if value is None:
+                return None
+            return _re.sub(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s]+", "[host]", value)
+
+        verify_auth(authorization)
+        worker = getattr(app.state, "live_worker", None)
+        worker_snapshot: Dict[str, Any] = {}
+        if worker is not None:
+            try:
+                worker_snapshot = dict(worker.status())
+            except Exception:
+                worker_snapshot = {}
+        alive = bool(worker_snapshot.get("alive", False)) if worker is not None else False
+        last_error = worker_snapshot.get("last_error")
+        # Redacted: error as plain string only, host/credentials stripped, never response bodies.
+        last_error_str = _redact_host(str(last_error)) if last_error is not None else None
+
+        source_state: Dict[str, Any] = {}
+        if service is not None:
+            source_state = service.get_live_source_state()
+        recent_poll_cursor = source_state.get("recent_poll_cursor")
+        lag_sec: Optional[float] = None
+        if recent_poll_cursor:
+            try:
+                cursor_dt = datetime.fromisoformat(str(recent_poll_cursor))
+                if cursor_dt.tzinfo is None:
+                    cursor_dt = cursor_dt.replace(tzinfo=timezone.utc)
+                lag_sec = (datetime.now(timezone.utc) - cursor_dt).total_seconds()
+            except (ValueError, TypeError):
+                lag_sec = None
+
+        # F11: None = buffer disabled/absent (unmeasured), NOT empty.
+        buffer_size: Optional[int] = None
+        buffer_stats: Optional[Dict[str, Any]] = None
+        if worker is not None:
+            try:
+                coordinator = getattr(worker, "coordinator", None)
+                order_buffer = getattr(coordinator, "order_buffer", None) if coordinator is not None else None
+                if order_buffer is not None:
+                    full_stats = dict(order_buffer.status())
+                    buffer_size = full_stats.get("size")
+                    buffer_stats = {
+                        key: full_stats.get(key)
+                        for key in ("size", "late_total", "future_anomalies", "backpressure_count")
+                    }
+            except Exception:
+                buffer_size = None
+                buffer_stats = None
+
+        # F11: dispatcher block owned by another agent; null until wired.
+        dispatcher_status: Optional[Any] = None
+        try:
+            dispatcher = getattr(app.state, "telegram_dispatcher", None)
+            status_fn = getattr(dispatcher, "status", None) if dispatcher is not None else None
+            if callable(status_fn):
+                dispatcher_status = status_fn()
+        except Exception:
+            dispatcher_status = None
+
+        # F11: quarantine COUNT(*) preferred (no row loading); list fallback.
+        quarantine_total: Optional[int] = None
+        if service is not None:
+            try:
+                state_manager = getattr(service, "state_manager", None)
+                count_fn = getattr(state_manager, "quarantine_count", None)
+                if callable(count_fn):
+                    quarantine_total = int(count_fn())
+                else:
+                    quarantine_fn = getattr(state_manager, "quarantine_list", None)
+                    if callable(quarantine_fn):
+                        items = quarantine_fn()
+                        quarantine_total = len(items) if hasattr(items, "__len__") else None
+            except Exception:
+                quarantine_total = None
+
+        # F11: event lag measured from the newest RAW ingested event-time
+        # (coordinator state), not from scored flush — idle-flush delay and
+        # quiet periods would otherwise false-alarm. Falls back to scored
+        # end_time when no ingest has been recorded yet.
+        newest_ingested_event_time: Optional[str] = source_state.get("newest_ingested_event_time")
+        newest_scored_event_time: Optional[str] = None
+        event_lag_sec: Optional[float] = None
+        lag_basis = newest_ingested_event_time
+        if lag_basis:
+            try:
+                basis_dt = datetime.fromisoformat(str(lag_basis))
+                if basis_dt.tzinfo is None:
+                    basis_dt = basis_dt.replace(tzinfo=timezone.utc)
+                event_lag_sec = (datetime.now(timezone.utc) - basis_dt).total_seconds()
+            except (ValueError, TypeError):
+                lag_basis = None
+                event_lag_sec = None
+        if service is not None:
+            try:
+                newest: Optional[datetime] = None
+                for collection_fn in (service.get_history, service.get_outbox):
+                    try:
+                        items = collection_fn()
+                    except Exception:
+                        continue
+                    for item in items or []:
+                        end_time = getattr(item, "end_time", None)
+                        if isinstance(end_time, str):
+                            try:
+                                end_time = datetime.fromisoformat(end_time)
+                            except (ValueError, TypeError):
+                                continue
+                        if not isinstance(end_time, datetime):
+                            continue
+                        if end_time.tzinfo is None:
+                            end_time = end_time.replace(tzinfo=timezone.utc)
+                        if newest is None or end_time > newest:
+                            newest = end_time
+                if newest is not None:
+                    newest_scored_event_time = newest.isoformat()
+                    if lag_basis is None:
+                        event_lag_sec = (datetime.now(timezone.utc) - newest).total_seconds()
+            except Exception:
+                newest_scored_event_time = None
+                if lag_basis is None:
+                    event_lag_sec = None
+
+        outbox_pending = 0
+        if service is not None:
+            outbox_pending = len(service.get_outbox())
+
+        return {
+            "worker_alive": alive,
+            "cycles_completed": int(worker_snapshot.get("cycles_completed", 0) or 0),
+            "consecutive_failures": int(worker_snapshot.get("consecutive_failures", 0) or 0),
+            "last_error": last_error_str,
+            "last_cycle_at": worker_snapshot.get("last_cycle_at"),
+            "live_model_version": source_state.get("live_model_version"),
+            "recent_poll_cursor": recent_poll_cursor,
+            "lag_sec": lag_sec,
+            "buffer_size": buffer_size,
+            "buffer_stats": buffer_stats,
+            "outbox_pending": outbox_pending,
+            "dispatcher": dispatcher_status,
+            "quarantine_total": quarantine_total,
+            "newest_scored_event_time": newest_scored_event_time,
+            "newest_ingested_event_time": newest_ingested_event_time,
+            "event_lag_sec": event_lag_sec,
+            "tls_verify": source_state.get("tls_verify"),
+        }
+
     @app.post("/ingest/wazuh", tags=["Ingress"])
     def ingest_wazuh(
         payload: Dict[str, Any],
@@ -299,6 +464,28 @@ def create_app(
 
         committed_count = service.commit_outbox(meta_ids)
         return {"committed": committed_count, "remaining": len(service.outbox)}
+
+    @app.post("/api/v1/live/quarantine/{alert_id}/release", tags=["Outbox"])
+    def release_quarantine_v1(
+        alert_id: str,
+        authorization: Optional[str] = Header(None),
+    ) -> Dict[str, Any]:
+        """Release one quarantined alert row so the next re-poll can retry ingest.
+
+        The row never reached ``seen`` (it failed before commit), so deleting
+        it simply un-blocks that ID — the following poll attempts a fresh
+        ingest. Returns ``{"released": 1}`` when a row was deleted,
+        ``{"released": 0}`` when the ID was absent.
+        """
+        verify_auth(authorization)
+        state_manager = getattr(service, "state_manager", None) if service is not None else None
+        release_fn = getattr(state_manager, "quarantine_release", None)
+        if not callable(release_fn):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Quarantine store uninitialized",
+            )
+        return {"released": int(release_fn(alert_id))}
 
     # Mount Modular Dashboard APIRouters
     app.include_router(auth.router)

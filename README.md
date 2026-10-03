@@ -22,17 +22,16 @@ python -m pytest -v
 
 For the defense, freeze the exact Git SHA, model artifact, and a manifest-backed golden dataset. See [`docs/demo/SIDANG-RUNBOOK.md`](docs/demo/SIDANG-RUNBOOK.md) and [`docs/thesis/BAB-IV-V-KERANGKA.md`](docs/thesis/BAB-IV-V-KERANGKA.md).
 
-### Lenovo local demo
+### Lenovo local native development & demo (Windows)
 
-Copy `deploy/local/.env.example` to `deploy/local/.env`, verify the replay/model paths, then run:
-
-```powershell
-py scripts/deploy/local.py up
-```
-
-The launcher starts the service and pre-indexes the daily Wazuh exports without reading `.meta` sidecars as alerts. See [`docs/deployment/HYBRID-LENOVO-ASUS.md`](docs/deployment/HYBRID-LENOVO-ASUS.md).
+Jalankan backend dan frontend secara native tanpa Docker:
+- Panduan lengkap: [`docs/deployment/NATIVE-LOCAL-RUNBOOK.md`](docs/deployment/NATIVE-LOCAL-RUNBOOK.md)
+- Jalankan Backend: `.\scripts\run-backend.ps1`
+- Jalankan Frontend: `.\scripts\run-frontend.ps1`
+- Dashboard UI: `http://127.0.0.1:5173/dashboard/`
 
 ### Pre-Deployment & Operations Documentation
+- [`docs/deployment/NATIVE-LOCAL-RUNBOOK.md`](docs/deployment/NATIVE-LOCAL-RUNBOOK.md): Panduan menjalankan backend FastAPI & frontend Vite secara native di Windows.
 - [`docs/deployment/ASUS.md`](docs/deployment/ASUS.md): Phased ASUS server deployment guide.
 - [`docs/deployment/HYBRID-LENOVO-ASUS.md`](docs/deployment/HYBRID-LENOVO-ASUS.md): PowerShell, WSL2, and ASUS hybrid workflow.
 - [`docs/deployment/WAZUH-LIVE-INTEGRATION-CHECKLIST.md`](docs/deployment/WAZUH-LIVE-INTEGRATION-CHECKLIST.md): Operational parameter checklist for live Wazuh connection.

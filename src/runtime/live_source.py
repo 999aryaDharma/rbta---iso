@@ -12,6 +12,38 @@ from src.ingestion.wazuh_client import WazuhIndexerClient
 logger = logging.getLogger(__name__)
 
 
+def validate_index_id_uniqueness(hits: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
+    """Offline smoke-test for the poller identity contract (F10, no network).
+
+    The poller assumes each source document carries a unique alert identity
+    (``_source.id``, falling back to ``_id``); success-page dedup, the
+    ``search_after`` cursor, and downstream exactly-once dedup all rest on
+    that assumption. This helper lets tests and smoke checks verify the
+    assumption against a captured page without touching the Indexer.
+
+    Returns ``{"doc_count", "unique_ids", "id_is_unique"}``. Documents with
+    no usable identity are counted in ``doc_count`` but contribute no id.
+    """
+    seen: Set[str] = set()
+    count = 0
+    for hit in hits:
+        count += 1
+        doc_id: Any = None
+        if isinstance(hit, dict):
+            src = hit.get("_source")
+            if isinstance(src, dict) and src.get("id") is not None:
+                doc_id = src.get("id")
+            elif hit.get("_id") is not None:
+                doc_id = hit.get("_id")
+        if doc_id is not None:
+            seen.add(str(doc_id))
+    return {
+        "doc_count": count,
+        "unique_ids": len(seen),
+        "id_is_unique": len(seen) == count,
+    }
+
+
 class LiveSourceError(RuntimeError):
     """Base exception for live source errors."""
     pass
@@ -87,17 +119,44 @@ class WazuhIndexerLivePoller:
         self.overlap_window: timedelta = overlap_window
         self.poll_interval: timedelta = poll_interval
         self.page_size: int = page_size
+        # N1b per-hit quarantine: documents that fail canonicalization are
+        # collected here (reset on every _paginate_search call) instead of
+        # failing the whole page. The coordinator drains this after each poll
+        # path and quarantines every entry durably, then continues.
+        self.last_bad_docs: List[Dict[str, Any]] = []
 
     def _paginate_search(
         self,
         indices: Sequence[str],
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
+        allow_unavailable: bool = True,
     ) -> List[CanonicalRawAlert]:
         """Execute deterministic paginated search using @timestamp ASC and id ASC.
 
         Enforces strict fail-closed response validation and canonicalization integrity.
+
+        Identity assumption (F10): every hit is keyed by a unique alert id
+        (``_source.id``, fallback ``_id``); see
+        :func:`validate_index_id_uniqueness` for the offline smoke check.
+
+        Shard tolerance (F10): a response *without* the ``_shards`` key is
+        accepted as long as ``hits.hits`` is well-formed — several Indexer
+        fixtures and proxies omit ``_shards`` on success — but any explicit
+        ``failed != 0``, ``timed_out``, or ``terminated_early`` still fails
+        closed. ``allow_partial_search_results`` is always forced to
+        ``"false"`` so partial shard coverage can never look like success.
+
+        ``allow_unavailable=True`` (default, fast recent path) tolerates
+        missing daily indices; ``False`` is the strict mode intended for
+        discovery/full-recon callers that must notice absent indices.
+
+        Per-hit canonicalization (N1b, replaces page-fail L1): a document that
+        fails canonicalization is appended to ``self.last_bad_docs`` as
+        ``{"index", "doc_id", "error"}`` and skipped — valid documents on the
+        same page are still returned. ``last_bad_docs`` resets on every call.
         """
+        self.last_bad_docs = []
         if not indices:
             return []
 
@@ -126,7 +185,8 @@ class WazuhIndexerLivePoller:
                 current_body["search_after"] = search_after_cursor
 
             resp = self.client._request("POST", target_endpoint, json_data=current_body, params={
-                "ignore_unavailable": "true", "allow_no_indices": "true",
+                "ignore_unavailable": "true" if allow_unavailable else "false",
+                "allow_no_indices": "true" if allow_unavailable else "false",
                 "allow_partial_search_results": "false",
             })
             try:
@@ -155,7 +215,8 @@ class WazuhIndexerLivePoller:
 
             hits = data["hits"]["hits"]
 
-            # Fail-closed canonicalization loop
+            # Per-hit quarantine loop (N1b): collect the corrupt document,
+            # keep every valid sibling on the page.
             for pos, hit in enumerate(hits):
                 try:
                     alert = canonicalize_wazuh_alert(hit)
@@ -163,9 +224,19 @@ class WazuhIndexerLivePoller:
                 except Exception as exc:
                     doc_id = hit.get("_id") if isinstance(hit, dict) else None
                     idx_name = hit.get("_index") if isinstance(hit, dict) else None
-                    raise LiveCanonicalizationError(
-                        f"Failed to canonicalize document in live source (index={idx_name}, doc_id={doc_id}, page_pos={pos}): {exc}"
-                    ) from exc
+                    logger.warning(
+                        "Skipping uncanonicalizable live document "
+                        "(index=%s, doc_id=%s, page_pos=%d): %s",
+                        idx_name, doc_id, pos, exc,
+                    )
+                    self.last_bad_docs.append({
+                        "index": idx_name,
+                        "doc_id": doc_id,
+                        "error": (
+                            f"Failed to canonicalize document in live source "
+                            f"(index={idx_name}, doc_id={doc_id}, page_pos={pos}): {exc}"
+                        ),
+                    })
 
             # Termination condition
             if len(hits) < self.page_size:
@@ -189,7 +260,9 @@ class WazuhIndexerLivePoller:
                 except TypeError:
                     advancing = False
                 if not advancing:
-                    raise LiveSourceIntegrityError("Pagination cursor did not advance")
+                    raise LiveSourceIntegrityError(
+                        f"Pagination cursor did not advance (cursor={list(next_cursor)!r})"
+                    )
             search_after_cursor = next_cursor
 
         return new_alerts
@@ -231,6 +304,7 @@ class WazuhIndexerLivePoller:
         self,
         current_time: Optional[datetime] = None,
         recent_poll_cursor: Optional[datetime] = None,
+        allow_unavailable: bool = True,
     ) -> List[CanonicalRawAlert]:
         """Fast recent polling path for low-latency alert discovery.
 
@@ -249,7 +323,10 @@ class WazuhIndexerLivePoller:
         now = current_time or datetime.now(timezone.utc)
         start_time = (recent_poll_cursor or now) - self.overlap_window
         indices = derive_daily_indices(start_time, now)
-        return self._paginate_search(indices=indices, start_time=start_time, end_time=now)
+        return self._paginate_search(
+            indices=indices, start_time=start_time, end_time=now,
+            allow_unavailable=allow_unavailable,
+        )
 
     def poll_reconciliation(
         self,
@@ -257,6 +334,7 @@ class WazuhIndexerLivePoller:
         reconciliation_days: int = 2,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
+        allow_unavailable: bool = True,
     ) -> List[CanonicalRawAlert]:
         """Recent reconciliation scan path over retained daily indices (default 2 days: today and yesterday).
 
@@ -279,11 +357,15 @@ class WazuhIndexerLivePoller:
         now = end_time or current_time or datetime.now(timezone.utc)
         scan_start = start_time or (now - timedelta(days=max(0, reconciliation_days - 1)))
         indices = derive_daily_indices(scan_start, now)
-        return self._paginate_search(indices=indices, start_time=start_time, end_time=end_time)
+        return self._paginate_search(
+            indices=indices, start_time=start_time, end_time=end_time,
+            allow_unavailable=allow_unavailable,
+        )
 
     def poll_full_reconciliation(
         self,
         prefix: str = "wazuh-alerts-4.x-",
+        allow_unavailable: bool = True,
     ) -> List[CanonicalRawAlert]:
         """Lossless full-retention reconciliation scan across all retained Wazuh daily alert indices.
 
@@ -303,7 +385,10 @@ class WazuhIndexerLivePoller:
         indices = self.discover_retained_daily_alert_indices(prefix=prefix)
         if not indices:
             return []
-        return self._paginate_search(indices=indices, start_time=None, end_time=None)
+        return self._paginate_search(
+            indices=indices, start_time=None, end_time=None,
+            allow_unavailable=allow_unavailable,
+        )
 
     def poll_once(
         self,

@@ -133,29 +133,33 @@ class RawAlertEvidenceStore:
     def flush(self) -> None:
         """Commit any buffered raw evidence records to disk immediately."""
         with self._lock:
-            if not self._write_buffer:
-                return
-            conn = self._get_conn()
-            conn.executemany(
-                """
-                INSERT OR IGNORE INTO raw_alert_evidence (
-                    wazuh_alert_id, canonical_fingerprint, fingerprint_version, timestamp, agent_id, agent_name,
-                    rule_id, rule_level, rule_description, rule_group_primary, rule_groups_all,
-                    mitre_tactics, mitre_techniques, srcip, location, decoder,
-                    full_log, agent_criticality, metadata, original_source_payload,
-                    source_index, source_document_id, source_mode, ingested_at
-                ) VALUES (
-                    ?, ?, 2, ?, ?, ?,
-                    ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?,
-                    ?, ?, ?, ?
-                )
-                """,
-                self._write_buffer,
+            self._flush_locked()
+
+    def _flush_locked(self) -> None:
+        """Flush the write buffer; caller must hold ``self._lock``."""
+        if not self._write_buffer:
+            return
+        conn = self._get_conn()
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO raw_alert_evidence (
+                wazuh_alert_id, canonical_fingerprint, fingerprint_version, timestamp, agent_id, agent_name,
+                rule_id, rule_level, rule_description, rule_group_primary, rule_groups_all,
+                mitre_tactics, mitre_techniques, srcip, location, decoder,
+                full_log, agent_criticality, metadata, original_source_payload,
+                source_index, source_document_id, source_mode, ingested_at
+            ) VALUES (
+                ?, ?, 2, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?,
+                ?, ?, ?, ?
             )
-            conn.commit()
-            self._write_buffer.clear()
+            """,
+            self._write_buffer,
+        )
+        conn.commit()
+        self._write_buffer.clear()
 
     def store(
         self,
@@ -175,6 +179,9 @@ class RawAlertEvidenceStore:
         ------
         RawEvidenceConflictError
             If wazuh_alert_id already exists with conflicting canonical attributes.
+            The legacy ``skip_conflict_check`` flag is retained for API
+            compatibility but never weakens this check: replay ingestion also
+            enforces full canonical conflict detection.
         """
         meta = alert.metadata if isinstance(alert.metadata, dict) else dict(alert.metadata)
 
@@ -230,6 +237,12 @@ class RawAlertEvidenceStore:
 
             if row is not None:
                 existing_fp = row["canonical_fingerprint"]
+                if not existing_fp:
+                    raise RawEvidenceIntegrityError(
+                        f"Stored raw evidence for wazuh_alert_id='{alert.wazuh_alert_id}' has an empty"
+                        f" canonical fingerprint (fingerprint_version={row['fingerprint_version']});"
+                        " the evidence row is corrupt and must be repaired, not overwritten"
+                    )
                 if row["fingerprint_version"] == 1:
                     fields = {name: row[name] for name in (
                         "wazuh_alert_id", "timestamp", "agent_id", "agent_name", "rule_id", "rule_level",
@@ -253,6 +266,10 @@ class RawAlertEvidenceStore:
                 )
 
             if len(self._recent_fingerprints) >= self._max_recent_fingerprints:
+                # F13a: buffered-but-unflushed rows are invisible to the SELECT
+                # above, so the cache must be committed to SQLite before it is
+                # cleared — otherwise conflicts against buffered rows go undetected.
+                self._flush_locked()
                 self._recent_fingerprints.clear()
             self._recent_fingerprints[alert.wazuh_alert_id] = fingerprint
 

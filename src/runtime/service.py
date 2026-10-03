@@ -244,8 +244,14 @@ class LiveRBTAService:
         """Explicitly persist current durable state to disk."""
         self._persist_to_disk()
 
+    @_serialized
     def _drain_pending_scoring(self, auto_persist: Optional[bool] = None) -> List[ScoredMetaAlert]:
-        """Score pending meta-alerts and safely commit them to outbox and history."""
+        """Score pending meta-alerts and safely commit them to outbox and history.
+
+        Serialized with the service lock (reentrant RLock, so nested calls
+        from ingest/flush/shutdown are safe) so direct external calls cannot
+        race concurrent ingest/flush mutations.
+        """
         should_persist = self.auto_persist if auto_persist is None else auto_persist
         new_scored: List[ScoredMetaAlert] = []
         while self.pending_scoring:
@@ -289,6 +295,9 @@ class LiveRBTAService:
         should_persist = self.auto_persist if auto_persist is None else auto_persist
         if self.raw_evidence_store is not None:
             # We don't have original payload here directly, pass None
+            # NOTE: skip_conflict_check is a legacy no-op kept for API
+            # compatibility; the store always enforces canonical conflict
+            # detection, including for REPLAY source mode.
             self.raw_evidence_store.store(
                 alert,
                 original_payload=original_payload,

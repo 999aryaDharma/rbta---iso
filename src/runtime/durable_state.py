@@ -2,6 +2,7 @@
 
 from collections import Counter
 from datetime import datetime, timezone
+import hashlib
 import json
 import logging
 import sqlite3
@@ -13,6 +14,45 @@ from src.rbta.engine import RBTAEngine, _ActiveBucket
 from src.rbta.temporal_state import AgentTemporalState
 
 logger = logging.getLogger(__name__)
+
+#: Version of the Wazuh canonicalizer derivation logic covered by
+#: :func:`compute_derivation_hash`. Bump when canonicalizer semantics change
+#: so drift detection fails closed instead of silently reusing stale state.
+CANONICALIZER_VERSION = "1.0"
+
+
+def compute_derivation_hash() -> str:
+    """Compute a stable hash of the canonicalizer derivation config.
+
+    The canonicalizer derives ``agent_criticality`` and ``rule_group_primary``
+    from the domain tables in :mod:`src.config.domain`; any change to those
+    tables silently changes fingerprints, buckets, and features.  Hashing their
+    JSON-sorted representation (plus :data:`CANONICALIZER_VERSION`) lets the
+    live worker detect config drift against the hash stored alongside durable
+    state (fail-visible, never silent).
+
+    Fail-closed like model pinning: when the config cannot be read the error
+    propagates — there is deliberately no constant fallback, so a broken
+    config can never masquerade as a known-good derivation.
+    """
+    from src.config.domain import (
+        AGENT_CRITICALITY,
+        CRITICAL_MITRE_TACTICS,
+        DEFAULT_AGENT_CRITICALITY,
+        DEFAULT_RULE_GROUP_WEIGHT,
+        GROUP_SEVERITY_WEIGHT,
+    )
+
+    derivation = {
+        "agent_criticality": dict(sorted(AGENT_CRITICALITY.items())),
+        "group_severity_weight": dict(sorted(GROUP_SEVERITY_WEIGHT.items())),
+        "critical_mitre_tactics": sorted(str(t) for t in CRITICAL_MITRE_TACTICS),
+        "default_agent_criticality": DEFAULT_AGENT_CRITICALITY,
+        "default_rule_group_weight": DEFAULT_RULE_GROUP_WEIGHT,
+        "canonicalizer_version": CANONICALIZER_VERSION,
+    }
+    canonical = json.dumps(derivation, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class DurableStateManager:
@@ -46,7 +86,78 @@ class DurableStateManager:
                 """
             )
             conn.execute("CREATE TABLE IF NOT EXISTS runtime_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL)")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS quarantined_alerts (
+                    wazuh_alert_id TEXT PRIMARY KEY,
+                    source_index TEXT NOT NULL DEFAULT '',
+                    source_document_id TEXT NOT NULL DEFAULT '',
+                    error_type TEXT NOT NULL DEFAULT '',
+                    count INTEGER NOT NULL DEFAULT 1,
+                    first_seen TEXT NOT NULL DEFAULT (datetime('now')),
+                    last_seen TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+            conn.execute("CREATE TABLE IF NOT EXISTS derivation_state (id INTEGER PRIMARY KEY CHECK (id = 1), derivation_hash TEXT NOT NULL)")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS suppressed_notifications (
+                    meta_id INTEGER PRIMARY KEY,
+                    reason TEXT NOT NULL DEFAULT '',
+                    suppressed_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notification_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    meta_id INTEGER,
+                    run_id TEXT,
+                    verdict TEXT,
+                    at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
 
+    def _assert_no_finalized_collision(self, new_finalized_history: List[Dict[str, Any]]) -> None:
+        """Fail closed when a batch meta_id already exists in finalized_history.
+
+        N8: silently ignoring (INSERT OR IGNORE) would fork the meta_id stream —
+        the batch row is dropped while the in-memory counter has already moved
+        on. Checked with a read-only SELECT (chunked at 500) before any write,
+        so commit-only-on-success is preserved.
+
+        Idempotency: a colliding row whose stored scored_data is identical to
+        the batch item is a retried checkpoint, not a fork — it passes without
+        raising. Any divergent content under a committed meta_id still raises.
+        """
+        ids = [int(item["meta_id"]) for item in (new_finalized_history or [])]
+        if not ids:
+            return
+        batch_by_id: Dict[int, Dict[str, Any]] = {}
+        for item in (new_finalized_history or []):
+            batch_by_id.setdefault(int(item["meta_id"]), item)
+        with sqlite3.connect(self.history_db_path) as conn:
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = conn.execute(
+                    f"SELECT meta_id, scored_data FROM finalized_history WHERE meta_id IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+                if not rows:
+                    continue
+                divergent = sorted(
+                    int(r[0]) for r in rows
+                    if json.loads(r[1]) != batch_by_id.get(int(r[0]))
+                )
+                if divergent:
+                    raise RuntimeError(
+                        f"Refusing to checkpoint: batch meta_id(s) already committed "
+                        f"in finalized_history with divergent content: {divergent}"
+                    )
     def append_finalized(self, scored_items: List[Dict[str, Any]]) -> None:
         if not scored_items:
             return
@@ -153,10 +264,195 @@ class DurableStateManager:
             ).fetchone()
         return row is not None
 
+    def quarantine_add(
+        self,
+        wazuh_alert_id: str,
+        source_index: str = "",
+        source_document_id: str = "",
+        error_type: str = "",
+    ) -> int:
+        """Record a deterministically corrupt alert in durable quarantine (upsert).
+
+        Repeat offenses against the same ID bump ``count``/``last_seen`` while
+        ``first_seen`` is preserved, so the quarantine table stays visible in
+        status without growing per retry.
+
+        Returns the per-ID ``count`` after this offense (1 on first offense),
+        so callers can log the first quarantine as an error and repeats as debug.
+        """
+        counts = self.quarantine_add_many([{
+            "wazuh_alert_id": wazuh_alert_id,
+            "source_index": source_index,
+            "source_document_id": source_document_id,
+            "error_type": error_type,
+        }])
+        return counts[0]
+
+    def quarantine_add_many(self, entries: List[Dict[str, Any]]) -> List[int]:
+        """Record a batch of quarantine entries in a single transaction.
+
+        One connection / one commit for the whole batch (plus one read-back
+        for the resulting counts). Returns the per-ID ``count`` after this
+        flush, in entry order.
+        """
+        if not entries:
+            return []
+        now = datetime.now(timezone.utc).isoformat()
+        rows = [
+            (
+                str(e.get("wazuh_alert_id", "")),
+                str(e.get("source_index", "") or ""),
+                str(e.get("source_document_id", "") or ""),
+                str(e.get("error_type", "") or ""),
+                now,
+                now,
+            )
+            for e in entries
+        ]
+        with sqlite3.connect(self.history_db_path) as conn:
+            conn.executemany(
+                """
+                INSERT INTO quarantined_alerts
+                    (wazuh_alert_id, source_index, source_document_id, error_type, count, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, 1, ?, ?)
+                ON CONFLICT(wazuh_alert_id) DO UPDATE SET
+                    source_index = excluded.source_index,
+                    source_document_id = excluded.source_document_id,
+                    error_type = excluded.error_type,
+                    count = quarantined_alerts.count + 1,
+                    last_seen = excluded.last_seen
+                """,
+                rows,
+            )
+            conn.commit()
+            counts = []
+            for (alert_id, *_rest) in rows:
+                row = conn.execute(
+                    "SELECT count FROM quarantined_alerts WHERE wazuh_alert_id = ?",
+                    (alert_id,),
+                ).fetchone()
+                counts.append(int(row[0]) if row else 0)
+        return counts
+
+    def quarantine_release(self, wazuh_alert_id: str) -> int:
+        """Delete one quarantined ID; returns affected rows (1 released, 0 absent)."""
+        with sqlite3.connect(self.history_db_path) as conn:
+            cursor = conn.execute(
+                "DELETE FROM quarantined_alerts WHERE wazuh_alert_id = ?",
+                (str(wazuh_alert_id),),
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
+
+    def quarantine_count(self) -> int:
+        """Return COUNT(*) of quarantined alerts (agent status uses this, not len(list))."""
+        with sqlite3.connect(self.history_db_path) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM quarantined_alerts").fetchone()
+        return int(row[0]) if row else 0
+
+    def suppression_add(self, meta_id: int, reason: str) -> None:
+        """Suppress notification for one finalized meta ID (idempotent, first reason wins).
+
+        Called by the dispatcher agent via getattr; never raises on re-suppress.
+        """
+        with sqlite3.connect(self.history_db_path) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO suppressed_notifications (meta_id, reason) VALUES (?, ?)",
+                (int(meta_id), str(reason or "")),
+            )
+            conn.commit()
+
+    def suppression_count(self) -> int:
+        """Return COUNT(*) of suppressed notification meta IDs."""
+        with sqlite3.connect(self.history_db_path) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM suppressed_notifications").fetchone()
+        return int(row[0]) if row else 0
+
+    def notification_add(self, meta_id: int, run_id: str, verdict: str) -> int:
+        """Append one dispatcher notification verdict to notification_log.
+
+        Called by the dispatcher agent via getattr; returns the AUTOINCREMENT
+        row id of the appended verdict row.
+        """
+        with sqlite3.connect(self.history_db_path) as conn:
+            cursor = conn.execute(
+                "INSERT INTO notification_log (meta_id, run_id, verdict) VALUES (?, ?, ?)",
+                (int(meta_id), str(run_id), str(verdict)),
+            )
+            conn.commit()
+            return int(cursor.lastrowid or 0)
+
+    def notification_count(self) -> int:
+        """Return COUNT(*) of logged dispatcher notification verdicts."""
+        with sqlite3.connect(self.history_db_path) as conn:
+            row = conn.execute("SELECT COUNT(*) FROM notification_log").fetchone()
+        return int(row[0]) if row else 0
+
+    def notification_verdicts(self, limit: int = 100) -> List[str]:
+        """Return recent notification verdicts, newest first (shadow-run evidence)."""
+        with sqlite3.connect(self.history_db_path) as conn:
+            rows = conn.execute(
+                "SELECT verdict FROM notification_log ORDER BY id DESC LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
+        return [str(row[0]) for row in rows]
+
+    def quarantine_id_set(self) -> Set[str]:
+        """Return just quarantined IDs as a set (cheap per-cycle skip filter).
+
+        Single-column SELECT, unlike :meth:`quarantine_list` which fetches
+        display columns newest-first for operator status visibility.
+        """
+        with sqlite3.connect(self.history_db_path) as conn:
+            rows = conn.execute("SELECT wazuh_alert_id FROM quarantined_alerts").fetchall()
+        return {str(row[0]) for row in rows}
+
+    def quarantine_list(self) -> List[Dict[str, Any]]:
+        """Return quarantined alerts newest-first for operator status visibility."""
+        with sqlite3.connect(self.history_db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT wazuh_alert_id, source_index, source_document_id, error_type,"
+                " count, first_seen, last_seen FROM quarantined_alerts"
+                " ORDER BY last_seen DESC, wazuh_alert_id ASC"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_derivation_hash(self) -> Optional[str]:
+        """Return the stored canonicalizer derivation hash, or None when unset."""
+        with sqlite3.connect(self.history_db_path) as conn:
+            row = conn.execute("SELECT derivation_hash FROM derivation_state WHERE id = 1").fetchone()
+        return str(row[0]) if row else None
+
+    def set_derivation_hash(self, derivation_hash: str) -> None:
+        """Persist the canonicalizer derivation hash for worker drift comparison."""
+        with sqlite3.connect(self.history_db_path) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO derivation_state (id, derivation_hash) VALUES (1, ?)",
+                (str(derivation_hash),),
+            )
+            conn.commit()
+
     @property
     def state_path(self) -> Path:
         """Return resolved path to the state file."""
         return self.filepath
+
+    def _backup_legacy_mirror_once(self) -> None:
+        """Copy a non-1.2 JSON mirror to .pre-1.2.bak exactly once before overwrite."""
+        mirror_backup = self.filepath.with_name(self.filepath.name + ".pre-1.2.bak")
+        try:
+            if not self.filepath.exists() or mirror_backup.exists():
+                return
+            raw = self.filepath.read_text(encoding="utf-8")
+            try:
+                schema = json.loads(raw).get("schema_version") if raw.strip() else None
+            except ValueError:
+                schema = None
+            if schema != "1.2":
+                mirror_backup.write_text(raw, encoding="utf-8")
+        except OSError:
+            logger.warning("Legacy JSON mirror could not be backed up; proceeding with save")
 
     def save_state(
         self,
@@ -174,6 +470,9 @@ class DurableStateManager:
         # Seen IDs are append-only in SQLite so checkpoint cost is proportional
         # to new events rather than rewriting the full replay history as JSON.
         new_seen_ids = set(getattr(engine, "_new_seen_alert_ids", set()))
+
+        # N8: fail closed on meta_id collision before any write in this checkpoint.
+        self._assert_no_finalized_collision(list(new_finalized_history or []))
 
         # 1. Serialize Meta Counter
         meta_id_counter = engine._meta_id_counter
@@ -245,6 +544,9 @@ class DurableStateManager:
         if hasattr(engine, "_new_seen_alert_ids"):
             engine._new_seen_alert_ids.difference_update(new_seen_ids)
 
+        # F13c: preserve a pre-1.2 mirror exactly once before it is overwritten.
+        self._backup_legacy_mirror_once()
+
         # Compatibility/export mirror only; recovery always prefers SQLite.
         try:
             tmp_file.write_text(serialized, encoding="utf-8")
@@ -265,8 +567,26 @@ class DurableStateManager:
         Dict[str, Any]
             Restored metadata dictionary containing 'outbox' and 'source_checkpoint'.
         """
+        # The state directory may have been removed between manager init and
+        # restore (e.g. operator cleanup). Recreate it so restore fails only
+        # on genuine corruption, not on a missing directory.
+        self.history_db_path.parent.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.history_db_path) as conn:
             row = conn.execute("SELECT payload FROM runtime_snapshot WHERE id = 1").fetchone()
+            if row is None:
+                # F13d fail-closed: a missing snapshot with surviving seen IDs
+                # means a partial/corrupt restore — never hydrate dedup into an
+                # empty engine, which would silently fork duplicate protection
+                # (engine without buckets/temporal state but with seen IDs).
+                # History-only state is still restorable: loading finalized
+                # history touches no dedup structures.
+                seen_count = conn.execute("SELECT COUNT(*) FROM seen_alert_ids").fetchone()[0]
+                if int(seen_count or 0) > 0:
+                    raise RuntimeError(
+                        "Runtime SQLite snapshot is missing while seen_alert_ids"
+                        " is non-empty; refusing to hydrate dedup state into an empty engine —"
+                        " restore the complete runtime backup instead"
+                    )
         if row:
             data = json.loads(row[0])
         elif self.filepath.exists():
@@ -277,6 +597,11 @@ class DurableStateManager:
         else:
             engine._seen_alert_ids = self.load_seen_alert_ids() if hydrate_seen_ids else set()
             engine._new_seen_alert_ids = set()
+            # N8: history-only restore resumes the meta_id stream at MAX+1 so
+            # the next bucket cannot collide with already-committed history.
+            with sqlite3.connect(self.history_db_path) as conn:
+                max_row = conn.execute("SELECT MAX(meta_id) FROM finalized_history").fetchone()
+            engine._meta_id_counter = int(max_row[0]) + 1 if max_row and max_row[0] is not None else 1
             return {"outbox": [], "source_checkpoint": {}, "finalized_history": self.load_finalized_history()}
 
         # 1. Restore Seen IDs and Counter

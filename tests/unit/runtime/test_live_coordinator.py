@@ -111,23 +111,298 @@ def test_coordinator_full_retention_reconciliation_recovers_old_alert(tmp_path: 
     assert result.full_reconciliation_candidates == 2
 
 
-def test_coordinator_canonicalization_failure_does_not_advance_success_timestamp(tmp_path: Path):
-    """When a source document fails canonicalization, coordinator raises and does NOT advance success timestamp."""
-    service = create_test_service(tmp_path)
-    poller = MagicMock(spec=WazuhIndexerLivePoller)
+def _stub_service(tmp_path: Path):
+    """Cheap stub service: real DurableStateManager, mocked ingest paths."""
+    service = MagicMock()
+    service.state_manager = DurableStateManager(tmp_path / "stub_state.json")
+    service.is_seen.return_value = False
+    service.check_idle_flush.return_value = []
+    service.get_live_source_state.return_value = {}
+    service.update_live_source_state.side_effect = lambda s: None
+    return service
 
+
+def _scale_alerts(n: int, t_now, step_s: int = 20, start: int = 0):
+    return [
+        make_raw_alert(start + i, t_now - timedelta(seconds=(n - i) * step_s))
+        for i in range(n)
+    ]
+
+
+def test_coordinator_bad_docs_quarantined_per_hit_and_cycle_commits(tmp_path: Path):
+    """N1b: per-hit bad docs drained from poller.last_bad_docs are quarantined
+    (error_type LiveCanonicalizationError); valid alerts still ingest; cursor commits."""
+    from datetime import timezone as _tz
+
+    service = _stub_service(tmp_path)
+    service.ingest_alert.side_effect = lambda a: []
+    poller = MagicMock()
     t_now = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
-    poller.poll_full_reconciliation.side_effect = LiveCanonicalizationError("Corrupt payload in hit 5")
+    valid = _scale_alerts(150, t_now)
+    bad = {"index": "wazuh-alerts-4.x-2026.08.28", "doc_id": "doc_bad", "error": "boom"}
+
+    def _full(*a, **k):
+        poller.last_bad_docs = []
+        return []
+
+    def _recent(*a, **k):
+        poller.last_bad_docs = []
+        return []
+
+    def _fast(*a, **k):
+        poller.last_bad_docs = [bad]
+        return valid
+
+    poller.poll_full_reconciliation.side_effect = _full
+    poller.poll_reconciliation.side_effect = _recent
+    poller.poll_recent.side_effect = _fast
+    poller.last_bad_docs = []
 
     coord = LiveIngestionCoordinator(service=service, poller=poller)
+    result = coord.run_cycle(current_time=t_now)
 
-    with pytest.raises(LiveCanonicalizationError, match="Corrupt payload"):
-        coord.run_cycle(current_time=t_now, force_full_reconciliation=True)
+    assert result.submitted_candidates == 150
+    assert result.quarantined == 1
+    assert result.processed_new_ids == 150
+    rows = service.state_manager.quarantine_list()
+    assert len(rows) == 1
+    assert rows[0]["wazuh_alert_id"] == "doc_bad"
+    assert rows[0]["error_type"] == "LiveCanonicalizationError"
+    assert service.update_live_source_state.called  # cursor committed on success
 
-    # State was NOT marked successful
-    assert coord.last_full_reconciliation_at is None
-    state = service.get_live_source_state()
-    assert state.get("last_full_reconciliation_at") is None
+
+def test_coordinator_quarantines_rbta_and_temporal_errors_and_continues(tmp_path: Path):
+    """N1a: RBTAInvariantError + TemporalStateError are deterministic quarantine,
+    not transient halt; engine.process is failure-atomic (verified below)."""
+    from src.rbta.engine import RBTAInvariantError
+    from src.rbta.temporal_state import TemporalStateError
+
+    service = _stub_service(tmp_path)
+
+    def _ingest(alert):
+        if alert.wazuh_alert_id == "alert_5":
+            raise RBTAInvariantError("contradictory criticality")
+        if alert.wazuh_alert_id == "alert_7":
+            raise TemporalStateError("terminal invalid")
+        return []
+
+    service.ingest_alert.side_effect = _ingest
+    poller = MagicMock()
+    t_now = datetime(2026, 8, 28, 10, 30, 0, tzinfo=timezone.utc)
+    poller.poll_recent.return_value = _scale_alerts(200, t_now)
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+    poller.last_bad_docs = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    result = coord.run_cycle(current_time=t_now)
+
+    assert result.failures == 2
+    assert result.quarantined == 2
+    assert result.processed_new_ids == 198
+    by_id = {r["wazuh_alert_id"]: r["error_type"] for r in service.state_manager.quarantine_list()}
+    assert by_id == {"alert_5": "RBTAInvariantError", "alert_7": "TemporalStateError"}
+    assert service.update_live_source_state.called
+
+
+def test_engine_process_invariant_error_is_failure_atomic():
+    """N1a evidence: contradictory criticality mutates zero engine state."""
+    from src.rbta.engine import RBTAEngine, RBTAInvariantError
+
+    engine = RBTAEngine(base_delta_t=timedelta(minutes=15), adaptive=False)
+    t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    engine.process(make_raw_alert(1, t))
+    counter_before = engine._meta_id_counter
+
+    bad = make_raw_alert(2, t + timedelta(minutes=1), crit=4)
+    with pytest.raises(RBTAInvariantError):
+        engine.process(bad)
+
+    assert "alert_2" not in engine._seen_alert_ids
+    assert "alert_2" not in engine._new_seen_alert_ids
+    assert engine._meta_id_counter == counter_before
+    assert engine._active_buckets[("001", "pam")].alert_count == 1
+
+
+def test_engine_process_temporal_error_is_failure_atomic():
+    """N1a evidence: terminal-invalid temporal state mutates zero commit state."""
+    from src.rbta.engine import RBTAEngine
+    from src.rbta.temporal_state import TemporalStateError
+
+    engine = RBTAEngine()  # adaptive: 100 identical gaps -> baseline 0 -> terminal invalid
+    t = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    for i in range(99):
+        engine.process(make_raw_alert(i, t))
+    counter_before = engine._meta_id_counter
+
+    with pytest.raises(TemporalStateError):
+        engine.process(make_raw_alert(99, t))
+
+    assert "alert_99" not in engine._seen_alert_ids
+    assert engine._meta_id_counter == counter_before
+
+
+def test_coordinator_quarantine_breaker_trips_on_fraction(tmp_path: Path):
+    """N5c: quarantine fraction >1% halts the cycle (no cursor commit)."""
+    from src.runtime.raw_evidence import RawEvidenceConflictError
+
+    service = _stub_service(tmp_path)
+    service.ingest_alert.side_effect = RawEvidenceConflictError("systemic poison")
+    poller = MagicMock()
+    t_now = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    poller.poll_recent.return_value = _scale_alerts(5, t_now)
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+    poller.last_bad_docs = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    with pytest.raises(RuntimeError, match="[Qq]uarantine"):
+        coord.run_cycle(current_time=t_now)
+    # P1 latch: breaker_tripped persisted, transport cursor keys NOT committed.
+    assert service.update_live_source_state.called
+    payload = service.update_live_source_state.call_args.args[0]
+    assert payload["breaker_tripped"]["quarantined"] == 5
+    assert payload["breaker_tripped"]["submitted"] == 5
+    assert payload["breaker_tripped"]["trip_id"].startswith("qb-")
+    assert "recent_poll_cursor" not in payload
+
+
+def test_coordinator_quarantine_breaker_trips_on_absolute_count(tmp_path: Path):
+    """N5c: >100 quarantined in one cycle halts even when the fraction is <=1%."""
+    from src.runtime.raw_evidence import RawEvidenceConflictError
+
+    service = _stub_service(tmp_path)
+    service.ingest_alert.side_effect = RawEvidenceConflictError("slow systemic poison")
+    poller = MagicMock()
+    t_now = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    all_alerts = _scale_alerts(12000, t_now, step_s=1)
+    poison_ids = {f"alert_{i}" for i in range(110)}  # 110/12000 = 0.92% <= 1%
+
+    def _ingest(alert):
+        if alert.wazuh_alert_id in poison_ids:
+            raise RawEvidenceConflictError("slow systemic poison")
+        return []
+
+    service.ingest_alert.side_effect = _ingest
+    poller.poll_recent.return_value = all_alerts
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+    poller.last_bad_docs = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    with pytest.raises(RuntimeError, match="[Qq]uarantine"):
+        coord.run_cycle(current_time=t_now)
+    # P1 latch: breaker_tripped persisted, transport cursor keys NOT committed.
+    assert service.update_live_source_state.called
+    payload = service.update_live_source_state.call_args.args[0]
+    assert payload["breaker_tripped"]["quarantined"] == 110
+    assert payload["breaker_tripped"]["submitted"] == 12000
+    assert payload["breaker_tripped"]["trip_id"].startswith("qb-")
+    assert "recent_poll_cursor" not in payload
+
+
+def test_coordinator_quarantine_flushes_once_per_cycle(tmp_path: Path, monkeypatch):
+    """N5b: per-cycle quarantine entries flush via a single add_many call."""
+    service = create_test_service(tmp_path)
+    from src.runtime.raw_evidence import RawAlertEvidenceStore
+
+    service.raw_evidence_store = RawAlertEvidenceStore(db_path=tmp_path / "ev.sqlite3", batch_size=10000)
+
+    t_now = datetime(2026, 8, 28, 10, 30, 0, tzinfo=timezone.utc)
+    n = 120
+    candidates = _scale_alerts(n, t_now)
+    poison_ts = t_now - timedelta(seconds=(n - 77) * 20)
+    poison = make_raw_alert(77, poison_ts, level=9, crit=4)
+    service.raw_evidence_store.store(poison)
+    service.raw_evidence_store.flush()
+
+    poller = MagicMock(spec=WazuhIndexerLivePoller)
+    poller.poll_recent.return_value = candidates
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+
+    calls = []
+    real_add_many = service.state_manager.quarantine_add_many
+
+    def _counting(entries):
+        calls.append(len(entries))
+        return real_add_many(entries)
+
+    monkeypatch.setattr(service.state_manager, "quarantine_add_many", _counting)
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    result = coord.run_cycle(current_time=t_now)
+
+    assert result.quarantined == 1
+    assert calls == [1]  # exactly one batched flush
+
+
+def test_coordinator_quarantine_logs_error_only_on_first_offense(tmp_path: Path, caplog):
+    """N5a: first quarantine logs error; repeat offense for the same ID logs debug."""
+    import logging
+
+    service = create_test_service(tmp_path)
+    from src.runtime.raw_evidence import RawAlertEvidenceStore
+
+    service.raw_evidence_store = RawAlertEvidenceStore(db_path=tmp_path / "ev.sqlite3", batch_size=10000)
+
+    t_now = datetime(2026, 8, 28, 10, 30, 0, tzinfo=timezone.utc)
+    n = 120
+    candidates = _scale_alerts(n, t_now)
+    poison_ts = t_now - timedelta(seconds=(n - 77) * 20)
+    poison = make_raw_alert(77, poison_ts, level=9, crit=4)
+    service.raw_evidence_store.store(poison)
+    service.raw_evidence_store.flush()
+
+    poller = MagicMock(spec=WazuhIndexerLivePoller)
+    poller.poll_recent.return_value = candidates
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    with caplog.at_level(logging.DEBUG, logger="src.runtime.live_coordinator"):
+        coord.run_cycle(current_time=t_now)
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR and "alert_77" in r.getMessage()]
+
+    caplog.clear()
+    t2 = t_now + timedelta(minutes=30)
+    with caplog.at_level(logging.DEBUG, logger="src.runtime.live_coordinator"):
+        result2 = coord.run_cycle(current_time=t2)
+    # M2(b): already-quarantined alert_77 is skipped, never re-ingested.
+    assert result2.quarantined == 0
+    assert result2.failures == 0
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR and "Quarantin" in r.getMessage()]
+    assert [r for r in caplog.records if r.levelno == logging.DEBUG and "alert_77" in r.getMessage()]
+
+
+def test_coordinator_buffer_seen_snapshot_single_lookup_per_candidate(tmp_path: Path, monkeypatch):
+    """F7b/minor: buffer-active cycle calls is_seen exactly once per candidate."""
+    service = create_test_service(tmp_path)
+    t_now = datetime(2026, 8, 28, 10, 30, 0, tzinfo=timezone.utc)
+    a_seen = make_raw_alert(1, t_now - timedelta(minutes=2))
+    a_new = make_raw_alert(2, t_now - timedelta(minutes=1))
+    service.ingest_alert(a_seen, auto_persist=False)
+
+    poller = MagicMock(spec=WazuhIndexerLivePoller)
+    poller.poll_recent.return_value = [a_seen, a_new]
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+
+    coord = LiveIngestionCoordinator(
+        service=service,
+        poller=poller,
+        order_buffer_enabled=True,
+        order_buffer_hold_window=timedelta(hours=1),
+    )
+    real_is_seen = service.is_seen
+    calls = []
+
+    def _counting(alert_id: str) -> bool:
+        calls.append(alert_id)
+        return real_is_seen(alert_id)
+
+    monkeypatch.setattr(service, "is_seen", _counting)
+    coord.run_cycle(current_time=t_now)
+    assert sorted(calls) == ["alert_1", "alert_2"]
 
 
 def test_coordinator_full_retention_duplicates_are_safe(tmp_path: Path):
@@ -177,3 +452,445 @@ def test_coordinator_persists_transport_state(tmp_path: Path):
     assert state["last_recent_reconciliation_at"] == t_now.isoformat()
     assert state["last_full_reconciliation_at"] == t_now.isoformat()
     assert state["recent_reconciliation_days"] == 2
+
+
+def test_coordinator_quarantines_deterministic_conflict_and_continues(tmp_path: Path):
+    """F2 QUARANTINE policy: deterministic evidence conflict mid-cycle is quarantined durably;
+    other candidates are still ingested and the cycle succeeds (cursor commits).
+
+    120 candidates / 1 quarantine (0.83%) stays under the N5 circuit breaker (>1%)."""
+    from src.runtime.raw_evidence import RawAlertEvidenceStore
+
+    service = create_test_service(tmp_path)
+    service.raw_evidence_store = RawAlertEvidenceStore(db_path=tmp_path / "ev.sqlite3", batch_size=10000)
+
+    t_now = datetime(2026, 8, 28, 10, 30, 0, tzinfo=timezone.utc)
+    n = 120
+    candidates = [
+        make_raw_alert(i, t_now - timedelta(seconds=(n - i) * 20))
+        for i in range(n)
+    ]
+
+    # Pre-store conflicting canonical content under alert_77's ID, then flush to SQLite.
+    poison_ts = t_now - timedelta(seconds=(n - 77) * 20)
+    poison = make_raw_alert(77, poison_ts, level=9, crit=4)
+    service.raw_evidence_store.store(poison)
+    service.raw_evidence_store.flush()
+
+    poller = MagicMock(spec=WazuhIndexerLivePoller)
+    poller.poll_recent.return_value = candidates
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    result = coord.run_cycle(current_time=t_now)
+
+    assert result.failures == 1
+    assert result.quarantined == 1
+    assert result.processed_new_ids == n - 1
+    assert service.is_seen("alert_0")
+    assert service.is_seen("alert_119")
+
+    quarantined = service.state_manager.quarantine_list()
+    assert len(quarantined) == 1
+    assert quarantined[0]["wazuh_alert_id"] == "alert_77"
+    assert quarantined[0]["error_type"] == "RawEvidenceConflictError"
+    assert quarantined[0]["count"] == 1
+
+    # Cycle succeeded, so the transport cursor commits (no silent halt).
+    assert coord.last_fast_poll_at == t_now
+    assert service.get_live_source_state()["last_fast_poll_at"] == t_now.isoformat()
+
+
+def test_coordinator_transient_error_still_fails_cycle_without_quarantine(tmp_path: Path):
+    """Transient (non-deterministic) ingest errors must still raise; cursor must not advance."""
+    service = create_test_service(tmp_path)
+    poller = MagicMock(spec=WazuhIndexerLivePoller)
+
+    t_now = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    a1 = make_raw_alert(1, t_now - timedelta(minutes=1))
+    poller.poll_recent.return_value = [a1]
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+
+    service.ingest_alert = MagicMock(side_effect=RuntimeError("indexer timeout"))
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+
+    with pytest.raises(RuntimeError, match="indexer timeout"):
+        coord.run_cycle(current_time=t_now)
+
+    assert coord.last_fast_poll_at is None
+    assert service.state_manager.quarantine_list() == []
+
+
+def test_full_reconciliation_uses_strict_index_coverage(tmp_path: Path):
+    """Full-retention sweep fails hard on unavailable indices (no silent gaps)."""
+    service = create_test_service(tmp_path)
+    poller = MagicMock(spec=WazuhIndexerLivePoller)
+    poller.poll_recent.return_value = []
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    coord.run_cycle(
+        current_time=datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc),
+        force_full_reconciliation=True,
+    )
+
+    _, kwargs = poller.poll_full_reconciliation.call_args
+    assert kwargs.get("allow_unavailable") is False
+
+
+def test_cycle_records_newest_ingested_event_time(tmp_path: Path):
+    """Cycle commits the newest ingested event-time for honest lag telemetry."""
+    service = create_test_service(tmp_path)
+    t_now = datetime(2026, 8, 28, 10, 30, 0, tzinfo=timezone.utc)
+    a1 = make_raw_alert(1, t_now - timedelta(minutes=2))
+    a2 = make_raw_alert(2, t_now - timedelta(minutes=1))
+    poller = MagicMock(spec=WazuhIndexerLivePoller)
+    poller.poll_recent.return_value = [a1, a2]
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    coord.run_cycle(current_time=t_now)
+
+    state = service.get_live_source_state()
+    assert state.get("newest_ingested_event_time") == (t_now - timedelta(minutes=1)).isoformat()
+
+
+def test_buffer_skips_seen_ids_without_late_pollution(tmp_path: Path):
+    """F7b: reconciliation duplicates bypass the buffer (no late-count pollution)."""
+    service = create_test_service(tmp_path)
+    t_now = datetime(2026, 8, 28, 10, 30, 0, tzinfo=timezone.utc)
+    a_seen = make_raw_alert(1, t_now - timedelta(minutes=2))
+    a_new = make_raw_alert(2, t_now - timedelta(minutes=1))
+    service.ingest_alert(a_seen, auto_persist=False)
+
+    poller = MagicMock(spec=WazuhIndexerLivePoller)
+    poller.poll_recent.return_value = [a_seen, a_new]
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+
+    coord = LiveIngestionCoordinator(
+        service=service,
+        poller=poller,
+        order_buffer_enabled=True,
+        order_buffer_hold_window=timedelta(hours=1),
+    )
+    result = coord.run_cycle(current_time=t_now)
+
+    assert result.duplicate_noops == 1
+    assert result.processed_new_ids == 0
+    assert coord.order_buffer.status()["late_total"] == 0
+    assert coord.order_buffer.status()["size"] == 1
+
+
+def test_m2_persistent_quarantine_skipped_breaker_never_trips(tmp_path: Path, monkeypatch):
+    """M2: 6 persistent defects among 400 alerts over 20 cycles.
+
+    Steady state after the first halt: the 6 IDs are already quarantined, so
+    every cycle skips them (no re-ingest, no failures, no new quarantine) —
+    the breaker never trips and the cursor advances each cycle.
+    """
+    from src.runtime.raw_evidence import RawEvidenceConflictError
+
+    service = _stub_service(tmp_path)
+    poison_ids = {f"alert_{i}" for i in range(6)}
+    ingest_calls: list = []
+
+    def _ingest(alert):
+        ingest_calls.append(alert.wazuh_alert_id)
+        if alert.wazuh_alert_id in poison_ids:
+            raise RawEvidenceConflictError("persistent poison")
+        return []
+
+    service.ingest_alert.side_effect = _ingest
+    service.state_manager.quarantine_add_many([
+        {"wazuh_alert_id": pid, "source_index": "idx", "source_document_id": pid, "error_type": "RawEvidenceConflictError"}
+        for pid in sorted(poison_ids)
+    ])
+
+    poller = MagicMock()
+    t0 = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    alerts = _scale_alerts(400, t0)
+    poller.poll_recent.return_value = alerts
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+    poller.last_bad_docs = []
+
+    real_id_set = service.state_manager.quarantine_id_set
+    list_calls: list = []
+
+    def _counting_list():
+        list_calls.append(1)
+        return real_id_set()
+
+    monkeypatch.setattr(service.state_manager, "quarantine_id_set", _counting_list)
+    real_add_many = service.state_manager.quarantine_add_many
+    add_many_calls: list = []
+
+    def _counting_add(entries):
+        add_many_calls.append(len(entries))
+        return real_add_many(entries)
+
+    monkeypatch.setattr(service.state_manager, "quarantine_add_many", _counting_add)
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    for cycle in range(20):
+        result = coord.run_cycle(current_time=t0 + timedelta(minutes=cycle))
+
+    assert result.failures == 0
+    assert result.quarantined == 0
+    assert result.skipped_quarantined == 6
+    assert result.processed_new_ids == 394
+    assert coord.last_fast_poll_at == t0 + timedelta(minutes=19)
+    assert service.state_manager.quarantine_count() == 6
+    assert set(ingest_calls).isdisjoint(poison_ids)  # never re-ingested
+    assert add_many_calls == []  # nothing new to flush
+    assert len(list_calls) == 20  # exactly one quarantine snapshot query per cycle
+
+
+def test_m2_breaker_counts_only_new_quarantines(tmp_path: Path):
+    """M2(a): genuinely new quarantines still trip the breaker (6 new / 400 =
+    1.5% > 1%), proving the new-only counting did not disable protection."""
+    from src.runtime.raw_evidence import RawEvidenceConflictError
+
+    service = _stub_service(tmp_path)
+    poison_ids = {f"alert_{i}" for i in range(6)}
+
+    def _ingest(alert):
+        if alert.wazuh_alert_id in poison_ids:
+            raise RawEvidenceConflictError("fresh systemic poison")
+        return []
+
+    service.ingest_alert.side_effect = _ingest
+    poller = MagicMock()
+    t_now = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    poller.poll_recent.return_value = _scale_alerts(400, t_now)
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+    poller.last_bad_docs = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    with pytest.raises(RuntimeError, match="[Qq]uarantine"):
+        coord.run_cycle(current_time=t_now)
+    # P1 latch: breaker_tripped persisted, transport cursor keys NOT committed.
+    assert service.update_live_source_state.called
+    payload = service.update_live_source_state.call_args.args[0]
+    assert payload["breaker_tripped"]["quarantined"] == 6
+    assert payload["breaker_tripped"]["submitted"] == 400
+    assert payload["breaker_tripped"]["trip_id"].startswith("qb-")
+    assert "recent_poll_cursor" not in payload
+
+
+def test_m2_future_dated_alert_does_not_shift_newest(tmp_path: Path):
+    """M2(c): newest_ingested_event_time ignores future-dated (> now + 5 min)
+    candidates even when they ingest successfully."""
+    service = _stub_service(tmp_path)
+    service.ingest_alert.side_effect = lambda a: []
+    captured: dict = {}
+    service.update_live_source_state.side_effect = lambda s: captured.update(s)
+
+    t_now = datetime(2026, 8, 28, 10, 30, 0, tzinfo=timezone.utc)
+    a_ok = make_raw_alert(1, t_now - timedelta(minutes=2))
+    a_future = make_raw_alert(2, t_now + timedelta(hours=1))
+    poller = MagicMock()
+    poller.poll_recent.return_value = [a_ok, a_future]
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+    poller.last_bad_docs = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    result = coord.run_cycle(current_time=t_now)
+
+    assert result.processed_new_ids == 2
+    assert captured["newest_ingested_event_time"] == (t_now - timedelta(minutes=2)).isoformat()
+
+
+def test_m2_all_future_dated_writes_explicit_none(tmp_path: Path):
+    """M2(c): with no ingestible non-future candidate the key is written as
+    explicit None, never a stale value from an earlier cycle."""
+    service = _stub_service(tmp_path)
+    service.ingest_alert.side_effect = lambda a: []
+    captured: dict = {}
+    service.update_live_source_state.side_effect = lambda s: captured.update(s)
+
+    t_now = datetime(2026, 8, 28, 10, 30, 0, tzinfo=timezone.utc)
+    poller = MagicMock()
+    poller.poll_recent.return_value = [make_raw_alert(1, t_now + timedelta(hours=1))]
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+    poller.last_bad_docs = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    coord.run_cycle(current_time=t_now)
+
+    assert "newest_ingested_event_time" in captured
+    assert captured["newest_ingested_event_time"] is None
+
+
+def test_m2_quarantined_candidate_excluded_from_newest(tmp_path: Path):
+    """M2(c): the newest-timestamp candidate, when quarantined, must not shift
+    newest_ingested_event_time; the max over successfully ingested wins."""
+    from src.runtime.raw_evidence import RawEvidenceConflictError
+
+    service = _stub_service(tmp_path)
+
+    def _ingest(alert):
+        if alert.wazuh_alert_id == "alert_999":
+            raise RawEvidenceConflictError("newest is poison")
+        return []
+
+    service.ingest_alert.side_effect = _ingest
+    captured: dict = {}
+    service.update_live_source_state.side_effect = lambda s: captured.update(s)
+
+    t_now = datetime(2026, 8, 28, 10, 30, 0, tzinfo=timezone.utc)
+    oks = [
+        make_raw_alert(i, t_now - timedelta(hours=2) - timedelta(seconds=i * 20))
+        for i in range(150)
+    ]
+    poison = make_raw_alert(999, t_now - timedelta(minutes=1))
+    poller = MagicMock()
+    poller.poll_recent.return_value = oks + [poison]
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+    poller.last_bad_docs = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    result = coord.run_cycle(current_time=t_now)
+
+    assert result.quarantined == 1
+    assert captured["newest_ingested_event_time"] == (t_now - timedelta(hours=2)).isoformat()
+
+
+def test_p1_breaker_latch_halts_cycles_until_matching_ack(tmp_path: Path):
+    """P1 longitudinal: 30% burst trips cycle-1 and latches; cycles 2-3 raise
+    on the latch without work; a wrong ack still raises; matching ack resumes."""
+    from src.runtime.raw_evidence import RawEvidenceConflictError
+
+    service = _stub_service(tmp_path)
+    store: dict = {}
+    service.get_live_source_state.side_effect = lambda: dict(store)
+    service.update_live_source_state.side_effect = lambda s: store.update(s)
+    poison_ids = {f"alert_{i}" for i in range(30)}
+
+    def _ingest(alert):
+        if alert.wazuh_alert_id in poison_ids:
+            raise RawEvidenceConflictError("burst poison")
+        return []
+
+    service.ingest_alert.side_effect = _ingest
+    poller = MagicMock()
+    t_now = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    poller.poll_recent.return_value = _scale_alerts(100, t_now)
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+    poller.last_bad_docs = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    with pytest.raises(RuntimeError, match="[Qq]uarantine"):
+        coord.run_cycle(current_time=t_now)
+    latch = store.get("breaker_tripped")
+    assert isinstance(latch, dict)
+    trip_id = latch["trip_id"]
+    assert trip_id.startswith("qb-")
+    assert latch["quarantined"] == 30
+    assert latch["submitted"] == 100
+    assert latch.get("at")
+    assert service.state_manager.quarantine_count() == 30  # flush persisted despite halt
+
+    for step in (5, 10):
+        service.ingest_alert.reset_mock()
+        poller.poll_recent.reset_mock()
+        with pytest.raises(RuntimeError, match="[Bb]reaker.*[Tt]rip|ack"):
+            coord.run_cycle(current_time=t_now + timedelta(minutes=step))
+        service.ingest_alert.assert_not_called()
+        poller.poll_recent.assert_not_called()
+
+    wrong_ack_coord = LiveIngestionCoordinator(
+        service=service, poller=poller, breaker_ack="qb-20000101000000-0"
+    )
+    with pytest.raises(RuntimeError, match="[Bb]reaker.*[Tt]rip|ack"):
+        wrong_ack_coord.run_cycle(current_time=t_now + timedelta(minutes=15))
+
+    ack_coord = LiveIngestionCoordinator(service=service, poller=poller, breaker_ack=trip_id)
+    poller.poll_recent.return_value = _scale_alerts(100, t_now + timedelta(minutes=20), start=1000)
+    service.ingest_alert.side_effect = lambda a: []
+    result = ack_coord.run_cycle(current_time=t_now + timedelta(minutes=20))
+    assert result.processed_new_ids == 100
+    assert store.get("breaker_tripped") is None
+
+
+def test_minor_skip_quarantined_before_buffer_never_buffered(tmp_path: Path):
+    """Minor order-buffer: quarantined IDs are filtered before OrderBuffer.add,
+    so the buffer never holds them; the skip is observable via skipped_quarantined."""
+    service = _stub_service(tmp_path)
+    service.ingest_alert.side_effect = lambda a: []
+    service.state_manager.quarantine_add("alert_1", error_type="E1")
+    poller = MagicMock()
+    t_now = datetime(2026, 8, 28, 10, 30, 0, tzinfo=timezone.utc)
+    poller.poll_recent.return_value = [
+        make_raw_alert(1, t_now - timedelta(minutes=2)),
+        make_raw_alert(2, t_now - timedelta(minutes=1)),
+    ]
+    poller.poll_reconciliation.return_value = []
+    poller.poll_full_reconciliation.return_value = []
+    poller.last_bad_docs = []
+
+    coord = LiveIngestionCoordinator(
+        service=service,
+        poller=poller,
+        order_buffer_enabled=True,
+        order_buffer_hold_window=timedelta(hours=1),
+    )
+    result = coord.run_cycle(current_time=t_now)
+
+    assert result.skipped_quarantined == 1
+    assert coord.order_buffer._held_ids == {"alert_2"}
+    tried = [c.args[0].wazuh_alert_id for c in service.ingest_alert.call_args_list]
+    assert "alert_1" not in tried
+
+
+def test_minor_unidentified_bad_doc_key_is_content_hash(tmp_path: Path):
+    """Minor(b): bad docs without doc_id key by sha256(content)[:12] — stable
+    across cycles (no :pos suffix), so the repeat is skipped, not re-quarantined."""
+    import hashlib
+    import json as _json
+
+    service = _stub_service(tmp_path)
+    service.ingest_alert.side_effect = lambda a: []
+    poller = MagicMock()
+    t_now = datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    valid = _scale_alerts(150, t_now)
+    bad = {"index": "wazuh-alerts-4.x-2026.08.28", "doc_id": None, "error": "boom"}
+    poller.poll_recent.side_effect = lambda **k: (setattr(poller, "last_bad_docs", [dict(bad)]) or valid)
+    poller.poll_reconciliation.side_effect = lambda **k: (setattr(poller, "last_bad_docs", []) or [])
+    poller.poll_full_reconciliation.side_effect = lambda **k: (setattr(poller, "last_bad_docs", []) or [])
+    poller.last_bad_docs = []
+
+    coord = LiveIngestionCoordinator(service=service, poller=poller)
+    coord.run_cycle(current_time=t_now)
+    rows = service.state_manager.quarantine_list()
+    assert len(rows) == 1
+    # Minor: the key hashes {index, doc_id} ONLY — page_pos embedded in the
+    # error text is excluded, so the key is stable across cycles.
+    expected = "unidentified:" + hashlib.sha256(
+        _json.dumps(
+            {"index": "wazuh-alerts-4.x-2026.08.28", "doc_id": None},
+            sort_keys=True,
+            default=str,
+        ).encode("utf-8")
+    ).hexdigest()[:12]
+    assert rows[0]["wazuh_alert_id"] == expected
+
+    # A re-polled identical doc at a different page_pos (different error
+    # text) maps to the SAME key: skipped, not re-quarantined.
+    bad2 = {"index": "wazuh-alerts-4.x-2026.08.28", "doc_id": None, "error": "boom (page_pos=7)"}
+    poller.poll_recent.side_effect = lambda **k: (setattr(poller, "last_bad_docs", [dict(bad2)]) or valid)
+    result2 = coord.run_cycle(current_time=t_now + timedelta(minutes=5))
+    assert result2.quarantined == 0
+    assert result2.failures == 0
+    assert service.state_manager.quarantine_count() == 1
+    assert service.state_manager.quarantine_list()[0]["count"] == 1

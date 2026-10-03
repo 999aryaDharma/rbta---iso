@@ -123,3 +123,34 @@ def test_wazuh_client_retry_exhausted():
             client.create_point_in_time("test")
 
         assert mock_sleep.call_count == 2
+
+
+def test_network_failure_includes_host_and_cause():
+    client = WazuhIndexerClient(base_url="https://wazuh-indexer:9200")
+    with patch.object(
+        client._session, "request", side_effect=requests.exceptions.ConnectionError("refused")
+    ):
+        with pytest.raises(WazuhClientError) as error:
+            client.list_indices()
+    assert "https://wazuh-indexer:9200" in str(error.value)
+    assert error.value.__cause__ is not None
+    assert "sensitive" not in str(error.value).lower()
+
+
+def test_http_error_includes_host_and_cause_without_body():
+    client = WazuhIndexerClient(base_url="https://wazuh-indexer:9200")
+    mock_resp = MagicMock(status_code=500, text="secret-body-marker")
+    mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError("500 Server Error")
+    with patch.object(client._session, "request", return_value=mock_resp):
+        with pytest.raises(WazuhClientError) as error:
+            client.list_indices()
+    assert "https://wazuh-indexer:9200" in str(error.value)
+    assert "secret-body-marker" not in str(error.value)
+    assert error.value.__cause__ is not None
+
+
+def test_invalid_ca_path_raises_clear_error(monkeypatch, tmp_path):
+    monkeypatch.setenv("WAZUH_INDEXER_CA_PATH", str(tmp_path / "missing-ca.pem"))
+    monkeypatch.setenv("WAZUH_INDEXER_VERIFY_TLS", "true")
+    with pytest.raises(FileNotFoundError, match="WAZUH_INDEXER_CA_PATH"):
+        WazuhIndexerClient()

@@ -75,6 +75,10 @@ def compute_canonical_fingerprint(
             "source_index", "source_document_id", "source_sort", "fetched_at",
             "source_mode", "timestamp_received", "opensearch_index", "opensearch_document_id",
         }
+        if not isinstance(metadata, (Mapping, MappingProxyType)):
+            raise TypeError(
+                f"canonical fingerprint metadata must be a mapping, got {type(metadata).__name__}"
+            )
         metadata = {key: value for key, value in metadata.items() if key not in transport_fields}
     ts_str = timestamp.isoformat() if isinstance(timestamp, datetime) else str(timestamp)
     canonical_dict = {

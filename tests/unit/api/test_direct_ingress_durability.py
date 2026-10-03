@@ -76,6 +76,10 @@ def test_direct_ingress_persists_active_bucket_and_seen_id_before_http_return(tm
     }
 
     # 2. Simulate process crash by creating app2 / service2 from the exact same state file
+    # Simulated restart: the OS releases the state lock on process exit.
+    from src.runtime.live_worker import release_state_lock
+
+    release_state_lock(str(state_file))
     app2 = create_production_app(env=env)
     client2 = TestClient(app2)
 

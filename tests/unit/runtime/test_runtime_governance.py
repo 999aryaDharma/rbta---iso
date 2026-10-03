@@ -29,9 +29,10 @@ def test_no_timestamp_drop_logic_in_runtime_src():
 
 
 def test_no_swallowed_canonicalization_exceptions_in_live_source():
-    """Verify that live source does not swallow canonicalization exceptions with warning+continue."""
+    """Per-hit quarantine ruling (N1, supersedes page-fail L1): bad documents
+    are recorded to last_bad_docs for durable quarantine, never silently skipped."""
     live_source_path = RUNTIME_SRC / "live_source.py"
     content = live_source_path.read_text(encoding="utf-8")
     assert "LiveCanonicalizationError" in content
-    # Ensure canonicalize_wazuh_alert is called and exceptions are raised
-    assert "raise LiveCanonicalizationError" in content
+    assert "last_bad_docs" in content
+    assert "raise LiveCanonicalizationError" not in content

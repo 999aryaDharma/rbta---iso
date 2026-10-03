@@ -57,7 +57,20 @@ class WazuhIndexerClient:
             tls_setting = os.getenv("WAZUH_INDEXER_VERIFY_TLS", "true").strip().lower()
             if tls_setting not in ("true", "false"):
                 raise ValueError("WAZUH_INDEXER_VERIFY_TLS must be true or false")
-            verify_tls = (os.getenv("WAZUH_INDEXER_CA_PATH") or True) if tls_setting == "true" else False
+            if tls_setting == "true":
+                ca_path = os.getenv("WAZUH_INDEXER_CA_PATH") or os.getenv("WAZUH_INDEXER_CA_BUNDLE")
+                if ca_path:
+                    from pathlib import Path as _Path
+
+                    if not _Path(ca_path).is_file():
+                        raise FileNotFoundError(
+                            f"WAZUH_INDEXER_CA_PATH points to missing file: {ca_path}"
+                        )
+                    verify_tls = ca_path
+                else:
+                    verify_tls = True
+            else:
+                verify_tls = False
         self.verify_tls: Union[bool, str] = verify_tls
         self.timeout: Tuple[float, float] = timeout
         self.max_retries: int = max_retries
@@ -95,7 +108,7 @@ class WazuhIndexerClient:
                 # 401 / 403 Fail Fast
                 if resp.status_code in (401, 403):
                     raise WazuhAuthError(
-                        f"Authentication failed ({resp.status_code}) against Wazuh Indexer"
+                        f"Authentication failed ({resp.status_code}) against Wazuh Indexer at {self.base_url}"
                     )
 
                 # Transient server errors (429, 502, 503, 504) -> retry
@@ -107,15 +120,19 @@ class WazuhIndexerClient:
                 resp.raise_for_status()
                 return resp
 
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
                 if attempt >= self.max_retries:
-                    raise WazuhClientError(f"Network failure calling Wazuh Indexer after {self.max_retries} attempts") from None
+                    raise WazuhClientError(
+                        f"Network failure calling Wazuh Indexer at {self.base_url} after {self.max_retries} attempts"
+                    ) from exc
                 delay = min(30.0, (2 ** (attempt - 1)) * 0.5) + self._random_fn() * 0.5
                 self._sleep_fn(delay)
             except WazuhAuthError:
                 raise
-            except requests.exceptions.HTTPError:
-                raise WazuhClientError(f"HTTP error ({resp.status_code}) calling Wazuh Indexer") from None
+            except requests.exceptions.HTTPError as exc:
+                raise WazuhClientError(
+                    f"HTTP error ({resp.status_code}) calling Wazuh Indexer at {self.base_url}"
+                ) from exc
 
         raise WazuhClientError("Exceeded max retries calling Wazuh Indexer")
 

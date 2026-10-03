@@ -69,13 +69,14 @@ def test_derive_daily_indices_midnight_spanning():
     assert "wazuh-alerts-*" not in indices
 
 
-def test_live_poller_canonicalization_failure_raises_fail_closed():
-    """When a document fails canonicalization, poller raises LiveCanonicalizationError instead of silent continue."""
+def test_live_poller_bad_document_collected_per_hit_and_valid_continue():
+    """N1b per-hit poller: 1 corrupt doc mid-page is collected in last_bad_docs;
+    valid docs on both sides are still returned (replaces page-fail L1)."""
     client = MagicMock(spec=WazuhIndexerClient)
     malformed_hit = {
         "_index": "wazuh-alerts-4.x-2026.08.28",
         "_id": "doc_bad",
-        "sort": [1775118765000, "alert_bad"],
+        "sort": [1775118765001, "alert_bad"],
         "_source": {
             "id": "alert_bad",
             # missing timestamp and agent
@@ -87,12 +88,42 @@ def test_live_poller_canonicalization_failure_raises_fail_closed():
     )
 
     poller = WazuhIndexerLivePoller(client=client)
+    alerts = poller.poll_recent(
+        current_time=datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc)
+    )
 
-    with pytest.raises(LiveCanonicalizationError) as exc_info:
-        poller.poll_recent(current_time=datetime(2026, 8, 28, 10, 0, 0, tzinfo=timezone.utc))
+    assert [a.wazuh_alert_id for a in alerts] == ["alert_1", "alert_2"]
+    assert len(poller.last_bad_docs) == 1
+    bad = poller.last_bad_docs[0]
+    assert bad["doc_id"] == "doc_bad"
+    assert bad["index"] == "wazuh-alerts-4.x-2026.08.28"
+    assert bad["error"]
 
-    assert "doc_bad" in str(exc_info.value)
-    assert "wazuh-alerts-4.x-2026.08.28" in str(exc_info.value)
+
+def test_live_poller_last_bad_docs_reset_each_call():
+    """N1b: last_bad_docs resets on every paginate call (no cross-call leakage)."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    malformed_hit = {
+        "_index": "wazuh-alerts-4.x-2026.08.28",
+        "_id": "doc_bad",
+        "sort": [1775118765001, "alert_bad"],
+        "_source": {"id": "alert_bad"},
+    }
+    client._request.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"hits": {"hits": [malformed_hit]}},
+    )
+    poller = WazuhIndexerLivePoller(client=client)
+    assert poller.poll_recent() == []
+    assert len(poller.last_bad_docs) == 1
+
+    client._request.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"hits": {"hits": [make_hit(9)]}},
+    )
+    alerts = poller.poll_recent()
+    assert [a.wazuh_alert_id for a in alerts] == ["alert_9"]
+    assert poller.last_bad_docs == []
 
 
 def test_live_poller_malformed_response_empty_dict_fails():
@@ -262,3 +293,61 @@ def test_live_poller_propagates_transport_error():
 
     with pytest.raises(Exception, match="Connection Refused"):
         poller.poll_recent()
+
+
+def test_live_poller_cursor_message_includes_offending_value():
+    client = MagicMock(spec=WazuhIndexerClient)
+    page = MagicMock()
+    page.json.return_value = {"hits": {"hits": [make_hit(1)]}}
+    empty = MagicMock()
+    empty.json.return_value = {"hits": {"hits": []}}
+    client._request.side_effect = [page, page, empty]
+    with pytest.raises(LiveSourceIntegrityError) as exc_info:
+        WazuhIndexerLivePoller(client=client, page_size=1).poll_recent()
+    assert "did not advance" in str(exc_info.value)
+    assert "1775118765001" in str(exc_info.value)
+
+
+# --- F10 poller integrity helpers (TDD) ---
+
+def test_paginate_search_strict_params_when_allow_unavailable_false():
+    """F10: allow_unavailable=False sends strict index params (discovery/full-recon)."""
+    from src.runtime.live_source import WazuhIndexerLivePoller as _P
+
+    client = MagicMock(spec=WazuhIndexerClient)
+    client._request.return_value.json.return_value = {"hits": {"hits": []}}
+    poller = _P(client=client)
+    poller._paginate_search(indices=["wazuh-alerts-4.x-2026.08.28"], allow_unavailable=False)
+    assert client._request.call_args.kwargs["params"] == {
+        "ignore_unavailable": "false", "allow_no_indices": "false",
+        "allow_partial_search_results": "false",
+    }
+
+
+def test_paginate_search_default_stays_tolerant():
+    """F10: default allow_unavailable=True preserves legacy tolerant params."""
+    client = MagicMock(spec=WazuhIndexerClient)
+    client._request.return_value.json.return_value = {"hits": {"hits": []}}
+    WazuhIndexerLivePoller(client=client)._paginate_search(
+        indices=["wazuh-alerts-4.x-2026.08.28"]
+    )
+    assert client._request.call_args.kwargs["params"] == {
+        "ignore_unavailable": "true", "allow_no_indices": "true",
+        "allow_partial_search_results": "false",
+    }
+
+
+def test_validate_index_id_uniqueness_reports_duplicates():
+    """F10: smoke-test helper flags duplicate _source.id without network."""
+    from src.runtime.live_source import validate_index_id_uniqueness
+
+    hits = [make_hit(1), make_hit(2)]
+    ok = validate_index_id_uniqueness(hits)
+    assert ok == {"doc_count": 2, "unique_ids": 2, "id_is_unique": True}
+
+    dup = [make_hit(1), make_hit(1)]
+    bad = validate_index_id_uniqueness(dup)
+    assert bad == {"doc_count": 2, "unique_ids": 1, "id_is_unique": False}
+    assert validate_index_id_uniqueness([]) == {
+        "doc_count": 0, "unique_ids": 0, "id_is_unique": True,
+    }

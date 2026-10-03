@@ -310,3 +310,22 @@ def test_export_canonical_alerts_roundtrips_in_timestamp_order(store: RawAlertEv
     assert [alert.wazuh_alert_id for alert in exported] == ["earlier", "later"]
     assert exported[0].rule_group_primary == earlier.rule_group_primary
     assert exported[0].mitre_tactics == earlier.mitre_tactics
+
+
+def test_canonical_fingerprint_rejects_non_mapping_metadata():
+    from src.runtime.json_safe import compute_canonical_fingerprint
+
+    with pytest.raises(TypeError, match="metadata"):
+        compute_canonical_fingerprint(
+            wazuh_alert_id="a",
+            timestamp="t",
+            agent_id="1",
+            agent_name="n",
+            rule_id="r",
+            rule_level=1,
+            rule_group_primary="g",
+            srcip="",
+            agent_criticality=1.0,
+            mitre_tactics=[],
+            metadata=["not-a-mapping"],
+        )
