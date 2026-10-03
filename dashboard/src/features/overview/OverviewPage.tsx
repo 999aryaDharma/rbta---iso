@@ -2,6 +2,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import { usePollingQuery } from '@/hooks/usePolling';
 import { fetchSummary, fetchTimeseries } from '@/api/dashboard';
 import { fetchMetaAlerts } from '@/api/metaAlerts';
+import { resolveLiveContext } from '@/features/live/liveContext';
 import { MetricCard } from '@/components/shared/MetricCard';
 import { PageHeader } from '@/components/shared/PageHeader';
 import { DecisionBadge } from '@/components/shared/DecisionBadge';
@@ -30,16 +31,27 @@ export function OverviewPage() {
   );
 
   const needsInvestigation = recentMetas?.items.filter((m) => m.action === 'ESCALATE') || [];
+  const mode = resolveLiveContext(runId);
+  const isReplay = mode === 'replay';
 
   return (
     <>
       <PageHeader
-        breadcrumbs={['Security Analytics', 'Overview']}
-        title="Ringkasan Hasil Triase"
-        description="RBTA mengurangi unit pemeriksaan; Isolation Forest memprioritaskan keanehan tanpa menyatakan kebenaran serangan."
+        breadcrumbs={isReplay ? ['Riset', 'Ringkasan Replay'] : ['Operasi', 'Ringkasan Live']}
+        title={isReplay ? 'Ringkasan Replay' : 'Ringkasan Live'}
+        description={
+          isReplay
+            ? `Angka ringkasan dari dataset historis run replay ${runId}. Definisi metrik identik dengan konteks Live; skor Isolation Forest = urutan prioritas, bukan vonis serangan.`
+            : 'Angka ringkasan dari arus alert langsung (tanpa run_id). RBTA mengurangi unit triase; skor Isolation Forest = urutan prioritas, bukan vonis serangan.'
+        }
       />
 
       <div className="px-6 py-8 lg:px-10 space-y-8">
+        <p className="text-xs text-kumo-subtle leading-relaxed border border-kumo-hairline bg-kumo-canvas rounded-xl px-4 py-3">
+          {isReplay
+            ? `Konteks: Replay — dataset historis (run ${runId}). ARR = reduksi unit triase, bukan akurasi; skor = prioritas, bukan vonis serangan.`
+            : 'Konteks: Live — arus alert langsung dari Indexer/API. ARR = reduksi unit triase, bukan akurasi; skor = prioritas, bukan vonis serangan.'}
+        </p>
         {/* Needs Investigation Banner */}
         {needsInvestigation.length > 0 && (
           <div className="p-6 rounded-xl border border-rose-500/30 border-l-4 border-l-rose-500 bg-rose-500/5 shadow-xs space-y-5">
@@ -98,7 +110,7 @@ export function OverviewPage() {
                       navigate(withRunId(`/meta-alerts/${m.meta_id}`));
                     }}
                   >
-                    Investigate {m.alert_count} Raw Alerts <ArrowRight size={13} className="ml-1" />
+                    Selidiki {m.alert_count} Alert Mentah <ArrowRight size={13} className="ml-1" />
                   </Button>
                 </div>
               ))}
@@ -109,23 +121,23 @@ export function OverviewPage() {
         {/* KPI Cards Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
           <MetricCard
-            label="Raw Ingested Alerts"
+            label="Alert Mentah Masuk"
             value={summary ? formatNumber(summary.raw_alert_count) : '—'}
-            sub="Incoming Wazuh events"
+            sub={isReplay ? 'Alert valid dari dataset historis' : 'Alert Wazuh dari arus langsung'}
           />
           <MetricCard
-            label="Finalized MetaAlerts"
+            label="MetaAlert Final"
             value={summary ? formatNumber(summary.meta_alert_count) : '—'}
-            sub="Clustered temporal episodes"
+            sub="Episode temporal hasil agregasi RBTA"
           />
           <MetricCard
-            label="Alert Reduction Rate"
+            label="Alert Reduction Rate (ARR)"
             value={
               summary && summary.alert_reduction_rate_percent !== null && summary.alert_reduction_rate_percent !== undefined
                 ? `${summary.alert_reduction_rate_percent}%`
                 : '—'
             }
-            sub="Pengurangan unit triase, bukan akurasi"
+            sub="Reduksi unit triase, bukan akurasi deteksi"
           />
           <div
             onClick={() => navigate(withRunId('/meta-alerts?action=ESCALATE'))}
@@ -134,28 +146,28 @@ export function OverviewPage() {
             <MetricCard
               label="MetaAlert ESCALATE"
               value={summary ? formatNumber(summary.escalate_count) : '—'}
-              sub="Prioritas investigasi, bukan insiden terbukti"
+              sub="Prioritas investigasi terbuka, bukan insiden terbukti"
             />
           </div>
           <MetricCard
-            label="Di Atas Threshold"
+            label="Di Atas Ambang Tukey"
             value={summary ? formatNumber(summary.anomalies_detected) : '—'}
-            sub="Keanehan struktural menurut IF"
+            sub="Skor di atas ambang; prioritas, bukan vonis serangan"
           />
           <div
             onClick={() => navigate(withRunId('/rbta'))}
             className="cursor-pointer transition-opacity hover:opacity-95"
           >
             <MetricCard
-              label="Active Open Buckets"
+              label="Bucket RBTA Terbuka"
               value={summary ? formatNumber(summary.active_buckets_count) : '—'}
-              sub="Live temporal windows"
+              sub={isReplay ? 'Jendela temporal run replay ini (per agen)' : 'Jendela temporal arus langsung (per agen)'}
             />
           </div>
           <MetricCard
-            label="Digest Queue"
+            label="Antrean Digest"
             value={summary ? formatNumber(summary.digest_count) : '—'}
-            sub="Low-frequency routine batches"
+            sub="Batch rutin frekuensi rendah (DAILY_DIGEST)"
           />
           <MetricCard
             label="MetaAlert SUPPRESS"
@@ -170,10 +182,12 @@ export function OverviewPage() {
             <div className="flex items-center justify-between pb-3 border-b border-kumo-hairline">
               <div>
                 <h2 className="text-sm font-semibold text-kumo-strong">
-                  Ingestion & Aggregation Velocity
+                  Kecepatan Ingesti & Agregasi
                 </h2>
                 <p className="text-xs text-kumo-subtle mt-0.5">
-                  Raw Wazuh alerts stream vs finalized MetaAlerts over time
+                  {isReplay
+                    ? 'Alert historis vs MetaAlert final per waktu (run replay ini)'
+                    : 'Alert mentah arus langsung vs MetaAlert final per waktu'}
                 </p>
               </div>
             </div>
@@ -184,8 +198,8 @@ export function OverviewPage() {
                 <YAxis tick={{ fontSize: 11 }} />
                 <Tooltip />
                 <Legend wrapperStyle={{ fontSize: '12px' }} />
-                <Area type="monotone" dataKey="raw_alerts" stroke="#64748b" fill="#64748b20" name="Raw Alerts" />
-                <Area type="monotone" dataKey="meta_alerts" stroke="#0f172a" fill="#0f172a20" name="MetaAlerts" />
+                <Area type="monotone" dataKey="raw_alerts" stroke="#64748b" fill="#64748b20" name="Alert Mentah" />
+                <Area type="monotone" dataKey="meta_alerts" stroke="#0f172a" fill="#0f172a20" name="MetaAlert" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
@@ -197,10 +211,10 @@ export function OverviewPage() {
             <div className="px-6 py-4 border-b border-kumo-hairline flex items-center justify-between">
               <div>
                 <h2 className="text-sm font-semibold text-kumo-strong">
-                  Recent MetaAlert Episodes
+                  Episode MetaAlert Terbaru
                 </h2>
                 <p className="text-xs text-kumo-subtle mt-0.5">
-                  Latest aggregated alert groups evaluated by Isolation Forest
+                  Kelompok alert teragregasi yang dinilai Isolation Forest; skor = prioritas, bukan vonis serangan
                 </p>
               </div>
               <Button
@@ -208,19 +222,19 @@ export function OverviewPage() {
                 size="sm"
                 onClick={() => navigate(withRunId('/meta-alerts'))}
               >
-                View all MetaAlerts <ArrowRight size={13} className="ml-1" />
+                Lihat semua MetaAlert <ArrowRight size={13} className="ml-1" />
               </Button>
             </div>
             <Table>
               <Table.Header>
                 <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
                   <Table.Head>Meta ID</Table.Head>
-                  <Table.Head>Timestamp</Table.Head>
+                  <Table.Head>Waktu Akhir</Table.Head>
                   <Table.Head>Agent / Host</Table.Head>
-                  <Table.Head>Rule Name</Table.Head>
-                  <Table.Head className="text-right">Alert Count</Table.Head>
-                  <Table.Head className="text-right">Anomaly Score</Table.Head>
-                  <Table.Head>SOC Decision</Table.Head>
+                  <Table.Head>Rule Group</Table.Head>
+                  <Table.Head className="text-right">Jumlah Alert</Table.Head>
+                  <Table.Head className="text-right">Skor Anomali</Table.Head>
+                  <Table.Head>Keputusan / Aksi</Table.Head>
                 </Table.Row>
               </Table.Header>
               <Table.Body>

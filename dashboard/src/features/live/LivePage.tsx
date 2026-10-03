@@ -1,5 +1,6 @@
 import { PageHeader } from '@/components/shared/PageHeader';
-import { LiveStatusCard } from './LiveStatusPanel';
+import { LiveTriageSummaryCard } from './LiveTriageSummary';
+import { LiveTransportDetails } from './LiveTransportDetails';
 import { ActiveBucketsTimelineCard } from './ActiveBucketsTimeline';
 
 export function LivePage() {
@@ -8,11 +9,12 @@ export function LivePage() {
       <PageHeader
         breadcrumbs={['Operasi', 'Live Stream']}
         title="Live Stream Wazuh"
-        description="Arus alert langsung dari Indexer/API — status worker, keterbasian siklus, karantina, dan lag"
+        description="Beban triase analis dulu: reduksi, antrean ESCALATE, distribusi decision, dan kesegaran data — detail transport di bawah timeline"
       />
       <div className="px-6 py-8 lg:px-10 space-y-8">
-        <LiveStatusCard />
+        <LiveTriageSummaryCard />
         <ActiveBucketsTimelineCard />
+        <LiveTransportDetails />
       </div>
     </>
   );

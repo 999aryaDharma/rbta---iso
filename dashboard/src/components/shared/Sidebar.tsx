@@ -140,7 +140,7 @@ export function AppSidebar() {
           </SidebarMenu>
         </SidebarGroup>
 
-        {/* Thesis Demonstration Section */}
+        {/* Thesis Sidang Section */}
         <SidebarGroup>
           <SidebarGroupLabel>Sidang</SidebarGroupLabel>
           <SidebarMenu>

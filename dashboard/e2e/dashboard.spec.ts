@@ -543,7 +543,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     await input.fill(VALID_API_KEY);
     await page.locator('button:has-text("Sign In to Control Plane")').click();
 
-    await expect(page.locator('text=Security Analytics Overview')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole('heading', { name: 'Ringkasan Live' })).toBeVisible({ timeout: 5000 });
   });
 
   test('3. Overview page renders KPI cards, ARR truth, and Kumo layout', async ({ page }) => {
@@ -552,11 +552,11 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     }, VALID_API_KEY);
     await page.goto('/dashboard/overview');
 
-    await expect(page.locator('text=Raw Ingested Alerts').first()).toBeVisible();
-    await expect(page.getByText('Finalized MetaAlerts', { exact: true })).toBeVisible();
+    await expect(page.locator('text=Alert Mentah Masuk').first()).toBeVisible();
+    await expect(page.getByText('MetaAlert Final', { exact: true })).toBeVisible();
     await expect(page.locator('text=Alert Reduction Rate').first()).toBeVisible();
     await expect(page.locator('text=98.73%').first()).toBeVisible();
-    await expect(page.locator('text=Escalated Incidents').first()).toBeVisible();
+    await expect(page.locator('text=MetaAlert ESCALATE').first()).toBeVisible();
   });
 
   test('4. ESCALATE / Needs Investigation deep-link navigates to filtered MetaAlerts', async ({ page }) => {
@@ -565,7 +565,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     }, VALID_API_KEY);
     await page.goto('/dashboard/overview');
 
-    const viewAllBtn = page.locator('button:has-text("View all")');
+    const viewAllBtn = page.locator('button:has-text("Lihat semua MetaAlert")');
     await viewAllBtn.click();
     await expect(page).toHaveURL(/.*\/meta-alerts/);
   });
@@ -663,7 +663,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     }, VALID_API_KEY);
     await page.goto('/dashboard/demo');
 
-    await expect(page.locator('text=Demo Sidang RBTA–Isolation Forest')).toBeVisible();
+    await expect(page.locator('text=Replay Sidang RBTA–Isolation Forest')).toBeVisible();
     const select = page.locator('select').first();
     await expect(select).toBeVisible();
     await select.selectOption('eval_dataset_demo.jsonl');
@@ -678,7 +678,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     const select = page.locator('select').first();
     await select.selectOption('eval_dataset_demo.jsonl');
 
-    const startBtn = page.locator('button:has-text("Mulai Demo")');
+    const startBtn = page.locator('button:has-text("Mulai Replay")');
     await startBtn.click();
     await expect(page.locator('text=RUNNING').first()).toBeVisible();
   });
@@ -709,7 +709,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     const resetBtn = page.locator('button:has-text("Siapkan run baru")');
     if (await resetBtn.isVisible()) {
       await resetBtn.click();
-      await expect(page.locator('text=Siapkan run demo baru?')).toBeVisible();
+      await expect(page.locator('text=Siapkan run replay baru?')).toBeVisible();
       await page.locator('button:has-text("Konfirmasi")').click();
       await expect(page.locator('text=IDLE').first()).toBeVisible();
     }
@@ -773,7 +773,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     const select = page.locator('select').first();
     await select.selectOption('__ALL__');
 
-    const startBtn = page.locator('button:has-text("Mulai Demo")');
+    const startBtn = page.locator('button:has-text("Mulai Replay")');
     await startBtn.click();
     await expect(page.locator('text=RUNNING').first()).toBeVisible();
   });
@@ -796,7 +796,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     }, VALID_API_KEY);
     await page.goto('/dashboard/demo');
 
-    const startBtn = page.locator('button:has-text("Mulai Demo")');
+    const startBtn = page.locator('button:has-text("Mulai Replay")');
     await startBtn.click();
     await expect(page.locator('text=Operational Processing Pipeline')).toBeVisible();
 
@@ -822,7 +822,7 @@ test.describe('RBTA + Cloudflare Kumo Dashboard Complete E2E Suite', () => {
     }, VALID_API_KEY);
     await page.goto('/dashboard/demo');
 
-    const startBtn = page.locator('button:has-text("Mulai Demo")');
+    const startBtn = page.locator('button:has-text("Mulai Replay")');
     await startBtn.click();
 
     await page.locator('button:has-text("6. 7 Features")').click();

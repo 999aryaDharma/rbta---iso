@@ -67,7 +67,7 @@ export function LiveStatusPanel({ isLoading, isError, data, errorMessage, onRetr
 
       {stale && data.worker_alive && (
         <p role="status" className="text-xs text-amber-600">
-          Data basi — siklus terakhir lebih dari 2 menit lalu. Periksa koneksi Indexer/API dan log backend.
+          Data basi, siklus terakhir lebih dari 2 menit lalu. Periksa koneksi Indexer/API dan log backend.
         </p>
       )}
       {!data.worker_alive && (
@@ -78,8 +78,10 @@ export function LiveStatusPanel({ isLoading, isError, data, errorMessage, onRetr
 
       <dl className="grid grid-cols-2 lg:grid-cols-4 gap-5 text-xs">
         <div>
-          <dt className="text-kumo-subtle font-medium">Siklus selesai</dt>
-          <dd className="font-mono font-semibold text-kumo-strong text-base">{data.cycles_completed}</dd>
+          <dt className="text-kumo-subtle font-medium">Alert unik diproses</dt>
+          <dd className="font-mono font-semibold text-kumo-strong text-base">
+            {data.ingested_total ?? '—'}
+          </dd>
         </div>
         <div>
           <dt className="text-kumo-subtle font-medium">Gagal beruntun</dt>

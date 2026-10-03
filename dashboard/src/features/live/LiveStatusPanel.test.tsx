@@ -16,6 +16,7 @@ const baseStatus: LiveStatus = {
   buffer_size: null,
   buffer_stats: null,
   outbox_pending: 1,
+  ingested_total: 1899,
   dispatcher: null,
   quarantine_total: 0,
   newest_scored_event_time: null,
@@ -38,17 +39,26 @@ describe('LiveStatusPanel', () => {
     expect(onRetry).toHaveBeenCalledTimes(1);
   });
 
-  it('menampilkan worker hidup, siklus, dan model terpin', () => {
+  it('menampilkan worker hidup dan model terpin', () => {
     render(<LiveStatusPanel isLoading={false} isError={false} data={baseStatus} onRetry={() => {}} />);
     expect(screen.getByText(/worker hidup/i)).toBeInTheDocument();
-    expect(screen.getByText('12')).toBeInTheDocument();
     expect(screen.getByText('rbta-if-v1')).toBeInTheDocument();
+  });
+
+  it('tidak menampilkan hitungan siklus internal', () => {
+    render(<LiveStatusPanel isLoading={false} isError={false} data={baseStatus} onRetry={() => {}} />);
+    expect(screen.queryByText('Siklus selesai')).not.toBeInTheDocument();
   });
 
   it('menandai basi bila siklus terakhir sudah tua', () => {
     const stale = { ...baseStatus, last_cycle_at: new Date(Date.now() - 10 * 60_000).toISOString() };
     render(<LiveStatusPanel isLoading={false} isError={false} data={stale} onRetry={() => {}} />);
     expect(screen.getByText(/basi/i)).toBeInTheDocument();
+  });
+
+  it('menampilkan total alert unik yang diproses', () => {
+    render(<LiveStatusPanel isLoading={false} isError={false} data={baseStatus} onRetry={() => {}} />);
+    expect(screen.getByText('1899')).toBeInTheDocument();
   });
 
   it('menampilkan worker berhenti saat mode replay', () => {
