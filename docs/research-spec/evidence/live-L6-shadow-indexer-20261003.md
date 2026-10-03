@@ -53,5 +53,7 @@ Frontend: lint + typecheck + **62 passed/20 files** + build OK.
 
 - Ini bukti pipeline hidup + reduksi triase berjalan, BUKAN bukti deteksi
   serangan dan bukan izin produksi.
-- Belum dilakukan: kirim Telegram asli, rotasi password reader yang sempat
-  tersingkap di log sesi, CA permanen sisi server, Runbook VPS.
+- Belum dilakukan: dispatch Telegram live sesungguhnya (konektivitas bot
+  terbukti 2026-10-03: pesan uji `sendMessage` terkirim), rotasi password
+  reader yang sempat tersingkap di log sesi, CA permanen sisi server,
+  Runbook VPS.

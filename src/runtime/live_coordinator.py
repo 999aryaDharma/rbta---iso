@@ -5,7 +5,9 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import logging
-from typing import Any, Dict, List, Optional, Set
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Union
 
 from src.contracts.raw_alert import CanonicalRawAlert
 from src.contracts.scored_meta_alert import ScoredMetaAlert
@@ -117,6 +119,8 @@ class LiveIngestionCoordinator:
         order_buffer_max_hold: timedelta = timedelta(minutes=5),
         order_buffer_max_items: int = 1000,
         breaker_ack: Optional[str] = None,
+        live_archive_enabled: Optional[bool] = None,
+        live_archive_dir: Optional[Union[str, Path]] = None,
     ) -> None:
         self.service: LiveRBTAService = service
         self.poller: WazuhIndexerLivePoller = poller or WazuhIndexerLivePoller()
@@ -138,6 +142,19 @@ class LiveIngestionCoordinator:
             else None
         )
         self.breaker_ack: Optional[str] = breaker_ack
+
+        # Design A: best-effort raw JSONL archive of live-ingested alerts.
+        # Default disabled so replay/demo paths are unaffected; enable via
+        # RBTA_LIVE_ARCHIVE_ENABLED=1 (dir via RBTA_LIVE_ARCHIVE_DIR).
+        if live_archive_enabled is None:
+            live_archive_enabled = os.environ.get(
+                "RBTA_LIVE_ARCHIVE_ENABLED", ""
+            ).strip().lower() in ("1", "true", "yes", "on")
+        self.live_archive_enabled: bool = bool(live_archive_enabled)
+        if live_archive_dir is None:
+            env_dir = os.environ.get("RBTA_LIVE_ARCHIVE_DIR", "").strip()
+            live_archive_dir = env_dir if env_dir else "data/archive"
+        self.live_archive_dir: Path = Path(live_archive_dir)
 
         # Restore transport cursor state from service
         source_state = self.service.get_live_source_state()
@@ -404,6 +421,7 @@ class LiveIngestionCoordinator:
         failures = 0
         total_scored: List[ScoredMetaAlert] = []
         ingested_event_times: List[datetime] = []
+        newly_ingested: List[CanonicalRawAlert] = []
         future_cutoff = now + _FUTURE_EVENT_SKEW
 
         # N5b: quarantine entries are collected per cycle and flushed once
@@ -428,6 +446,10 @@ class LiveIngestionCoordinator:
                     new_ids_count += 1
                     if use_seen_cache:
                         seen_cache[candidate.wazuh_alert_id] = True
+                # Design A: only newly ingested IDs are archived, so the
+                # archive stays duplicate-free for later replay.
+                if not is_already_seen:
+                    newly_ingested.append(candidate)
                 # M2(c): only successfully ingested, non-future-dated event
                 # times may advance newest_ingested_event_time.
                 if candidate.timestamp.tzinfo is None or candidate.timestamp <= future_cutoff:
@@ -447,6 +469,17 @@ class LiveIngestionCoordinator:
                 logger.error("Failed to ingest alert '%s': %s", candidate.wazuh_alert_id, exc)
                 failures += 1
                 raise
+
+        # Design A: best-effort raw JSONL archive of this cycle's newly
+        # ingested alerts (sorted, daily-rotated inside append_alerts).
+        # append_alerts never raises; this belt-and-suspenders guard keeps
+        # the live cycle green no matter what the archive path does.
+        if self.live_archive_enabled and newly_ingested:
+            try:
+                from src.runtime.live_archive import append_alerts
+                append_alerts(newly_ingested, self.live_archive_dir)
+            except Exception as exc:
+                logger.warning("Live archive batch failed: %s", exc)
 
         # N1b: every per-hit bad document is quarantined, then the cycle continues.
         # Unidentified docs key by content hash over {index, doc_id} ONLY —
