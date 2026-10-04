@@ -30,10 +30,24 @@ interface LiveTriageSummaryPanelProps {
 
 const DECISION_ORDER = ['CRITICAL', 'SUSPICIOUS', 'NOISE_HIGH', 'NOISE'];
 
+const LEVEL_BAR: Record<string, string> = {
+  CRITICAL: 'bg-red-500',
+  SUSPICIOUS: 'bg-amber-500',
+  NOISE_HIGH: 'bg-sky-500',
+  NOISE: 'bg-kumo-subtle',
+};
+
 function formatLag(sec: number | null): string {
   if (sec === null || Number.isNaN(sec)) return '-';
   if (sec < 60) return `${sec.toFixed(1)} dtk`;
   return `${(sec / 60).toFixed(1)} mnt`;
+}
+
+function lagTone(sec: number | null, stale: boolean): string {
+  if (sec === null || Number.isNaN(sec)) return 'text-kumo-subtle';
+  if (stale || sec >= 300) return 'text-red-600';
+  if (sec >= 60) return 'text-amber-600';
+  return 'text-emerald-600';
 }
 
 function formatArr(v: number | null): string {
@@ -81,6 +95,7 @@ export function LiveTriageSummaryPanel({ isLoading, isError, data, errorMessage,
 
   const decisions = orderedDecisions(data.decisionCounts);
   const decisionTotal = Math.max(1, decisions.reduce((acc, [, v]) => acc + v, 0));
+  const escalate = data.escalateOpen ?? 0;
 
   return (
     <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-5">
@@ -107,47 +122,48 @@ export function LiveTriageSummaryPanel({ isLoading, isError, data, errorMessage,
         </p>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+      <div
+        role="img"
+        aria-label={`Reduksi: ${data.rawAlerts ?? '-'} alert menjadi ${data.metaAlerts ?? '-'} MetaAlert, ARR ${formatArr(data.arrPercent)}`}
+        className="flex items-center gap-3 rounded-lg bg-kumo-recessed/40 px-4 py-3 text-xs"
+      >
+        <div className="min-w-0">
+          <p className="font-mono font-bold text-kumo-strong text-lg leading-none">{data.rawAlerts ?? '-'}</p>
+          <p className="text-kumo-subtle mt-1">Alert masuk</p>
+        </div>
+        <span aria-hidden className="font-mono text-kumo-subtle">→</span>
+        <div className="min-w-0">
+          <p className="font-mono font-bold text-kumo-strong text-lg leading-none">{data.metaAlerts ?? '-'}</p>
+          <p className="text-kumo-subtle mt-1">MetaAlert final</p>
+        </div>
+        <span aria-hidden className="font-mono text-kumo-subtle">→</span>
+        <div className="ml-auto text-right">
+          <p className="font-mono font-bold text-kumo-brand text-lg leading-none">{formatArr(data.arrPercent)}</p>
+          <p className="text-kumo-subtle mt-1">Reduksi live (ARR)</p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
         <div>
-          <p className="text-xs text-kumo-subtle font-medium">Alert masuk</p>
-          <p className="font-mono font-semibold text-kumo-strong text-base">
-            {data.rawAlerts ?? '-'}
+          <p className="text-xs text-kumo-subtle font-medium">ESCALATE terbuka</p>
+          <p className={`font-mono font-bold text-3xl leading-tight ${escalate > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+            {data.escalateOpen ?? '-'}
           </p>
+          <p className="text-[11px] text-kumo-subtle">menunggu triase analis</p>
         </div>
         <div>
-          <p className="text-xs text-kumo-subtle font-medium">MetaAlert final</p>
-          <p className="font-mono font-semibold text-kumo-strong text-base">
-            {data.metaAlerts ?? '-'}
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-kumo-subtle font-medium">Reduksi live (ARR)</p>
-          <p className="font-mono font-semibold text-kumo-strong text-base">
-            {formatArr(data.arrPercent)}
+          <p className="text-xs text-kumo-subtle font-medium">Outbox menunggu</p>
+          <p className="font-mono font-semibold text-kumo-default text-xl leading-tight">
+            {data.outboxPending ?? '-'}
           </p>
         </div>
         <div>
           <p className="text-xs text-kumo-subtle font-medium">Kesegaran (event-lag)</p>
-          <p className="font-mono text-kumo-default text-base">{formatLag(data.eventLagSec)}</p>
-        </div>
-        <div>
-          <p className="text-xs text-kumo-subtle font-medium">ESCALATE terbuka</p>
-          <p className="font-mono font-semibold text-kumo-strong text-base">
-            {data.escalateOpen ?? '-'}
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-kumo-subtle font-medium">Outbox menunggu</p>
-          <p className="font-mono text-kumo-default text-base">
-            {data.outboxPending ?? '-'}
+          <p className={`font-mono font-semibold text-xl leading-tight ${lagTone(data.eventLagSec, data.stale)}`}>
+            {formatLag(data.eventLagSec)}
           </p>
         </div>
       </div>
-
-      <p className="text-[11px] text-kumo-subtle">
-        Umur tertua tidak tersedia dari API yang ada. Outbox live hanya mengekspos hitungan
-        tanpa stempel waktu per item. Endpoint Telegram payloads milik konteks replay, bukan live.
-      </p>
 
       <div>
         <h4 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong mb-2">
@@ -159,24 +175,33 @@ export function LiveTriageSummaryPanel({ isLoading, isError, data, errorMessage,
           </p>
         ) : decisions.length === 0 ? (
           <p className="text-xs text-kumo-subtle">
-            Belum ada MetaAlert live untuk distribusi decision.
+            Belum ada MetaAlert live untuk distribusi level.
           </p>
         ) : (
           <div className="space-y-2">
-            {decisions.map(([name, value]) => (
-              <div key={name}>
-                <div className="mb-1 flex justify-between text-xs">
+            <div
+              role="img"
+              aria-label={decisions.map(([name, value]) => `${name} ${value}`).join(', ')}
+              className="flex h-3 overflow-hidden rounded-full bg-kumo-recessed"
+            >
+              {decisions.map(([name, value]) => (
+                <div
+                  key={name}
+                  title={`${name}: ${value}`}
+                  className={`h-full ${LEVEL_BAR[name] ?? 'bg-kumo-brand'}`}
+                  style={{ width: `${(value / decisionTotal) * 100}%` }}
+                />
+              ))}
+            </div>
+            <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+              {decisions.map(([name, value]) => (
+                <li key={name} className="flex items-center gap-1.5">
+                  <span aria-hidden className={`inline-block w-2.5 h-2.5 rounded-sm ${LEVEL_BAR[name] ?? 'bg-kumo-brand'}`} />
                   <span className="font-semibold text-kumo-default">{name}</span>
                   <span className="font-mono text-kumo-subtle">{value}</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-kumo-recessed">
-                  <div
-                    className="h-full rounded-full bg-kumo-brand"
-                    style={{ width: `${(value / decisionTotal) * 100}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+                </li>
+              ))}
+            </ul>
             {data.decisionSampled < data.decisionTotal && (
               <p className="text-[11px] text-kumo-subtle">
                 Agregat {data.decisionSampled} dari {data.decisionTotal} MetaAlert live (100 terbaru).

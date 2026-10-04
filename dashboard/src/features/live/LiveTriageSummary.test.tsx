@@ -66,13 +66,28 @@ describe('LiveTriageSummaryPanel', () => {
     expect(screen.getByText(/prioritas.*bukan vonis serangan/i)).toBeInTheDocument();
   });
 
-  it('menampilkan ESCALATE terbuka + outbox dan mencatat umur tertua tak tersedia', () => {
+  it('menampilkan ESCALATE terbuka + outbox tanpa paragraf bocoran dapur', () => {
     render(<LiveTriageSummaryPanel isLoading={false} isError={false} data={baseDatum} onRetry={() => {}} />);
-    expect(screen.getByText('5')).toBeInTheDocument();
-    expect(screen.getByText(/umur tertua tidak tersedia/i)).toBeInTheDocument();
+    expect(screen.getByText('ESCALATE terbuka')).toBeInTheDocument();
+    expect(screen.getByText('Outbox menunggu')).toBeInTheDocument();
+    expect(screen.queryByText(/umur tertua tidak tersedia/i)).not.toBeInTheDocument();
   });
 
-  it('menampilkan distribusi decision per label', () => {
+  it('menampilkan funnel reduksi sebagai satu strip', () => {
+    render(<LiveTriageSummaryPanel isLoading={false} isError={false} data={baseDatum} onRetry={() => {}} />);
+    expect(
+      screen.getByRole('img', { name: /reduksi: 1899 alert menjadi 42 metaalert/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('menampilkan distribusi level sebagai stacked bar satu warna per level', () => {
+    render(<LiveTriageSummaryPanel isLoading={false} isError={false} data={baseDatum} onRetry={() => {}} />);
+    expect(
+      screen.getByRole('img', { name: /CRITICAL 2.*SUSPICIOUS 3.*NOISE_HIGH 7.*NOISE 30/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('menampilkan distribusi level per label', () => {
     render(<LiveTriageSummaryPanel isLoading={false} isError={false} data={baseDatum} onRetry={() => {}} />);
     expect(screen.getByText('CRITICAL')).toBeInTheDocument();
     expect(screen.getByText('SUSPICIOUS')).toBeInTheDocument();
@@ -154,7 +169,7 @@ describe('LiveTriageSummaryCard', () => {
     expect(mockFetchSummary).toHaveBeenCalled();
   });
 
-  it('menampilkan distribusi decision dari daftar live tanpa mengarang angka', async () => {
+  it('menampilkan distribusi level dari daftar live tanpa mengarang angka', async () => {
     renderCard();
     expect(await screen.findByText('CRITICAL')).toBeInTheDocument();
     expect(screen.getByText('SUSPICIOUS')).toBeInTheDocument();
