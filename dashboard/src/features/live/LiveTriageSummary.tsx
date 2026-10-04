@@ -152,13 +152,13 @@ export function LiveTriageSummaryPanel({ isLoading, isError, data, errorMessage,
           <p className="text-[11px] text-kumo-subtle">menunggu triase analis</p>
         </div>
         <div>
-          <p className="text-xs text-kumo-subtle font-medium">Outbox menunggu</p>
+          <p className="text-xs text-kumo-subtle font-medium">Antrean Telegram</p>
           <p className="font-mono font-semibold text-kumo-default text-xl leading-tight">
             {data.outboxPending ?? '-'}
           </p>
         </div>
         <div>
-          <p className="text-xs text-kumo-subtle font-medium">Kesegaran (event-lag)</p>
+          <p className="text-xs text-kumo-subtle font-medium">Lag event</p>
           <p className={`font-mono font-semibold text-xl leading-tight ${lagTone(data.eventLagSec, data.stale)}`}>
             {formatLag(data.eventLagSec)}
           </p>

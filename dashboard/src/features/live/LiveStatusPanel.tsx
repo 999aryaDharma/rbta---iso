@@ -106,7 +106,7 @@ export function LiveStatusPanel({ isLoading, isError, data, errorMessage, onRetr
           <dd className="font-mono text-kumo-default">{formatLag(data.event_lag_sec)}</dd>
         </div>
         <div>
-          <dt className="text-kumo-subtle font-medium">Outbox menunggu</dt>
+          <dt className="text-kumo-subtle font-medium">Antrean Telegram</dt>
           <dd className="font-mono text-kumo-default">{data.outbox_pending}</dd>
         </div>
         <div>

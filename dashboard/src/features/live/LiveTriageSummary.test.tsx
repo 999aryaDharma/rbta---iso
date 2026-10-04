@@ -69,7 +69,7 @@ describe('LiveTriageSummaryPanel', () => {
   it('menampilkan ESCALATE terbuka + outbox tanpa paragraf bocoran dapur', () => {
     render(<LiveTriageSummaryPanel isLoading={false} isError={false} data={baseDatum} onRetry={() => {}} />);
     expect(screen.getByText('ESCALATE terbuka')).toBeInTheDocument();
-    expect(screen.getByText('Outbox menunggu')).toBeInTheDocument();
+    expect(screen.getByText('Antrean Telegram')).toBeInTheDocument();
     expect(screen.queryByText(/umur tertua tidak tersedia/i)).not.toBeInTheDocument();
   });
 
