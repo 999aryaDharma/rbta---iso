@@ -125,7 +125,7 @@ export function LiveTriageSummaryPanel({ isLoading, isError, data, errorMessage,
       <div
         role="img"
         aria-label={`Reduksi: ${data.rawAlerts ?? '-'} alert menjadi ${data.metaAlerts ?? '-'} MetaAlert, ARR ${formatArr(data.arrPercent)}`}
-        className="flex items-center gap-3 rounded-lg bg-kumo-recessed/40 px-4 py-3 text-xs"
+        className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-kumo-recessed/40 px-4 py-3 text-xs"
       >
         <div className="min-w-0">
           <p className="font-mono font-bold text-kumo-strong text-lg leading-none">{data.rawAlerts ?? '-'}</p>
@@ -137,7 +137,7 @@ export function LiveTriageSummaryPanel({ isLoading, isError, data, errorMessage,
           <p className="text-kumo-subtle mt-1">MetaAlert final</p>
         </div>
         <span aria-hidden className="text-kumo-subtle shrink-0"><ArrowRight size={16} /></span>
-        <div className="ml-auto text-right">
+        <div className="ml-auto text-right min-w-0">
           <p className="font-mono font-bold text-kumo-brand text-lg leading-none">{formatArr(data.arrPercent)}</p>
           <p className="text-kumo-subtle mt-1">Reduksi live (ARR)</p>
         </div>
