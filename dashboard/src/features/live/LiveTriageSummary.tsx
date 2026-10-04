@@ -3,7 +3,7 @@ import { fetchSummary } from '@/api/dashboard';
 import { fetchLiveStatus } from '@/api/live';
 import { fetchMetaAlerts } from '@/api/metaAlerts';
 import { LIVE_STALE_AFTER_MS } from './LiveStatusPanel';
-import { ListChecks } from '@phosphor-icons/react';
+import { ArrowRight, ListChecks } from '@phosphor-icons/react';
 
 export interface TriageSummaryDatum {
   rawAlerts: number | null;
@@ -131,12 +131,12 @@ export function LiveTriageSummaryPanel({ isLoading, isError, data, errorMessage,
           <p className="font-mono font-bold text-kumo-strong text-lg leading-none">{data.rawAlerts ?? '-'}</p>
           <p className="text-kumo-subtle mt-1">Alert masuk</p>
         </div>
-        <span aria-hidden className="font-mono text-kumo-subtle">→</span>
+        <span aria-hidden className="text-kumo-subtle shrink-0"><ArrowRight size={16} /></span>
         <div className="min-w-0">
           <p className="font-mono font-bold text-kumo-strong text-lg leading-none">{data.metaAlerts ?? '-'}</p>
           <p className="text-kumo-subtle mt-1">MetaAlert final</p>
         </div>
-        <span aria-hidden className="font-mono text-kumo-subtle">→</span>
+        <span aria-hidden className="text-kumo-subtle shrink-0"><ArrowRight size={16} /></span>
         <div className="ml-auto text-right">
           <p className="font-mono font-bold text-kumo-brand text-lg leading-none">{formatArr(data.arrPercent)}</p>
           <p className="text-kumo-subtle mt-1">Reduksi live (ARR)</p>
