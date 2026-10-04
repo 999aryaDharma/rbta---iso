@@ -49,6 +49,11 @@ Jangan commit `deploy/ct/.env` (di-ignore).
 cd deploy/ct
 docker compose build
 docker compose up -d
+# WAJIB sekali per volume baru: volume dibuat milik root, container jalan
+# sebagai UID 10001 — tanpa ini backend crash PermissionError state.json.lock:
+docker run --rm -v rbta-ct-live:/s -v rbta-ct-archive:/a \
+  alpine chown -R 10001:10001 /s /a
+docker compose restart rbta-service
 sleep 45
 curl -s http://127.0.0.1:8010/ready
 ```
@@ -77,7 +82,10 @@ alpine tar czf /b/live-backup.tgz -C /s .` (sama untuk `rbta-ct-archive`).
 
 ## Batas yang diketahui
 
-- Image BELUM pernah di-build (dilarang Docker di laptop dev) — build
-  pertama terjadi di CT; laporkan error build apa adanya.
+- Image pertama kali di-build 2026-10-04 di CT (`rbta-service:ct`):
+  base `python:3.13-slim` (3.11 tak punya wheel numpy 2.5.x),
+  `scikit-learn==1.9.0` di `pyproject.toml` + `constraints.txt`
+  (model `rbta-if-v1` dilatih 1.7.2 — ada `InconsistentVersionWarning`
+  saat load, sudah terbukti stabil di semua gate lokal + shadow run).
 - Pin TLS = leaf interim; ganti ke CA permanen bila server menerbitkan ulang.
 - Retensi arsip `rbta-ct-archive` belum otomatis — jadwalkan hapus manual.
