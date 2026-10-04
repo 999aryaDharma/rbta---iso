@@ -35,6 +35,7 @@ export type AgentState = z.infer<typeof AgentStateSchema>;
 
 export const BucketStateSchema = z.object({
   meta_id: z.number().nullable().optional(),
+  finalized: z.boolean().nullish(),
   agent_id: z.string(),
   agent_name: z.string().nullable().optional(),
   rule_group_primary: z.string(),

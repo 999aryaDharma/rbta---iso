@@ -20,6 +20,9 @@ export interface TimelineBar {
   max_severity: number;
   tier: SeverityTier;
   finalized: boolean;
+  /** ISO event-time window bucket (untuk kolom durasi). */
+  start_time: string;
+  end_time: string;
   /** Fraksi 0..1 dalam jendela geser (terjepit). */
   x0: number;
   x1: number;
@@ -54,7 +57,11 @@ export function buildTimelineBars(
       alert_count: b.alert_count,
       max_severity: b.max_severity,
       tier: severityTier(b.max_severity),
-      finalized: b.meta_id != null,
+      start_time: b.start_time,
+      end_time: b.end_time,
+      // Kontrak: hanya flag backend yang menentukan final. meta_id saja
+      // berarti reservasi bucket aktif, bukan MetaAlert jadi.
+      finalized: b.finalized === true,
       x0,
       x1,
     });

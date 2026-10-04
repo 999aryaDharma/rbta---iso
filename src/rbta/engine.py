@@ -375,11 +375,19 @@ class RBTAEngine:
         return result
 
     def snapshot_buckets(self) -> list[dict]:
-        """Read-only snapshot of active buckets for dashboard."""
+        """Read-only snapshot of active buckets for dashboard.
+
+        Active buckets are still aggregating: their ``meta_id`` is a
+        reservation for the future MetaAlert, NOT a finalized record.
+        ``finalized`` is therefore always False here; the dashboard must
+        not link these rows to the MetaAlert detail endpoint (which only
+        reads finalized_history) until the bucket closes.
+        """
         result = []
         for (agent_id, rule_group), bucket in self._active_buckets.items():
             result.append({
                 "meta_id": bucket.meta_id,
+                "finalized": False,
                 "agent_id": agent_id,
                 "agent_name": bucket.agent_name,
                 "rule_group_primary": rule_group,

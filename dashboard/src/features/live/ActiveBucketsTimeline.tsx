@@ -3,18 +3,21 @@ import { useNavigate } from 'react-router-dom';
 import { usePollingQuery } from '@/hooks/usePolling';
 import { fetchBuckets } from '@/api/dashboard';
 import { buildTimelineBars, type TimelineBar } from './bucketTimeline';
-
-const TIER_BAR: Record<TimelineBar['tier'], string> = {
-  critical: 'bg-red-500',
-  high: 'bg-amber-500',
-  medium: 'bg-sky-500',
-  low: 'bg-kumo-subtle',
-};
+import { formatNumber, formatSeconds } from '@/lib/formatters';
+import { Table } from '@cloudflare/kumo/components/table';
+import { Badge } from '@cloudflare/kumo/components/badge';
 
 interface ActiveBucketsTimelineProps {
   bars: TimelineBar[];
   windowMinutes: number;
   onSelect: (metaId: number) => void;
+}
+
+function windowSeconds(startIso: string, endIso: string): number | null {
+  const s = new Date(startIso).getTime();
+  const e = new Date(endIso).getTime();
+  if (Number.isNaN(s) || Number.isNaN(e) || e < s) return null;
+  return (e - s) / 1000;
 }
 
 export function ActiveBucketsTimeline({ bars, windowMinutes, onSelect }: ActiveBucketsTimelineProps) {
@@ -29,56 +32,68 @@ export function ActiveBucketsTimeline({ bars, windowMinutes, onSelect }: ActiveB
   }
 
   return (
-    <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs space-y-4">
-      <div className="pb-3 border-b border-kumo-hairline">
+    <div className="rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs overflow-hidden">
+      <div className="px-6 py-4 border-b border-kumo-hairline">
         <h3 className="font-semibold text-xs uppercase tracking-wider text-kumo-strong">
           Bucket aktif RBTA: {windowMinutes} menit terakhir (event-time)
         </h3>
         <p className="text-xs text-kumo-subtle mt-1">
-          Bar = unit agregasi yang tumbuh saat alert masuk. Bar bukan bukti serangan.
+          Baris = unit agregasi yang masih tumbuh. Baris bukan bukti serangan; link hanya muncul setelah final.
         </p>
       </div>
-      <div className="space-y-3">
-        {bars.map((b) => {
-          const label = `${b.agent_id} · ${b.rule_group_primary} · ${b.alert_count} alert`;
-          const body = (
-            <>
-              <div className="flex items-baseline justify-between gap-2 text-xs mb-1">
-                <span className="font-mono font-semibold text-kumo-strong truncate">
+      <Table>
+        <Table.Header>
+          <Table.Row className="bg-kumo-recessed/50 text-[11px] uppercase tracking-wider">
+            <Table.Head>Bucket</Table.Head>
+            <Table.Head className="text-right">Alert</Table.Head>
+            <Table.Head className="text-right">Durasi window</Table.Head>
+            <Table.Head className="text-right">Level max</Table.Head>
+            <Table.Head className="text-center">Status</Table.Head>
+          </Table.Row>
+        </Table.Header>
+        <Table.Body>
+          {bars.map((b) => (
+            <Table.Row key={b.key} className="hover:bg-kumo-recessed/40 transition-colors text-xs">
+              <Table.Cell>
+                <span className="font-mono font-semibold text-kumo-strong">
                   {b.agent_id} · {b.rule_group_primary}
                 </span>
-                <span className="font-mono text-kumo-subtle shrink-0">
-                  {b.alert_count} alert · sev {b.max_severity}
-                </span>
-              </div>
-              <div className="relative h-3 rounded bg-kumo-recessed/60 overflow-hidden">
-                <div
-                  className={`absolute top-0 bottom-0 rounded ${TIER_BAR[b.tier]}`}
-                  style={{ left: `${b.x0 * 100}%`, width: `${Math.max(1.5, (b.x1 - b.x0) * 100)}%` }}
-                />
-              </div>
-              <p className="text-[11px] text-kumo-subtle mt-1">
-                {b.finalized ? `Final → MetaAlert #${b.meta_id}` : 'Mengagregasi… belum ada prediksi'}
-              </p>
-            </>
-          );
-          return b.finalized && b.meta_id != null ? (
-            <button
-              key={b.key}
-              type="button"
-              aria-label={`${label}, final ke MetaAlert ${b.meta_id}`}
-              onClick={() => onSelect(b.meta_id as number)}
-              className="block w-full text-left rounded-lg p-2 hover:bg-kumo-recessed/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand"
-            >
-              {body}
-            </button>
-          ) : (
-            <div key={b.key} aria-label={label} className="p-2">
-              {body}
-            </div>
-          );
-        })}
-      </div>
+                {b.agent_name && (
+                  <span className="block font-mono text-[11px] text-kumo-subtle">{b.agent_name}</span>
+                )}
+              </Table.Cell>
+              <Table.Cell className="text-right font-mono font-bold text-kumo-strong">
+                {formatNumber(b.alert_count)}
+              </Table.Cell>
+              <Table.Cell className="text-right font-mono text-kumo-subtle">
+                {formatSeconds(windowSeconds(b.start_time, b.end_time))}
+              </Table.Cell>
+              <Table.Cell className="text-right font-mono text-kumo-default">
+                {b.max_severity} / 15 ({b.tier})
+              </Table.Cell>
+              <Table.Cell className="text-center">
+                {b.finalized && b.meta_id != null ? (
+                  <button
+                    type="button"
+                    aria-label={`${b.agent_id} ${b.rule_group_primary}, final ke MetaAlert ${b.meta_id}`}
+                    onClick={() => onSelect(b.meta_id as number)}
+                    className="font-mono font-semibold text-kumo-brand underline underline-offset-2 hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand rounded"
+                  >
+                    MetaAlert #{b.meta_id}
+                  </button>
+                ) : (
+                  <span className="inline-flex flex-col items-center gap-1">
+                    <Badge variant="secondary">Mengagregasi</Badge>
+                    {b.meta_id != null && (
+                      <span className="font-mono text-[11px] text-kumo-subtle">calon #{b.meta_id}</span>
+                    )}
+                  </span>
+                )}
+              </Table.Cell>
+            </Table.Row>
+          ))}
+        </Table.Body>
+      </Table>
     </div>
   );
 }

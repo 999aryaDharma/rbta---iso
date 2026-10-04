@@ -58,9 +58,11 @@ describe('buildTimelineBars', () => {
     expect(bars[0].x1).toBeGreaterThan(bars[0].x0);
   });
 
-  it('menandai final bila meta_id sudah ada', () => {
-    const bars = buildTimelineBars([bucket({ meta_id: 5 })], NOW, 15 * MIN);
-    expect(bars[0].finalized).toBe(true);
-    expect(bars[0].meta_id).toBe(5);
+  it('meta_id saja bukan final; hanya flag backend yang menentukan', () => {
+    const reserved = buildTimelineBars([bucket({ meta_id: 5 })], NOW, 15 * MIN);
+    expect(reserved[0].finalized).toBe(false);
+    expect(reserved[0].meta_id).toBe(5);
+    const done = buildTimelineBars([bucket({ meta_id: 5, finalized: true })], NOW, 15 * MIN);
+    expect(done[0].finalized).toBe(true);
   });
 });
