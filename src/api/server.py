@@ -145,6 +145,7 @@ def create_production_app(
         replay_controller = ReplayController(
             scoring_pipeline=scoring_pipe,
             replay_data_dir=replay_data_dir,
+            replay_runs_dir=env_map.get("RBTA_REPLAY_RUNS_DIR"),
         )
 
     # 6. Lifespan for graceful shutdown (+ optional live worker thread, L2)
