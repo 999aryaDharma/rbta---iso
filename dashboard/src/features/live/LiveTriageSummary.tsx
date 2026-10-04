@@ -137,7 +137,7 @@ export function LiveTriageSummaryPanel({ isLoading, isError, data, errorMessage,
           <p className="text-kumo-subtle mt-1">MetaAlert final</p>
         </div>
         <span aria-hidden className="text-kumo-subtle shrink-0"><ArrowRight size={16} /></span>
-        <div className="ml-auto text-right min-w-0">
+        <div className="min-w-0">
           <p className="font-mono font-bold text-kumo-brand text-lg leading-none">{formatArr(data.arrPercent)}</p>
           <p className="text-kumo-subtle mt-1">Reduksi live (ARR)</p>
         </div>
