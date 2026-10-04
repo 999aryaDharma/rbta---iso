@@ -9,7 +9,7 @@ COPY dashboard/ /build/
 RUN npm run build
 
 # ── Stage 2: Production Python Runtime ─────────────────────────
-FROM python:3.11-slim AS runtime
+FROM python:3.13-slim AS runtime
 
 # Image provenance build arguments
 ARG GIT_SHA="unknown"
