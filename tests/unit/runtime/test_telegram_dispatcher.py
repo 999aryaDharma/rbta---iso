@@ -457,7 +457,7 @@ def test_f8_formatter_shows_meta_id():
 
     text = format_telegram_alert(_scored(999), run_id="live")
     assert "999" in text
-    assert "Meta" in text
+    assert "META-ALERT" in text
 
 
 def test_f8_throttle_sleeps_between_successful_sends():

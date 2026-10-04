@@ -5,25 +5,56 @@ from zoneinfo import ZoneInfo
 
 from src.contracts.scored_meta_alert import ScoredMetaAlert
 
+_WITA = ZoneInfo("Asia/Makassar")
+
+_ID_MONTHS = (
+    "Jan", "Feb", "Mar", "Apr", "Mei", "Jun",
+    "Jul", "Agu", "Sep", "Okt", "Nov", "Des",
+)
+
+
+def _short_date(dt) -> str:
+    local = dt.astimezone(_WITA)
+    return f"{local.day} {_ID_MONTHS[local.month - 1]} {local.year}"
+
+
+def _short_dt(dt) -> str:
+    local = dt.astimezone(_WITA)
+    return f"{_short_date(dt)}, {local:%H:%M}"
+
+
+def _format_window(scored_meta: ScoredMetaAlert) -> str:
+    start = scored_meta.start_time.astimezone(_WITA)
+    end = scored_meta.end_time.astimezone(_WITA)
+    if start.date() == end.date():
+        return f"{_short_date(start)}, {start:%H:%M}-{end:%H:%M} WITA"
+    return f"{_short_dt(start)} - {_short_dt(end)} WITA"
+
 
 def format_telegram_alert(scored_meta: ScoredMetaAlert, run_id: str = "live") -> str:
-    """Format a scored MetaAlert as escaped Telegram HTML; no routing logic."""
-    wita = ZoneInfo("Asia/Makassar")
-    window_start = scored_meta.start_time.astimezone(wita).strftime("%Y-%m-%d %H:%M:%S WITA")
-    window_end = scored_meta.end_time.astimezone(wita).strftime("%Y-%m-%d %H:%M:%S WITA")
+    """Format a scored MetaAlert as escaped Telegram HTML; no routing logic.
+
+    Hierarchy: verdict header, identity, single action line, plain-sentence
+    context, score sentence, provenance, claim boundary. Blank lines split
+    sections so the message scans on a phone screen.
+    """
     tactics_str = ", ".join(scored_meta.mitre_tactics) if scored_meta.mitre_tactics else "Tidak ada"
     margin = float(scored_meta.anomaly_score) - float(scored_meta.threshold_used)
 
     return (
-        f"<b>SECURITY META-ALERT: {escape(scored_meta.decision)}</b>\n"
-        f"<b>Meta-ID:</b> <code>{scored_meta.meta_id}</code>\n"
-        f"<b>Level:</b> {escape(scored_meta.decision)} | <b>Action:</b> {escape(scored_meta.action)}\n"
-        f"<b>Agent:</b> {escape(scored_meta.agent_name)} ({escape(scored_meta.agent_id)})\n"
-        f"<b>Rule group:</b> <code>{escape(scored_meta.rule_group_primary)}</code>\n"
-        f"<b>Waktu:</b> {window_start} → {window_end}\n"
-        f"<b>Evidence:</b> {scored_meta.alert_count} | <b>Severity:</b> {scored_meta.max_severity}/15\n"
-        f"<b>MITRE:</b> {escape(tactics_str)}\n"
-        f"<b>Anomaly:</b> {scored_meta.anomaly_score:.4f} | <b>Threshold:</b> {scored_meta.threshold_used:.4f} | <b>Margin:</b> {margin:+.4f}\n"
-        f"<b>Model:</b> <code>{escape(scored_meta.model_version)}</code> | <b>Run:</b> <code>{escape(run_id)}</code>\n"
-        "<i>Anomaly score bukan bukti serangan; ini adalah prioritas triase.</i>"
+        f"<b>{escape(scored_meta.decision)} · META-ALERT #{scored_meta.meta_id}</b>\n"
+        f"<code>{escape(scored_meta.agent_name)} ({escape(scored_meta.agent_id)}) · "
+        f"{escape(scored_meta.rule_group_primary)}</code>\n"
+        f"\n"
+        f"<b>Action: {escape(scored_meta.action)}</b>\n"
+        f"\n"
+        f"{_format_window(scored_meta)}\n"
+        f"{scored_meta.alert_count} alert · level max {scored_meta.max_severity}/15\n"
+        f"MITRE: {escape(tactics_str)}\n"
+        f"\n"
+        f"Skor {scored_meta.anomaly_score:.4f} "
+        f"(ambang {scored_meta.threshold_used:.4f}, margin {margin:+.4f})\n"
+        f"<code>{escape(scored_meta.model_version)} · {escape(run_id)}</code>\n"
+        f"\n"
+        "<i>Skor anomaly bukan bukti serangan; ini prioritas triase.</i>"
     )
