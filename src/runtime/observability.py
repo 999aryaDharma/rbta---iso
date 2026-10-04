@@ -101,6 +101,57 @@ def get_dashboard_buckets(service: LiveRBTAService) -> List[Dict[str, Any]]:
     return service.engine.snapshot_buckets()
 
 
+class BucketNotActiveError(LookupError):
+    """Raised when no open bucket exists for the requested key."""
+
+    def __init__(self, agent_id: str, rule_group_primary: str, finalized_meta_id: Optional[int] = None) -> None:
+        self.agent_id = agent_id
+        self.rule_group_primary = rule_group_primary
+        self.finalized_meta_id = finalized_meta_id
+        hint = (
+            f" sudah final sebagai MetaAlert #{finalized_meta_id}; buka halaman detailnya"
+            if finalized_meta_id is not None
+            else " (sudah final atau belum pernah ada)"
+        )
+        super().__init__(
+            f"Bucket {agent_id} / {rule_group_primary} tidak aktif{hint}"
+        )
+
+
+def get_dashboard_bucket_raw_alerts(
+    service: LiveRBTAService,
+    evidence_store: RawAlertEvidenceStore,
+    agent_id: str,
+    rule_group_primary: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> Dict[str, Any]:
+    """Resolve member raw alerts of one OPEN bucket, paginated and redacted.
+
+    Uses the same resolution envelope as the finalized MetaAlert raw-alerts
+    endpoint so the dashboard reuses one table contract. The reserved
+    ``meta_id`` is echoed for display only; the bucket is not final.
+    """
+    members = service.engine.active_bucket_members(agent_id, rule_group_primary)
+    if members is None:
+        finalized_meta_id: Optional[int] = None
+        for meta in service.finalized_history:
+            if meta.agent_id == agent_id and meta.rule_group_primary == rule_group_primary:
+                finalized_meta_id = meta.meta_id
+        raise BucketNotActiveError(agent_id, rule_group_primary, finalized_meta_id)
+    reserved_meta_id, alert_ids = members
+    resolved = evidence_store.get_meta_alert_raw_alerts(
+        list(alert_ids), meta_id=None, page=page, page_size=page_size
+    )
+    return {
+        "agent_id": agent_id,
+        "rule_group_primary": rule_group_primary,
+        "meta_id_reserved": reserved_meta_id,
+        "finalized": False,
+        **resolved,
+    }
+
+
 def get_dashboard_timeseries(
     service: LiveRBTAService,
     evidence_store: RawAlertEvidenceStore,

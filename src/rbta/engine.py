@@ -374,6 +374,19 @@ class RBTAEngine:
             })
         return result
 
+    def active_bucket_members(
+        self, agent_id: str, rule_group_primary: str
+    ) -> Optional[Tuple[int, List[str]]]:
+        """Read-only accessor for dashboard drill-down into one open bucket.
+
+        Returns the reserved ``meta_id`` and member ``wazuh_alert_id`` list
+        in arrival order, or None when no bucket is open for the key.
+        """
+        bucket = self._active_buckets.get((agent_id, rule_group_primary))
+        if bucket is None:
+            return None
+        return bucket.meta_id, list(bucket.wazuh_alert_ids)
+
     def snapshot_buckets(self) -> list[dict]:
         """Read-only snapshot of active buckets for dashboard.
 

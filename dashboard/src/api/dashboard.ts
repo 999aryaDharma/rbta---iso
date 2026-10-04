@@ -3,6 +3,7 @@ import {
   DashboardSummarySchema,
   AgentStateSchema,
   BucketStateSchema,
+  RawAlertListSchema,
   TimeseriesSchema,
   SystemInfoSchema,
   IntegrationsSchema,
@@ -11,6 +12,7 @@ import type {
   DashboardSummary,
   AgentState,
   BucketState,
+  RawAlertList,
   TimeseriesData,
   SystemInfo,
   IntegrationsData,
@@ -33,6 +35,27 @@ export async function fetchBuckets(runId?: string): Promise<BucketState[]> {
   const query = runId ? `?run_id=${encodeURIComponent(runId)}` : '';
   const data = await apiFetch<unknown>(`/dashboard/buckets${query}`);
   return z.array(BucketStateSchema).parse(data);
+}
+
+export interface BucketRawAlertsParams {
+  page?: number;
+  page_size?: number;
+  run_id?: string;
+}
+
+export async function fetchBucketRawAlerts(
+  agentId: string,
+  ruleGroup: string,
+  params: BucketRawAlertsParams = {},
+): Promise<RawAlertList> {
+  const queryParams = new URLSearchParams();
+  queryParams.set('agent_id', agentId);
+  queryParams.set('rule_group_primary', ruleGroup);
+  if (params.page) queryParams.set('page', String(params.page));
+  if (params.page_size) queryParams.set('page_size', String(params.page_size));
+  if (params.run_id) queryParams.set('run_id', params.run_id);
+  const data = await apiFetch<unknown>(`/dashboard/buckets/raw-alerts?${queryParams.toString()}`);
+  return RawAlertListSchema.parse(data);
 }
 
 export async function fetchTimeseries(windowHours: number = 24, runId?: string): Promise<TimeseriesData> {

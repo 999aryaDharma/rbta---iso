@@ -14,6 +14,7 @@ const RawAlertsPage = lazy(() => import('@/features/raw-alerts/RawAlertsPage').t
 const RawAlertDetailPage = lazy(() => import('@/features/raw-alerts/RawAlertDetailPage').then(m => ({ default: m.RawAlertDetailPage })));
 const ReplayPage = lazy(() => import('@/features/replay/ReplayPage').then(m => ({ default: m.ReplayPage })));
 const LivePage = lazy(() => import('@/features/live/LivePage').then(m => ({ default: m.LivePage })));
+const BucketDetailPage = lazy(() => import('@/features/live/BucketDetailPage').then(m => ({ default: m.BucketDetailPage })));
 const IntegrationsPage = lazy(() => import('@/features/integrations/IntegrationsPage').then(m => ({ default: m.IntegrationsPage })));
 const SystemPage = lazy(() => import('@/features/system/SystemPage').then(m => ({ default: m.SystemPage })));
 
@@ -44,6 +45,8 @@ export function App() {
               <Route path="/demo" element={<ReplayPage />} />
               <Route path="/replay" element={<Navigate to="/demo" replace />} />
               <Route path="/live" element={<LivePage />} />
+              <Route path="/live/buckets/:agentId/:ruleGroup" element={<BucketDetailPage />} />
+              <Route path="/live/buckets/:agentId/:ruleGroup/raw-alerts/:alertId" element={<RawAlertDetailPage />} />
               <Route path="/integrations" element={<IntegrationsPage />} />
               <Route path="/system" element={<SystemPage />} />
             </Routes></Suspense>

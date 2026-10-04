@@ -11,6 +11,7 @@ interface ActiveBucketsTimelineProps {
   bars: TimelineBar[];
   windowMinutes: number;
   onSelect: (metaId: number) => void;
+  onOpenBucket?: (bar: TimelineBar) => void;
 }
 
 function windowSeconds(startIso: string, endIso: string): number | null {
@@ -20,7 +21,7 @@ function windowSeconds(startIso: string, endIso: string): number | null {
   return (e - s) / 1000;
 }
 
-export function ActiveBucketsTimeline({ bars, windowMinutes, onSelect }: ActiveBucketsTimelineProps) {
+export function ActiveBucketsTimeline({ bars, windowMinutes, onSelect, onOpenBucket }: ActiveBucketsTimelineProps) {
   if (bars.length === 0) {
     return (
       <div className="p-6 rounded-xl border border-kumo-hairline bg-kumo-canvas shadow-xs">
@@ -55,12 +56,19 @@ export function ActiveBucketsTimeline({ bars, windowMinutes, onSelect }: ActiveB
           {bars.map((b) => (
             <Table.Row key={b.key} className="hover:bg-kumo-recessed/40 transition-colors text-xs">
               <Table.Cell>
-                <span className="font-mono font-semibold text-kumo-strong">
-                  {b.agent_id} · {b.rule_group_primary}
-                </span>
-                {b.agent_name && (
-                  <span className="block font-mono text-[11px] text-kumo-subtle">{b.agent_name}</span>
-                )}
+                <button
+                  type="button"
+                  aria-label={`Buka isi bucket ${b.agent_id} ${b.rule_group_primary}`}
+                  onClick={() => onOpenBucket?.(b)}
+                  className="text-left rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-kumo-brand hover:opacity-80"
+                >
+                  <span className="font-mono font-semibold text-kumo-brand underline underline-offset-2">
+                    {b.agent_id} · {b.rule_group_primary}
+                  </span>
+                  {b.agent_name && (
+                    <span className="block font-mono text-[11px] text-kumo-subtle">{b.agent_name}</span>
+                  )}
+                </button>
               </Table.Cell>
               <Table.Cell className="text-right font-mono font-bold text-kumo-strong">
                 {formatNumber(b.alert_count)}
@@ -111,6 +119,9 @@ export function ActiveBucketsTimelineCard({ windowMinutes = 15 }: { windowMinute
       bars={bars}
       windowMinutes={windowMinutes}
       onSelect={(metaId) => navigate(`/meta-alerts/${metaId}`)}
+      onOpenBucket={(b) =>
+        navigate(`/live/buckets/${encodeURIComponent(b.agent_id)}/${encodeURIComponent(b.rule_group_primary)}`)
+      }
     />
   );
 }

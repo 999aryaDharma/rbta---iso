@@ -1,10 +1,12 @@
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from src.api.auth import get_api_key
 from src.runtime.context_resolver import DashboardRuntimeResolver
 from src.runtime.observability import (
+    BucketNotActiveError,
     get_dashboard_agents,
+    get_dashboard_bucket_raw_alerts,
     get_dashboard_buckets,
     get_dashboard_integrations,
     get_dashboard_summary,
@@ -47,6 +49,28 @@ def dashboard_buckets(
 ) -> List[Dict[str, Any]]:
     service, _, _ = resolver.resolve(run_id)
     return get_dashboard_buckets(service)
+
+
+@router.get("/buckets/raw-alerts")
+def dashboard_bucket_raw_alerts(
+    agent_id: str = Query(..., description="Agent ID of the open bucket"),
+    rule_group_primary: str = Query(..., description="Primary rule group of the open bucket"),
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(20, ge=1, le=200, description="Items per page (max 200)"),
+    run_id: Optional[str] = Query(None, description="Optional replay run context ID"),
+    resolver: DashboardRuntimeResolver = Depends(_get_resolver),
+    api_key: str = Depends(get_api_key),
+) -> Dict[str, Any]:
+    service, evidence_store, _ = resolver.resolve(run_id)
+    try:
+        return get_dashboard_bucket_raw_alerts(
+            service, evidence_store, agent_id, rule_group_primary, page, page_size
+        )
+    except BucketNotActiveError as exc:
+        detail: Dict[str, Any] = {"detail": str(exc)}
+        if exc.finalized_meta_id is not None:
+            detail["finalized_meta_id"] = exc.finalized_meta_id
+        raise HTTPException(status_code=404, detail=detail)
 
 
 @router.get("/timeseries")

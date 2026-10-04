@@ -166,6 +166,60 @@ def test_meta_alerts_raw_alerts_resolution_and_unresolved(test_setup):
         assert isinstance(data["items"], list)
 
 
+def test_dashboard_bucket_raw_alerts_lists_active_members(test_setup):
+    client, headers, service, evidence_store, _, _ = test_setup
+
+    base = datetime(2026, 8, 29, 12, 0, 0, tzinfo=timezone.utc)
+    for i in (1, 2):
+        alert = CanonicalRawAlert(
+            wazuh_alert_id=f"live-bucket-{i}",
+            timestamp=base + timedelta(seconds=i * 5),
+            agent_id="001",
+            agent_name="agent-ubuntu",
+            rule_group_primary="auth",
+            rule_level=5,
+            rule_id="1001",
+            mitre_tactics=(),
+            srcip=None,
+            agent_criticality=1.0,
+            metadata=MappingProxyType({}),
+        )
+        evidence_store.store(alert)
+        service.ingest_alert(alert)
+
+    resp = client.get(
+        "/api/v1/dashboard/buckets/raw-alerts",
+        params={"agent_id": "001", "rule_group_primary": "auth"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["agent_id"] == "001"
+    assert data["rule_group_primary"] == "auth"
+    assert data["finalized"] is False
+    assert data["source_total"] == 2
+    assert [item["wazuh_alert_id"] for item in data["items"]] == ["live-bucket-1", "live-bucket-2"]
+
+    page2 = client.get(
+        "/api/v1/dashboard/buckets/raw-alerts",
+        params={"agent_id": "001", "rule_group_primary": "auth", "page": 2, "page_size": 1},
+        headers=headers,
+    )
+    assert page2.status_code == 200
+    assert [item["wazuh_alert_id"] for item in page2.json()["items"]] == ["live-bucket-2"]
+
+
+def test_dashboard_bucket_raw_alerts_unknown_bucket_404(test_setup):
+    client, headers, _, _, _, _ = test_setup
+
+    resp = client.get(
+        "/api/v1/dashboard/buckets/raw-alerts",
+        params={"agent_id": "999", "rule_group_primary": "nope"},
+        headers=headers,
+    )
+    assert resp.status_code == 404
+
+
 def test_meta_alert_trace_uses_evidence_resolution_contract(test_setup):
     client, headers, service, evidence_store, _, _ = test_setup
     alert = CanonicalRawAlert(
