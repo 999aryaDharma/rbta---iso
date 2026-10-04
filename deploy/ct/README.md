@@ -77,6 +77,28 @@ docker compose down && docker compose up -d --build   # update (habis git pull)
 docker volume ls | grep rbta-ct       # state (live) + arsip (archive) persisten
 ```
 
+## 6. Auto-deploy (CD pull-based)
+
+CT yang menarik, bukan GitHub yang mendorong (IP kampus privat tak
+terjangkau runner publik). Cron tiap 5 menit menjalankan
+`deploy/ct/auto-update.sh`: bila HEAD berubah → pull, rebuild, up,
+cek `/ready`. Push ke branch = deploy dalam ±5 menit.
+Tulis `[skip cd]` di pesan commit untuk melewati satu rilis
+(mis. commit docs tanpa rebuild).
+
+Pasang sekali di CT:
+
+```bash
+chmod +x ~/rbta/deploy/ct/auto-update.sh
+(crontab -l 2>/dev/null; echo "*/5 * * * * RBTA_HOST_PORT=8010 $HOME/rbta/deploy/ct/auto-update.sh") | crontab -
+tail -f ~/rbta/deploy/ct/cd.log   # pantau hasil tiap jadwal
+```
+
+CI (`/.github/workflows/ci.yml`, Ubuntu publik) berjalan tiap push:
+backend `pytest`, frontend `lint + typecheck + vitest`. CD di CT
+sengaja tidak menunggu CI hijau — branch ini rilis manual peneliti;
+jangan push kode yang belum lolos gate lokal.
+
 Backup berkala: `docker run --rm -v rbta-ct-live:/s -v $PWD:/b
 alpine tar czf /b/live-backup.tgz -C /s .` (sama untuk `rbta-ct-archive`).
 
