@@ -1,0 +1,98 @@
+name: rbta-ct
+
+# Proxmox CT production: live Indexer polling + Telegram live dispatch.
+# Backend menyajikan dashboard statis di /dashboard/ (satu container).
+# CATATAN: image di-build di CT (butuh egress internet untuk pip/npm).
+
+services:
+  rbta-service:
+    container_name: rbta-ct-service
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        GIT_SHA: ${RBTA_CODE_SHA:-ct-production}
+        BUILD_DATE: ${RBTA_BUILD_DATE:-unknown}
+    image: rbta-service:${RBTA_IMAGE_TAG:-ct}
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,uid=10001,gid=10001
+    ports:
+      - "${RBTA_HOST_PORT:-8010}:8000"
+    extra_hosts:
+      # Indexer TANPA IP-SAN: wajib diakses via nama DNS ini (bukan IP).
+      - "wazuh.indexer:${WAZUH_INDEXER_HOST_IP:?WAZUH_INDEXER_HOST_IP is required}"
+    environment:
+      RBTA_API_KEY: ${RBTA_API_KEY:?RBTA_API_KEY is required}
+      RBTA_MODEL_VERSION: ${RBTA_MODEL_VERSION:?RBTA_MODEL_VERSION is required}
+      RBTA_SOURCE_MODE: "LIVE"
+      RBTA_LIVE_WORKER_ENABLED: "true"
+      RBTA_LIVE_SOURCE: ${RBTA_LIVE_SOURCE:-indexer}
+      RBTA_LIVE_POLL_INTERVAL_SEC: ${RBTA_LIVE_POLL_INTERVAL_SEC:-5.0}
+      RBTA_ORDER_BUFFER_ENABLED: ${RBTA_ORDER_BUFFER_ENABLED:-false}
+      RBTA_LIVE_WORKER_DRAIN_ON_STOP: "false"
+      RBTA_MODEL_REGISTRY_DIR: /app/artifacts/models
+      RBTA_STATE_FILE: /app/data/live/state.json
+      RBTA_RAW_EVIDENCE_DB: /app/data/live/raw_alert_evidence.sqlite3
+      RBTA_LIVE_ARCHIVE_ENABLED: ${RBTA_LIVE_ARCHIVE_ENABLED:-true}
+      RBTA_LIVE_ARCHIVE_DIR: /app/data/archive
+      RBTA_REPLAY_DATA_DIR: /app/data/replay
+      WAZUH_INDEXER_URL: ${WAZUH_INDEXER_URL:-https://wazuh.indexer:9200}
+      WAZUH_INDEXER_USERNAME: ${WAZUH_INDEXER_USERNAME:?WAZUH_INDEXER_USERNAME is required}
+      WAZUH_INDEXER_PASSWORD: ${WAZUH_INDEXER_PASSWORD:?WAZUH_INDEXER_PASSWORD is required}
+      WAZUH_INDEXER_VERIFY_TLS: "true"
+      WAZUH_INDEXER_CA_BUNDLE: /app/certs/wazuh-indexer-leaf.pem
+      RBTA_TELEGRAM_BOT_TOKEN: ${RBTA_TELEGRAM_BOT_TOKEN:?RBTA_TELEGRAM_BOT_TOKEN is required}
+      RBTA_TELEGRAM_CHAT_ID: ${RBTA_TELEGRAM_CHAT_ID:?RBTA_TELEGRAM_CHAT_ID is required}
+      RBTA_HOST: 0.0.0.0
+      RBTA_PORT: "8000"
+      RBTA_LOG_LEVEL: ${RBTA_LOG_LEVEL:-INFO}
+    volumes:
+      - type: volume
+        source: rbta-ct-live
+        target: /app/data/live
+      - type: volume
+        source: rbta-ct-archive
+        target: /app/data/archive
+      - type: bind
+        source: ${RBTA_MODEL_HOST_DIR:?RBTA_MODEL_HOST_DIR is required}
+        target: /app/artifacts/models
+        read_only: true
+      - type: bind
+        source: ./certs
+        target: /app/certs
+        read_only: true
+      - type: bind
+        source: ./replay
+        target: /app/data/replay
+        read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: ${RBTA_CPU_LIMIT:-2.00}
+          memory: ${RBTA_MEMORY_LIMIT:-3072M}
+          pids: ${RBTA_PIDS_LIMIT:-200}
+
+volumes:
+  rbta-ct-live:
+    name: rbta-ct-live
+  rbta-ct-archive:
+    name: rbta-ct-archive

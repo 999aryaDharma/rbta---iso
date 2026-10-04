@@ -1,0 +1,83 @@
+# Deploy produksi ke CT Proxmox (Docker)
+
+Satu container: backend FastAPI + dashboard statis (`/dashboard/`).
+File lama `Dockerfile`/`deploy/asus`/`deploy/local` TIDAK diubah (historis).
+
+## 1. Siapkan CT (manual, sekali saja)
+
+1. Buat LXC: Ubuntu 24.04, 2 vCPU / 4 GB RAM / 30 GB disk, IP statis + DNS,
+   aktifkan **nesting** (`pct set <CTID> --features nesting=1`), user + SSH.
+2. Install Docker + compose plugin di CT:
+   ```bash
+   apt-get update && apt-get install -y docker.io docker-compose-plugin
+   docker compose version
+   ```
+3. Pastikan CT mencapai Indexer dan internet:
+   ```bash
+   ping -c2 172.16.83.207
+   curl -s -o /dev/null -w '%{http_code}\n' https://api.telegram.org
+   ```
+
+## 2. Kode + model (manual)
+
+```bash
+git clone -b prod/final-dashboard-demo <repo-url> rbta && cd rbta
+mkdir -p models deploy/ct/certs
+```
+
+`models/` TIDAK ikut git — transfer manual dari laptop (baca-saja):
+
+```powershell
+scp -r models/rbta-if-v1 root@<ip-ct>:~/rbta/models/
+scp wazuh-indexer-leaf.pem root@<ip-ct>:~/rbta/deploy/ct/certs/
+```
+
+## 3. Kredensial segar (manual, di CT saja)
+
+```bash
+cp deploy/ct/.env.example deploy/ct/.env
+nano deploy/ct/.env   # isi SEMUA nilai ganti-*: password reader HASIL ROTASI,
+                      # RBTA_API_KEY baru, token+chat Telegram
+```
+
+Atur `RBTA_MODEL_HOST_DIR` ke path absolut models di CT.
+Jangan commit `deploy/ct/.env` (di-ignore).
+
+## 4. Build + up (di CT)
+
+```bash
+cd deploy/ct
+docker compose build
+docker compose up -d
+sleep 45
+curl -s http://127.0.0.1:8010/ready
+```
+
+Verifikasi live (ganti `<key>` dengan RBTA_API_KEY produksi):
+
+```bash
+curl -s -H "Authorization: Bearer <key>" \
+  http://127.0.0.1:8010/api/v1/live/status | python3 -m json.tool
+```
+
+Harapan: `worker_alive:true`, `consecutive_failures:0`,
+`live_model_version:"rbta-if-v1"`. Buka dashboard:
+`http://<ip-ct>:8010/dashboard/live`.
+
+## 5. Operasi
+
+```bash
+docker compose logs -f rbta-service   # log worker/siklus
+docker compose down && docker compose up -d --build   # update (habis git pull)
+docker volume ls | grep rbta-ct       # state (live) + arsip (archive) persisten
+```
+
+Backup berkala: `docker run --rm -v rbta-ct-live:/s -v $PWD:/b
+alpine tar czf /b/live-backup.tgz -C /s .` (sama untuk `rbta-ct-archive`).
+
+## Batas yang diketahui
+
+- Image BELUM pernah di-build (dilarang Docker di laptop dev) — build
+  pertama terjadi di CT; laporkan error build apa adanya.
+- Pin TLS = leaf interim; ganti ke CA permanen bila server menerbitkan ulang.
+- Retensi arsip `rbta-ct-archive` belum otomatis — jadwalkan hapus manual.
