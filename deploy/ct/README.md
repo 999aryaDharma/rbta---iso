@@ -90,7 +90,7 @@ Pasang sekali di CT:
 
 ```bash
 chmod +x ~/rbta/deploy/ct/auto-update.sh
-(crontab -l 2>/dev/null; echo "*/5 * * * * RBTA_HOST_PORT=8010 $HOME/rbta/deploy/ct/auto-update.sh") | crontab -
+(crontab -l 2>/dev/null; echo "*/5 * * * * RBTA_HOST_PORT=8010 bash $HOME/rbta/deploy/ct/auto-update.sh >> $HOME/rbta/deploy/ct/cd.log 2>&1") | crontab -
 tail -f ~/rbta/deploy/ct/cd.log   # pantau hasil tiap jadwal
 ```
 
